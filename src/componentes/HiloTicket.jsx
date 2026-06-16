@@ -1,4 +1,4 @@
-import { estiloEstado, estiloPrioridad } from "../shared/constantes.js";
+import { estiloEstado, estiloPrioridad, motivoLegible } from "../shared/constantes.js";
 import { hace } from "../shared/fechas.js";
 
 export default function HiloTicket({ caso, onTomar, onResolver, analistaId }) {
@@ -20,7 +20,7 @@ export default function HiloTicket({ caso, onTomar, onResolver, analistaId }) {
       <div style={{ padding: "11px 16px", borderBottom: "1px solid var(--borde)", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
         <div>
           <div style={{ fontSize: 14, fontWeight: 600 }}>
-            #{caso.case_id} · {caso.motivo_label || caso.motivo_id}
+            #{caso.case_id} · {motivoLegible(caso.motivo_id, caso.motivo_label)}
           </div>
           <div style={{ fontSize: 12, color: "var(--texto-suave)", marginTop: 2 }}>
             Ruta {caso.route_code || "—"} · {hace(caso.fecha_caso)}
