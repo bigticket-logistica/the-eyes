@@ -38,6 +38,29 @@ export const GRUPOS = {
 export const ESTADOS_ABIERTOS = ["NEW", "OPEN", "ON_HOLD"];
 export const esAbierto = (estado) => ESTADOS_ABIERTOS.includes(estado);
 
+// Motivos de MELI -> etiqueta en español legible
+export const MOTIVOS = {
+  ROBBERY:             "Robo",
+  ACCIDENT:            "Tuvo un accidente",
+  MECHANICAL_PROBLEM:  "Problema mecánico",
+  PERSONAL_PROBLEM:    "No puede seguir conduciendo",
+  MISSING_PACKAGE:     "El paquete se perdió",
+  BUYER_ABSENT:        "No había nadie en el domicilio",
+  BAD_ADDRESS:         "El domicilio es incorrecto",
+  INACCESSIBLE_ADDRESS:"Está en una zona inaccesible",
+  BUSINESS_CLOSED:     "Negocio cerrado",
+  BUYER_MOVED:         "El comprador cambió de domicilio",
+  MISSROUTED:          "El paquete no pertenece a mi zona",
+  PNR_ON_ROUTE:        "PNR en ruta",
+  NOT_RECEIVED:        "El paquete fue rechazado",
+  BROKEN_PACKAGE:      "El producto está dañado",
+  UNVISITED_ADDRESS:   "Domicilio no visitado",
+  LM_COLLECT_PROBLEM:  "Problema con la colecta",
+};
+
+export const motivoLegible = (motivoId, fallback) =>
+  MOTIVOS[motivoId] || fallback || motivoId || "Incidencia";
+
 export const estiloEstado    = (e) => ESTADOS[e]      || { label: e || "—", bg: "#f1f5f9", color: "#475569" };
 export const estiloPrioridad = (p) => PRIORIDADES[p]  || { label: p || "—", bg: "#f1f5f9", color: "#475569", peso: 0 };
 export const estiloGrupo     = (g) => GRUPOS[g]       || { label: g || "—", bg: "#f1f5f9", color: "#475569" };
