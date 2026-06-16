@@ -1,0 +1,22 @@
+{
+  "name": "the-eyes",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "The Eyes — ticketera operativa de incidencias en ruta de Bigticket",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.45.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "react-router-dom": "^6.26.0"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^4.3.1",
+    "vite": "^5.4.0"
+  }
+}
