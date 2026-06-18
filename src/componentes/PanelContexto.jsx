@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { traerDetalleCaso } from "../shared/detalle.js";
+import { traerDetalleCaso, cacheFresco, detalleDesdeCache } from "../shared/detalle.js";
 
 function iniciales(n) {
   if (!n) return "··";
@@ -23,15 +23,28 @@ export default function PanelContexto({ caso }) {
   useEffect(() => {
     if (!caso?.case_id) { setDetalle(null); return; }
     let activo = true;
-    setCargando(true);
     setError(null);
-    setDetalle(null);
+
+    // 1) si el cache esta fresco (< 5 min), usarlo al instante sin llamar al VPS
+    if (cacheFresco(caso)) {
+      setDetalle(detalleDesdeCache(caso));
+      setCargando(false);
+      return;
+    }
+
+    // 2) cache viejo o ausente: mostrar lo que haya en cache mientras llega lo fresco
+    if (caso.detalle_actualizado_en) {
+      setDetalle(detalleDesdeCache(caso));
+    } else {
+      setDetalle(null);
+    }
+    setCargando(true);
     traerDetalleCaso(caso.case_id)
       .then((d) => { if (activo) setDetalle(d); })
       .catch((e) => { if (activo) setError(e.message || "No se pudo cargar el detalle"); })
       .finally(() => { if (activo) setCargando(false); });
     return () => { activo = false; };
-  }, [caso?.case_id]);
+  }, [caso?.case_id, caso?.detalle_actualizado_en]);
 
   if (!caso) return <div style={{ background: "#fff" }} />;
 
