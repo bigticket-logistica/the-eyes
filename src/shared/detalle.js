@@ -19,7 +19,7 @@ export function detalleDesdeCache(caso) {
     },
     comprador: {
       nombre: caso.comprador_nombre, telefono: caso.comprador_telefono,
-      mail: caso.comprador_mail,
+      telefonos: caso.comprador_telefonos, mail: caso.comprador_mail,
     },
     metricas: {
       entregados: caso.entregados, fallidas: caso.fallidas,
