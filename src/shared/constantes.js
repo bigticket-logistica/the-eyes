@@ -10,13 +10,15 @@ export const COLORES = {
   textoTenue: "#9ca3af",
 };
 
-// Estados de MELI -> etiqueta y color del pill
+// Estados de MELI -> etiqueta y color del pill (taxonomia real del portal)
 export const ESTADOS = {
   NEW:       { label: "Nuevo",                bg: "#dbeafe", color: "#1e40af" },
   OPEN:      { label: "Abierto",              bg: "#fef3c7", color: "#92400e" },
   ON_HOLD:   { label: "Esperando respuesta",  bg: "#f3e8ff", color: "#6b21a8" },
+  CHECKING:  { label: "Comprobando factibilidad", bg: "#e0f2fe", color: "#075985" },
   CLOSED:    { label: "Cerrado",              bg: "#dcfce7", color: "#166534" },
-  CANCELLED: { label: "Cancelado",            bg: "#f1f5f9", color: "#475569" },
+  CANCELLED: { label: "Anulado",              bg: "#f1f5f9", color: "#475569" },
+  EXPIRED:   { label: "Anulado",              bg: "#f1f5f9", color: "#475569" },
 };
 
 // Prioridad de MELI (se respeta tal cual)
@@ -34,9 +36,11 @@ export const GRUPOS = {
   entrega:    { label: "Entrega",    bg: "#E1F5EE", color: "#085041" },
 };
 
-// Estados considerados "abiertos" (cola activa)
-export const ESTADOS_ABIERTOS = ["NEW", "OPEN", "ON_HOLD"];
+// Estados considerados "abiertos" (requieren gestion)
+export const ESTADOS_ABIERTOS = ["NEW", "OPEN", "ON_HOLD", "CHECKING"];
 export const esAbierto = (estado) => ESTADOS_ABIERTOS.includes(estado);
+// Estados "cerrados" (no requieren gestion: cerrado, anulado, etc.)
+export const esCerrado = (estado) => !esAbierto(estado);
 
 // Motivos de MELI -> etiqueta en español legible
 export const MOTIVOS = {
