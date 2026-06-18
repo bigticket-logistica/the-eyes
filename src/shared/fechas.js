@@ -25,3 +25,15 @@ export function minutosEntre(a, b) {
   if (!a || !b) return null;
   return Math.round((new Date(b).getTime() - new Date(a).getTime()) / 60000);
 }
+
+// Fecha "del dia" en zona MX (CDMX, UTC-6) en formato YYYY-MM-DD
+function fechaMX(date) {
+  const mx = new Date(date.getTime() - 6 * 3600 * 1000);
+  return mx.toISOString().slice(0, 10);
+}
+
+// ¿El caso es de hoy (zona MX)? Compara fecha_caso contra el dia actual MX.
+export function esDeHoyMX(fecha) {
+  if (!fecha) return false;
+  return fechaMX(new Date(fecha)) === fechaMX(new Date());
+}
