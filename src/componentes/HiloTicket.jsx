@@ -1,4 +1,4 @@
-import { estiloEstado, estiloPrioridad, motivoLegible } from "../shared/constantes.js";
+import { detalleEstado, estiloPrioridad, motivoLegible } from "../shared/constantes.js";
 import { hace } from "../shared/fechas.js";
 
 export default function HiloTicket({ caso, onTomar, onResolver, analistaId }) {
@@ -10,7 +10,7 @@ export default function HiloTicket({ caso, onTomar, onResolver, analistaId }) {
     );
   }
 
-  const est = estiloEstado(caso.estado_id);
+  const est = detalleEstado(caso.estado_id, caso.sub_estado_id);
   const pr = estiloPrioridad(caso.prioridad);
   const esMio = caso.analista_actual && caso.analista_actual === analistaId;
   const sinDueno = !caso.analista_actual;
