@@ -40,9 +40,12 @@ export default function Ticketera() {
     return () => clearInterval(t);
   }, [cargar]);
 
-  const abiertos = casos.filter((c) => esAbierto(c.estado_id));
-  const abiertosHoy = abiertos.filter((c) => esDeHoyMX(c.fecha_caso));
-  const rezagados = abiertos.filter((c) => !esDeHoyMX(c.fecha_caso));
+  // Solo casos de HOY (el pasado vive en el historico, no en la cola).
+  const casosHoy = casos.filter((c) => esDeHoyMX(c.fecha_caso));
+  const abiertosHoy = casosHoy.filter((c) => esAbierto(c.estado_id));
+  const cerradosHoy = casosHoy.filter((c) => !esAbierto(c.estado_id));
+  // para la condicion de "vacio" y seleccion inicial
+  const abiertos = abiertosHoy;
 
   async function tomar(caso) {
     const { error } = await sb.rpc("fn_tomar_ticket", { p_caso_id: caso.id });
@@ -70,7 +73,7 @@ export default function Ticketera() {
     );
   }
 
-  if (!abiertos.length && !cargando) {
+  if (!casosHoy.length && !cargando) {
     return (
       <div style={pantallaCentro}>
         <div style={{ textAlign: "center", maxWidth: 360 }}>
@@ -91,7 +94,7 @@ export default function Ticketera() {
     }}>
       <ColaTickets
         casosHoy={abiertosHoy}
-        rezagados={rezagados}
+        cerradosHoy={cerradosHoy}
         seleccionado={seleccionado}
         onSeleccionar={setSeleccionado}
         analistaId={analista?.id}
