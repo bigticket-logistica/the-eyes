@@ -1,10 +1,9 @@
-import { estiloPrioridad, motivoLegible } from "../shared/constantes.js";
+import { estiloPrioridad, motivoLegible, estiloEstado } from "../shared/constantes.js";
 import { hace } from "../shared/fechas.js";
 
 // Orden de las rejas: de mayor a menor criticidad
 const ORDEN_REJAS = ["VERY_HIGH", "HIGH", "MEDIUM", "LOW"];
 
-// Agrupa casos por prioridad, mas antiguo primero dentro de cada reja
 function agruparPorReja(casos) {
   const rejas = {};
   for (const c of casos) {
@@ -21,9 +20,10 @@ function agruparPorReja(casos) {
   return { rejas, presentes };
 }
 
-function Tarjeta({ c, seleccionado, onSeleccionar, analistaId, colorBorde }) {
+function Tarjeta({ c, seleccionado, onSeleccionar, analistaId, colorBorde, apagado }) {
   const activo = seleccionado?.id === c.id;
   const mio = c.analista_actual && c.analista_actual === analistaId;
+  const est = estiloEstado(c.estado_id);
   return (
     <div
       onClick={() => onSeleccionar(c)}
@@ -31,12 +31,19 @@ function Tarjeta({ c, seleccionado, onSeleccionar, analistaId, colorBorde }) {
         padding: "9px 14px", borderBottom: "1px solid #f1f2f4", cursor: "pointer",
         background: activo ? "var(--naranja-suave)" : "#fff",
         borderLeft: `3px solid ${activo ? "var(--naranja)" : colorBorde}`,
+        opacity: apagado ? 0.62 : 1,
       }}
     >
       <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 2 }}>
         <span style={{ fontSize: 11, color: "var(--texto-tenue)" }}>{c.estacion_origen || "—"}</span>
         <span style={{ fontSize: 11, color: "var(--texto-tenue)" }}>· {hace(c.fecha_caso)}</span>
-        {mio && <span style={{ fontSize: 11, color: "var(--naranja)", marginLeft: "auto" }}>tuyo</span>}
+        {apagado && (
+          <span style={{
+            fontSize: 10, fontWeight: 600, marginLeft: "auto",
+            background: est.bg, color: est.color, padding: "1px 7px", borderRadius: 10,
+          }}>{est.label}</span>
+        )}
+        {!apagado && mio && <span style={{ fontSize: 11, color: "var(--naranja)", marginLeft: "auto" }}>tuyo</span>}
       </div>
       <div style={{ fontSize: 13, fontWeight: 500, marginBottom: 2 }}>
         {motivoLegible(c.motivo_id, c.motivo_label)}
@@ -48,9 +55,12 @@ function Tarjeta({ c, seleccionado, onSeleccionar, analistaId, colorBorde }) {
   );
 }
 
-export default function ColaTickets({ casosHoy = [], rezagados = [], seleccionado, onSeleccionar, analistaId }) {
+export default function ColaTickets({ casosHoy = [], cerradosHoy = [], seleccionado, onSeleccionar, analistaId }) {
   const { rejas, presentes } = agruparPorReja(casosHoy);
-  const total = casosHoy.length + rezagados.length;
+  const total = casosHoy.length + cerradosHoy.length;
+
+  // cerrados de hoy: mas reciente primero
+  const cerrados = [...cerradosHoy].sort((a, b) => new Date(b.fecha_caso) - new Date(a.fecha_caso));
 
   return (
     <div style={{ borderRight: "1px solid var(--borde)", overflowY: "auto", background: "#fff" }}>
@@ -59,34 +69,13 @@ export default function ColaTickets({ casosHoy = [], rezagados = [], seleccionad
         display: "flex", alignItems: "center", justifyContent: "space-between",
         position: "sticky", top: 0, background: "#fff", zIndex: 2,
       }}>
-        <span style={{ fontSize: 13, fontWeight: 600 }}>Cola activa</span>
-        <span style={{ fontSize: 12, color: "var(--texto-suave)" }}>{total}</span>
+        <span style={{ fontSize: 13, fontWeight: 600 }}>Cola de hoy</span>
+        <span style={{ fontSize: 12, color: "var(--texto-suave)" }}>
+          {casosHoy.length} {casosHoy.length === 1 ? "abierto" : "abiertos"}
+        </span>
       </div>
 
-      {/* BLOQUE REZAGADOS: abiertos de dias anteriores (no deberian existir) */}
-      {rezagados.length > 0 && (
-        <div>
-          <div style={{
-            display: "flex", alignItems: "center", gap: 7,
-            padding: "8px 14px", background: "#FCEBEB",
-            borderBottom: "1px solid #f0caca", borderTop: "2px solid #A32D2D",
-          }}>
-            <span style={{ fontSize: 13 }}>⚠️</span>
-            <span style={{ fontSize: 12, fontWeight: 600, color: "#791F1F" }}>Rezagados de días anteriores</span>
-            <span style={{ fontSize: 11, color: "#A32D2D", marginLeft: "auto" }}>
-              {rezagados.length} sin cerrar
-            </span>
-          </div>
-          {rezagados
-            .sort((a, b) => new Date(a.fecha_caso) - new Date(b.fecha_caso))
-            .map((c) => (
-              <Tarjeta key={c.id} c={c} seleccionado={seleccionado}
-                onSeleccionar={onSeleccionar} analistaId={analistaId} colorBorde="#A32D2D" />
-            ))}
-        </div>
-      )}
-
-      {/* REJAS DE CRITICIDAD: abiertos de hoy */}
+      {/* REJAS DE CRITICIDAD: abiertos de hoy (lo prioritario) */}
       {presentes.map((p) => {
         const pr = estiloPrioridad(p);
         const lista = rejas[p];
@@ -111,10 +100,30 @@ export default function ColaTickets({ casosHoy = [], rezagados = [], seleccionad
         );
       })}
 
-      {/* vacio total */}
+      {/* CERRADOS/ANULADOS DE HOY: ya gestionados, estilo apagado */}
+      {cerrados.length > 0 && (
+        <div>
+          <div style={{
+            display: "flex", alignItems: "center", gap: 7,
+            padding: "7px 14px", background: "#f6f7f9",
+            borderBottom: "1px solid var(--borde)", borderTop: "1px solid var(--borde)",
+          }}>
+            <span style={{ width: 8, height: 8, borderRadius: "50%", background: "#9ca3af" }} />
+            <span style={{ fontSize: 12, fontWeight: 600, color: "#6b7280" }}>Resueltos hoy</span>
+            <span style={{ fontSize: 11, color: "#9ca3af", marginLeft: "auto" }}>
+              {cerrados.length} sin gestión pendiente
+            </span>
+          </div>
+          {cerrados.map((c) => (
+            <Tarjeta key={c.id} c={c} seleccionado={seleccionado}
+              onSeleccionar={onSeleccionar} analistaId={analistaId} colorBorde="#d1d5db" apagado />
+          ))}
+        </div>
+      )}
+
       {total === 0 && (
         <div style={{ padding: 20, textAlign: "center", color: "var(--texto-tenue)", fontSize: 12 }}>
-          Sin incidencias abiertas
+          Sin incidencias hoy
         </div>
       )}
     </div>
