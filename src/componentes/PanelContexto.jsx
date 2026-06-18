@@ -1,3 +1,6 @@
+import { useEffect, useState } from "react";
+import { traerDetalleCaso } from "../shared/detalle.js";
+
 function iniciales(n) {
   if (!n) return "··";
   return n.split(" ").slice(0, 2).map((p) => p[0]).join("").toUpperCase();
@@ -13,38 +16,78 @@ function Fila({ etiqueta, valor }) {
 }
 
 export default function PanelContexto({ caso }) {
+  const [detalle, setDetalle] = useState(null);
+  const [cargando, setCargando] = useState(false);
+  const [error, setError] = useState(null);
+
+  useEffect(() => {
+    if (!caso?.case_id) { setDetalle(null); return; }
+    let activo = true;
+    setCargando(true);
+    setError(null);
+    setDetalle(null);
+    traerDetalleCaso(caso.case_id)
+      .then((d) => { if (activo) setDetalle(d); })
+      .catch((e) => { if (activo) setError(e.message || "No se pudo cargar el detalle"); })
+      .finally(() => { if (activo) setCargando(false); });
+    return () => { activo = false; };
+  }, [caso?.case_id]);
+
   if (!caso) return <div style={{ background: "#fff" }} />;
 
-  const compradorVivo = !caso.comprador_purgado && (caso.comprador_telefono || caso.comprador_nombre);
+  const cond = detalle?.conductor || {};
+  const comp = detalle?.comprador || {};
+  const met = detalle?.metricas || {};
+  // comprador efimero: se muestra en vivo, no se persiste. Si el caso ya esta cerrado, no se muestra.
+  const compradorVivo = !!(comp.nombre || comp.telefono);
 
   return (
     <div style={{ overflowY: "auto", background: "#fff", padding: 14 }}>
-      <div style={{ fontSize: 11, fontWeight: 600, color: "var(--texto-suave)", marginBottom: 8 }}>Conductor</div>
-      <div style={{ display: "flex", alignItems: "center", gap: 9, marginBottom: 10 }}>
-        <div style={{
-          width: 32, height: 32, borderRadius: "50%", background: "var(--navy)",
-          display: "flex", alignItems: "center", justifyContent: "center",
-          color: "#fff", fontWeight: 500, fontSize: 12,
-        }}>{iniciales(caso.conductor_nombre)}</div>
-        <div>
-          <div style={{ fontSize: 13, fontWeight: 500 }}>{caso.conductor_nombre || "Sin resolver"}</div>
-          <div style={{ fontSize: 11, color: "var(--texto-suave)" }}>
-            {caso.patente || "—"}{caso.vehiculo ? ` · ${caso.vehiculo}` : ""}
-          </div>
-        </div>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
+        <span style={{ fontSize: 11, fontWeight: 600, color: "var(--texto-suave)" }}>Conductor</span>
+        {cargando && <span style={{ fontSize: 10, color: "var(--texto-tenue)" }}>cargando…</span>}
       </div>
-      {caso.conductor_telefono && (
-        <a href={`tel:${caso.conductor_telefono}`} style={{ fontSize: 12, color: "var(--navy)", textDecoration: "none" }}>
-          {caso.conductor_telefono}
-        </a>
+
+      {error ? (
+        <div style={{ fontSize: 12, color: "#bb4444", marginBottom: 10 }}>
+          No se pudo cargar el detalle. <span style={{ color: "var(--texto-tenue)" }}>{error}</span>
+        </div>
+      ) : (
+        <>
+          <div style={{ display: "flex", alignItems: "center", gap: 9, marginBottom: 10 }}>
+            <div style={{
+              width: 32, height: 32, borderRadius: "50%", background: "var(--navy)",
+              display: "flex", alignItems: "center", justifyContent: "center",
+              color: "#fff", fontWeight: 500, fontSize: 12,
+            }}>{iniciales(cond.nombre)}</div>
+            <div>
+              <div style={{ fontSize: 13, fontWeight: 500 }}>
+                {cond.nombre || (cargando ? "…" : "Sin resolver")}
+              </div>
+              <div style={{ fontSize: 11, color: "var(--texto-suave)" }}>
+                {cond.patente || "—"}{cond.vehiculo ? ` · ${cond.vehiculo}` : ""}
+              </div>
+            </div>
+          </div>
+          {cond.telefono && (
+            <a href={`tel:${cond.telefono}`} style={{ fontSize: 12, color: "var(--navy)", textDecoration: "none" }}>
+              📞 {cond.telefono}
+            </a>
+          )}
+          {cond.mail && (
+            <div style={{ fontSize: 11, color: "var(--texto-suave)", marginTop: 2 }}>{cond.mail}</div>
+          )}
+        </>
       )}
 
       <div style={{ borderTop: "1px solid var(--borde)", marginTop: 10, paddingTop: 10 }}>
-        <Fila etiqueta="SC" valor={caso.estacion_origen} />
-        <Fila etiqueta="Avance ruta" valor={caso.route_progress != null ? `${caso.route_progress}%` : null} />
-        <Fila etiqueta="Entregados" valor={caso.entregados != null ? `${caso.entregados}/${caso.paquetes_en_ruta ?? "—"}` : null} />
-        <Fila etiqueta="Horas en ruta" valor={caso.horas_en_ruta} />
-        <Fila etiqueta="Con auxiliar" valor={caso.con_auxiliar == null ? null : caso.con_auxiliar ? "Sí" : "No"} />
+        <Fila etiqueta="SC" valor={met.estacion || caso.estacion_origen} />
+        <Fila etiqueta="Ruta" valor={met.ruta || caso.route_code} />
+        <Fila etiqueta="Avance" valor={met.avance_ruta} />
+        <Fila etiqueta="Entregados" valor={met.entregados != null ? `${met.entregados}/${met.paquetes_en_ruta ?? "—"}` : null} />
+        <Fila etiqueta="Fallidas" valor={met.fallidas != null ? `${met.fallidas}${met.pct_fallidas ? ` (${met.pct_fallidas})` : ""}` : null} />
+        <Fila etiqueta="Horas en ruta" valor={met.horas_en_ruta} />
+        <Fila etiqueta="Con auxiliar" valor={cond.con_auxiliar} />
       </div>
 
       <div style={{ borderTop: "1px solid var(--borde)", marginTop: 10, paddingTop: 10 }}>
@@ -53,20 +96,18 @@ export default function PanelContexto({ caso }) {
         </div>
         {compradorVivo ? (
           <>
-            <div style={{ fontSize: 12 }}>{caso.comprador_nombre || "—"}</div>
-            {caso.comprador_direccion && (
-              <div style={{ fontSize: 12, color: "var(--texto-suave)", marginTop: 2 }}>{caso.comprador_direccion}</div>
-            )}
-            {caso.comprador_telefono && (
+            <div style={{ fontSize: 12 }}>{comp.nombre || "—"}</div>
+            {comp.mail && <div style={{ fontSize: 11, color: "var(--texto-suave)", marginTop: 2 }}>{comp.mail}</div>}
+            {comp.telefono && (
               <button className="btn-navy" style={{ width: "100%", marginTop: 8, padding: "8px", fontSize: 12 }}
                 title="Envía el número al chofer para que coordine la entrega">
-                Pasar número al chofer
+                Pasar número al chofer · {comp.telefono}
               </button>
             )}
           </>
         ) : (
           <div style={{ fontSize: 12, color: "var(--texto-tenue)" }}>
-            {caso.comprador_purgado ? "Contacto eliminado al resolver el caso" : "Sin datos de comprador"}
+            {cargando ? "Cargando…" : "Sin datos de comprador"}
           </div>
         )}
       </div>
