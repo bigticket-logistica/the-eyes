@@ -1,4 +1,4 @@
-import { estiloPrioridad, motivoLegible, estiloEstado } from "../shared/constantes.js";
+import { estiloPrioridad, motivoLegible, detalleEstado } from "../shared/constantes.js";
 import { hace } from "../shared/fechas.js";
 
 // Orden de las rejas: de mayor a menor criticidad
@@ -23,7 +23,7 @@ function agruparPorReja(casos) {
 function Tarjeta({ c, seleccionado, onSeleccionar, analistaId, colorBorde, apagado }) {
   const activo = seleccionado?.id === c.id;
   const mio = c.analista_actual && c.analista_actual === analistaId;
-  const est = estiloEstado(c.estado_id);
+  const est = detalleEstado(c.estado_id, c.sub_estado_id);
   return (
     <div
       onClick={() => onSeleccionar(c)}
