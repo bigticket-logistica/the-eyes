@@ -52,7 +52,7 @@ export default function PanelContexto({ caso }) {
   const comp = detalle?.comprador || {};
   const met = detalle?.metricas || {};
   // comprador efimero: se muestra en vivo, no se persiste. Si el caso ya esta cerrado, no se muestra.
-  const compradorVivo = !!(comp.nombre || comp.telefono);
+  const compradorVivo = !!(comp.nombre || comp.telefono || (comp.telefonos && comp.telefonos.length));
 
   return (
     <div style={{ overflowY: "auto", background: "#fff", padding: 14 }}>
@@ -111,12 +111,19 @@ export default function PanelContexto({ caso }) {
           <>
             <div style={{ fontSize: 12 }}>{comp.nombre || "—"}</div>
             {comp.mail && <div style={{ fontSize: 11, color: "var(--texto-suave)", marginTop: 2 }}>{comp.mail}</div>}
-            {comp.telefono && (
-              <button className="btn-navy" style={{ width: "100%", marginTop: 8, padding: "8px", fontSize: 12 }}
-                title="Envía el número al chofer para que coordine la entrega">
-                Pasar número al chofer · {comp.telefono}
-              </button>
-            )}
+            {(() => {
+              // mostrar todos los telefonos disponibles; si no hay array, usar el unico
+              const tels = (comp.telefonos && comp.telefonos.length) ? comp.telefonos
+                          : (comp.telefono ? [comp.telefono] : []);
+              if (!tels.length) return null;
+              return tels.map((t, i) => (
+                <button key={t} className="btn-navy"
+                  style={{ width: "100%", marginTop: 8, padding: "8px", fontSize: 12 }}
+                  title="Envía el número al chofer para que coordine la entrega">
+                  Pasar número al chofer · {t}
+                </button>
+              ));
+            })()}
           </>
         ) : (
           <div style={{ fontSize: 12, color: "var(--texto-tenue)" }}>
