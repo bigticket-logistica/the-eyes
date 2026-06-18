@@ -10,7 +10,8 @@ export const COLORES = {
   textoTenue: "#9ca3af",
 };
 
-// Estados de MELI -> etiqueta y color del pill (taxonomia real del portal)
+// Estados de MELI -> etiqueta y color del pill (taxonomia real del portal).
+// El estado mostrado depende de estado_id + sub_estado_id juntos.
 export const ESTADOS = {
   NEW:       { label: "Nuevo",                bg: "#dbeafe", color: "#1e40af" },
   OPEN:      { label: "Abierto",              bg: "#fef3c7", color: "#92400e" },
@@ -20,6 +21,31 @@ export const ESTADOS = {
   CANCELLED: { label: "Anulado",              bg: "#f1f5f9", color: "#475569" },
   EXPIRED:   { label: "Anulado",              bg: "#f1f5f9", color: "#475569" },
 };
+
+// Diccionario fino por estado_id + sub_estado_id (confirmado con datos reales).
+// Da el label exacto que muestra el portal MELI.
+export const ESTADOS_DETALLE = {
+  "NEW/CREATED":              { label: "Nuevo",                                bg: "#dbeafe", color: "#1e40af", gestion: true },
+  "OPEN/ASSIGNED":            { label: "Abierto",                              bg: "#fef3c7", color: "#92400e", gestion: true },
+  "ON_HOLD/ANSWER_PENDING":   { label: "Esperando respuesta",                  bg: "#f3e8ff", color: "#6b21a8", gestion: true },
+  "ON_HOLD/RESEQUENCING":     { label: "Comprobando factibilidad",             bg: "#e0f2fe", color: "#075985", gestion: true },
+  "CLOSED/RESOLVED":          { label: "Cerrado · con reintento",              bg: "#dcfce7", color: "#166534", gestion: false },
+  "CLOSED/UNSOLVED":          { label: "Cerrado · sin reintento",              bg: "#dcfce7", color: "#166534", gestion: false },
+  "CLOSED/NOT_SUGGESTION":    { label: "Cerrado · sin sugerencia",             bg: "#dcfce7", color: "#166534", gestion: false },
+  "CLOSED/FINISHED":          { label: "Cerrado",                              bg: "#dcfce7", color: "#166534", gestion: false },
+  "CANCELLED/EXPIRED":        { label: "Anulado",                              bg: "#f1f5f9", color: "#475569", gestion: false },
+};
+
+// Resuelve el detalle de estado a partir de estado_id + sub_estado_id.
+// Si no encuentra la combinacion exacta, cae al estado base; y si tampoco,
+// asume "sin gestion" (lo seguro: no lo deja en la cola de pendientes).
+export function detalleEstado(estadoId, subEstadoId) {
+  const clave = `${estadoId}/${subEstadoId}`;
+  if (ESTADOS_DETALLE[clave]) return ESTADOS_DETALLE[clave];
+  const base = ESTADOS[estadoId];
+  if (base) return { ...base, gestion: ESTADOS_ABIERTOS.includes(estadoId) };
+  return { label: estadoId || "—", bg: "#f1f5f9", color: "#475569", gestion: false };
+}
 
 // Prioridad de MELI (se respeta tal cual)
 export const PRIORIDADES = {
@@ -36,11 +62,11 @@ export const GRUPOS = {
   entrega:    { label: "Entrega",    bg: "#E1F5EE", color: "#085041" },
 };
 
-// Estados considerados "abiertos" (requieren gestion)
+// Estados base considerados "abiertos" (requieren gestion)
 export const ESTADOS_ABIERTOS = ["NEW", "OPEN", "ON_HOLD", "CHECKING"];
-export const esAbierto = (estado) => ESTADOS_ABIERTOS.includes(estado);
-// Estados "cerrados" (no requieren gestion: cerrado, anulado, etc.)
-export const esCerrado = (estado) => !esAbierto(estado);
+// Un caso requiere gestion segun el diccionario fino (estado + sub_estado)
+export const esAbierto = (estadoId, subEstadoId) => detalleEstado(estadoId, subEstadoId).gestion;
+export const esCerrado = (estadoId, subEstadoId) => !esAbierto(estadoId, subEstadoId);
 
 // Motivos de MELI -> etiqueta en español legible
 export const MOTIVOS = {
