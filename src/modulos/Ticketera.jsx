@@ -42,8 +42,8 @@ export default function Ticketera() {
 
   // Solo casos de HOY (el pasado vive en el historico, no en la cola).
   const casosHoy = casos.filter((c) => esDeHoyMX(c.fecha_caso));
-  const abiertosHoy = casosHoy.filter((c) => esAbierto(c.estado_id));
-  const cerradosHoy = casosHoy.filter((c) => !esAbierto(c.estado_id));
+  const abiertosHoy = casosHoy.filter((c) => esAbierto(c.estado_id, c.sub_estado_id));
+  const cerradosHoy = casosHoy.filter((c) => !esAbierto(c.estado_id, c.sub_estado_id));
   // para la condicion de "vacio" y seleccion inicial
   const abiertos = abiertosHoy;
 
