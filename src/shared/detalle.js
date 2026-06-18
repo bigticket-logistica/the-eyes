@@ -21,6 +21,8 @@ export function detalleDesdeCache(caso) {
       nombre: caso.comprador_nombre, telefono: caso.comprador_telefono,
       telefonos: caso.comprador_telefonos, mail: caso.comprador_mail,
     },
+    direccion: caso.direccion_entrega || null,
+    quien_recibio: caso.quien_recibio || null,
     metricas: {
       entregados: caso.entregados, fallidas: caso.fallidas,
       pct_fallidas: caso.pct_fallidas, paquetes_en_ruta: caso.paquetes_en_ruta,
