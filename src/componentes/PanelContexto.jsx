@@ -8,12 +8,22 @@ function iniciales(n) {
 
 function Fila({ etiqueta, valor }) {
   return (
-    <div style={{ display: "flex", justifyContent: "space-between", padding: "3px 0", fontSize: 12 }}>
-      <span style={{ color: "var(--texto-suave)" }}>{etiqueta}</span>
+    <div style={{ display: "flex", justifyContent: "space-between", padding: "3px 0", fontSize: 12, gap: 10 }}>
+      <span style={{ color: "var(--texto-suave)", flexShrink: 0 }}>{etiqueta}</span>
       <span style={{ textAlign: "right" }}>{valor ?? "—"}</span>
     </div>
   );
 }
+
+function Titulo({ children }) {
+  return (
+    <div style={{ fontSize: 11, fontWeight: 600, color: "var(--texto-suave)", marginBottom: 8, marginTop: 4 }}>
+      {children}
+    </div>
+  );
+}
+
+const SEP = { borderTop: "1px solid var(--borde)", marginTop: 12, paddingTop: 12 };
 
 export default function PanelContexto({ caso }) {
   const [detalle, setDetalle] = useState(null);
@@ -25,19 +35,13 @@ export default function PanelContexto({ caso }) {
     let activo = true;
     setError(null);
 
-    // 1) si el cache esta fresco (< 5 min), usarlo al instante sin llamar al VPS
     if (cacheFresco(caso)) {
       setDetalle(detalleDesdeCache(caso));
       setCargando(false);
       return;
     }
-
-    // 2) cache viejo o ausente: mostrar lo que haya en cache mientras llega lo fresco
-    if (caso.detalle_actualizado_en) {
-      setDetalle(detalleDesdeCache(caso));
-    } else {
-      setDetalle(null);
-    }
+    if (caso.detalle_actualizado_en) setDetalle(detalleDesdeCache(caso));
+    else setDetalle(null);
     setCargando(true);
     traerDetalleCaso(caso.case_id)
       .then((d) => { if (activo) setDetalle(d); })
@@ -51,11 +55,19 @@ export default function PanelContexto({ caso }) {
   const cond = detalle?.conductor || {};
   const comp = detalle?.comprador || {};
   const met = detalle?.metricas || {};
-  // comprador efimero: se muestra en vivo, no se persiste. Si el caso ya esta cerrado, no se muestra.
-  const compradorVivo = !!(comp.nombre || comp.telefono || (comp.telefonos && comp.telefonos.length));
+  const dir = detalle?.direccion || {};
+  const qr = detalle?.quien_recibio || {};
+
+  // contactos del comprador: array de {numero, etiqueta}, o el telefono unico
+  const contactos = Array.isArray(comp.telefonos) ? comp.telefonos
+    : (comp.telefono ? [{ numero: comp.telefono, etiqueta: null }] : []);
+  const compradorVivo = !!(comp.nombre || comp.mail || contactos.length);
+  const hayDireccion = dir && Object.values(dir).some(Boolean);
+  const hayRecibio = qr && (qr.nombre || qr.tipo);
 
   return (
     <div style={{ overflowY: "auto", background: "#fff", padding: 14 }}>
+      {/* ─── CONDUCTOR ─── */}
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
         <span style={{ fontSize: 11, fontWeight: 600, color: "var(--texto-suave)" }}>Conductor</span>
         {cargando && <span style={{ fontSize: 10, color: "var(--texto-tenue)" }}>cargando…</span>}
@@ -67,7 +79,7 @@ export default function PanelContexto({ caso }) {
         </div>
       ) : (
         <>
-          <div style={{ display: "flex", alignItems: "center", gap: 9, marginBottom: 10 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 9, marginBottom: 8 }}>
             <div style={{
               width: 32, height: 32, borderRadius: "50%", background: "var(--navy)",
               display: "flex", alignItems: "center", justifyContent: "center",
@@ -83,7 +95,7 @@ export default function PanelContexto({ caso }) {
             </div>
           </div>
           {cond.telefono && (
-            <a href={`tel:${cond.telefono}`} style={{ fontSize: 12, color: "var(--navy)", textDecoration: "none" }}>
+            <a href={`tel:${cond.telefono}`} style={{ fontSize: 12, color: "var(--navy)", textDecoration: "none", display: "block" }}>
               📞 {cond.telefono}
             </a>
           )}
@@ -93,7 +105,8 @@ export default function PanelContexto({ caso }) {
         </>
       )}
 
-      <div style={{ borderTop: "1px solid var(--borde)", marginTop: 10, paddingTop: 10 }}>
+      {/* ─── MÉTRICAS DE RUTA ─── */}
+      <div style={SEP}>
         <Fila etiqueta="SC" valor={met.estacion || caso.estacion_origen} />
         <Fila etiqueta="Ruta" valor={met.ruta || caso.route_code} />
         <Fila etiqueta="Avance" valor={met.avance_ruta} />
@@ -103,27 +116,26 @@ export default function PanelContexto({ caso }) {
         <Fila etiqueta="Con auxiliar" valor={cond.con_auxiliar} />
       </div>
 
-      <div style={{ borderTop: "1px solid var(--borde)", marginTop: 10, paddingTop: 10 }}>
-        <div style={{ fontSize: 11, fontWeight: 600, color: "var(--texto-suave)", marginBottom: 8 }}>
+      {/* ─── COMPRADOR ─── */}
+      <div style={SEP}>
+        <Titulo>
           Comprador {compradorVivo && <span style={{ color: "#bb8200", fontWeight: 400 }}>· efímero</span>}
-        </div>
+        </Titulo>
         {compradorVivo ? (
           <>
             <div style={{ fontSize: 12 }}>{comp.nombre || "—"}</div>
             {comp.mail && <div style={{ fontSize: 11, color: "var(--texto-suave)", marginTop: 2 }}>{comp.mail}</div>}
-            {(() => {
-              // mostrar todos los telefonos disponibles; si no hay array, usar el unico
-              const tels = (comp.telefonos && comp.telefonos.length) ? comp.telefonos
-                          : (comp.telefono ? [comp.telefono] : []);
-              if (!tels.length) return null;
-              return tels.map((t, i) => (
-                <button key={t} className="btn-navy"
-                  style={{ width: "100%", marginTop: 8, padding: "8px", fontSize: 12 }}
+            {contactos.map((t, i) => (
+              <div key={t.numero + i} style={{ marginTop: 8 }}>
+                {t.etiqueta && (
+                  <div style={{ fontSize: 10, color: "var(--texto-tenue)", marginBottom: 2 }}>{t.etiqueta}</div>
+                )}
+                <button className="btn-navy" style={{ width: "100%", padding: "8px", fontSize: 12 }}
                   title="Envía el número al chofer para que coordine la entrega">
-                  Pasar número al chofer · {t}
+                  Pasar al chofer · {t.numero}
                 </button>
-              ));
-            })()}
+              </div>
+            ))}
           </>
         ) : (
           <div style={{ fontSize: 12, color: "var(--texto-tenue)" }}>
@@ -131,6 +143,35 @@ export default function PanelContexto({ caso }) {
           </div>
         )}
       </div>
+
+      {/* ─── DIRECCIÓN DE ENTREGA ─── */}
+      {hayDireccion && (
+        <div style={SEP}>
+          <Titulo>Dirección de entrega</Titulo>
+          <div style={{ fontSize: 12, lineHeight: 1.5 }}>
+            {[dir.calle, dir.numero].filter(Boolean).join(" ")}
+            {dir.barrio ? <div style={{ color: "var(--texto-suave)" }}>{dir.barrio}</div> : null}
+            <div style={{ color: "var(--texto-suave)" }}>
+              {[dir.ciudad, dir.provincia, dir.cp].filter(Boolean).join(", ")}
+            </div>
+            {dir.referencia && (
+              <div style={{ color: "var(--texto-tenue)", marginTop: 3, fontStyle: "italic" }}>
+                Ref: {dir.referencia}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* ─── QUIÉN RECIBIÓ ─── */}
+      {hayRecibio && (
+        <div style={SEP}>
+          <Titulo>Quién recibió</Titulo>
+          <div style={{ fontSize: 12 }}>
+            {qr.nombre || "—"}{qr.tipo ? <span style={{ color: "var(--texto-suave)" }}> · {qr.tipo}</span> : ""}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
