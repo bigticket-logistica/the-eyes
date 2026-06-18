@@ -2,6 +2,7 @@ import { useEffect, useState, useCallback } from "react";
 import { sb } from "../shared/supabase.js";
 import { useAuth } from "../shared/auth.jsx";
 import { esAbierto } from "../shared/constantes.js";
+import { esDeHoyMX } from "../shared/fechas.js";
 import ColaTickets from "../componentes/ColaTickets.jsx";
 import HiloTicket from "../componentes/HiloTicket.jsx";
 import PanelContexto from "../componentes/PanelContexto.jsx";
@@ -40,6 +41,8 @@ export default function Ticketera() {
   }, [cargar]);
 
   const abiertos = casos.filter((c) => esAbierto(c.estado_id));
+  const abiertosHoy = abiertos.filter((c) => esDeHoyMX(c.fecha_caso));
+  const rezagados = abiertos.filter((c) => !esDeHoyMX(c.fecha_caso));
 
   async function tomar(caso) {
     const { error } = await sb.rpc("fn_tomar_ticket", { p_caso_id: caso.id });
@@ -87,7 +90,8 @@ export default function Ticketera() {
       height: "100%",
     }}>
       <ColaTickets
-        casos={abiertos}
+        casosHoy={abiertosHoy}
+        rezagados={rezagados}
         seleccionado={seleccionado}
         onSeleccionar={setSeleccionado}
         analistaId={analista?.id}
