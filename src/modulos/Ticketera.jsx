@@ -49,12 +49,14 @@ export default function Ticketera() {
 
   async function tomar(caso) {
     const { error } = await sb.rpc("fn_tomar_ticket", { p_caso_id: caso.id });
-    if (!error) cargar();
+    if (error) { alert("No se pudo tomar el ticket: " + error.message); return; }
+    cargar();
   }
 
   async function resolver(caso) {
     const { error } = await sb.rpc("fn_resolver_ticket", { p_caso_id: caso.id, p_estado: "CLOSED" });
-    if (!error) { cargar(); }
+    if (error) { alert("No se pudo resolver: " + error.message); return; }
+    cargar();
   }
 
   if (cargando && !casos.length) {
