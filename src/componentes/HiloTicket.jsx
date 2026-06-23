@@ -118,7 +118,7 @@ export default function HiloTicket({ caso, onTomar, onResolver, analistaId }) {
   }
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", borderRight: "1px solid var(--borde)", background: "#fff" }}>
+    <div style={{ display: "flex", flexDirection: "column", height: "100%", minHeight: 0, borderRight: "1px solid var(--borde)", background: "#fff" }}>
       <div style={{ padding: "11px 16px", borderBottom: "1px solid var(--borde)", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
         <div>
           <div style={{ fontSize: 14, fontWeight: 600 }}>
@@ -134,7 +134,7 @@ export default function HiloTicket({ caso, onTomar, onResolver, analistaId }) {
         </div>
       </div>
 
-      <div style={{ flex: 1, overflowY: "auto", padding: 16, background: "var(--fondo)", display: "flex", flexDirection: "column", gap: 8 }}>
+      <div style={{ flex: 1, minHeight: 0, overflowY: "auto", padding: 16, background: "var(--fondo)", display: "flex", flexDirection: "column", gap: 8 }}>
         {caso.comentario_cierre && (
           <div style={{ maxWidth: "85%", background: "#FFF7ED", border: "1px solid #fed7aa", borderRadius: 10, padding: "9px 11px", alignSelf: "center" }}>
             <div style={{ fontSize: 11, color: "var(--texto-tenue)", marginBottom: 3 }}>Mensaje de MELI</div>
