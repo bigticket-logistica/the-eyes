@@ -25,7 +25,7 @@ function Burbuja({ m }) {
           {m.tipo_contenido === "texto" ? m.texto : `[${m.tipo_contenido}]${m.texto ? " " + m.texto : ""}`}
         </div>
         <div style={{ fontSize: 10, opacity: 0.6, marginTop: 3, textAlign: "right" }}>
-          {fechaHora(m.creado_en)}{saliente && m.estado_entrega ? ` \u00b7 ${m.estado_entrega}` : ""}
+          {fechaHora(m.creado_en)}{saliente && m.estado_entrega ? ` · ${m.estado_entrega}` : ""}
         </div>
       </div>
     </div>
@@ -79,7 +79,7 @@ export default function HiloTicket({ caso, onTomar, onResolver, analistaId }) {
   async function handleEnviar() {
     const t = texto.trim();
     if (!t || enviando) return;
-    if (!caso.conductor_telefono) { setError("Este caso no tiene tel\u00e9fono del conductor"); return; }
+    if (!caso.conductor_telefono) { setError("Este caso no tiene teléfono del conductor"); return; }
     setEnviando(true); setError(null);
     try {
       await enviarMensaje({
@@ -102,10 +102,10 @@ export default function HiloTicket({ caso, onTomar, onResolver, analistaId }) {
       <div style={{ padding: "11px 16px", borderBottom: "1px solid var(--borde)", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
         <div>
           <div style={{ fontSize: 14, fontWeight: 600 }}>
-            #{caso.case_id} \u00b7 {motivoLegible(caso.motivo_id, caso.motivo_label)}
+            #{caso.case_id} · {motivoLegible(caso.motivo_id, caso.motivo_label)}
           </div>
           <div style={{ fontSize: 12, color: "var(--texto-suave)", marginTop: 2 }}>
-            Ruta {caso.route_code || "\u2014"} \u00b7 {caso.conductor_nombre || "sin conductor"} \u00b7 {hace(caso.fecha_caso)}
+            Ruta {caso.route_code || "—"} · {caso.conductor_nombre || "sin conductor"} · {hace(caso.fecha_caso)}
           </div>
         </div>
         <div style={{ display: "flex", gap: 6 }}>
@@ -124,7 +124,7 @@ export default function HiloTicket({ caso, onTomar, onResolver, analistaId }) {
 
         {mensajes.length === 0 ? (
           <div style={{ margin: "auto", fontSize: 12, color: "var(--texto-tenue)", textAlign: "center" }}>
-            Sin mensajes todav\u00eda.<br />Escribe abajo para contactar al conductor.
+            Sin mensajes todavía.<br />Escribe abajo para contactar al conductor.
           </div>
         ) : (
           mensajes.map((m) => <Burbuja key={m.id} m={m} />)
@@ -152,13 +152,13 @@ export default function HiloTicket({ caso, onTomar, onResolver, analistaId }) {
                 value={texto}
                 onChange={(e) => setTexto(e.target.value)}
                 onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleEnviar(); } }}
-                placeholder={caso.conductor_telefono ? "Escribe al conductor\u2026" : "Sin tel\u00e9fono del conductor"}
+                placeholder={caso.conductor_telefono ? "Escribe al conductor…" : "Sin teléfono del conductor"}
                 disabled={enviando || !caso.conductor_telefono}
                 style={{ flex: 1 }}
               />
               <button className="btn-navy" onClick={handleEnviar} disabled={enviando || !texto.trim() || !caso.conductor_telefono}
                 style={{ padding: "9px 16px", whiteSpace: "nowrap" }}>
-                {enviando ? "Enviando\u2026" : "Enviar"}
+                {enviando ? "Enviando…" : "Enviar"}
               </button>
               <button className="btn-naranja" onClick={() => onResolver(caso)} style={{ padding: "9px 16px", whiteSpace: "nowrap" }}>
                 Resolver
