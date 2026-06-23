@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from "react";
+import { sb } from "../shared/supabase.js";
 import { detalleEstado, estiloPrioridad, motivoLegible } from "../shared/constantes.js";
 import { hace, fechaHora } from "../shared/fechas.js";
 import { mensajesDelCaso, conversacionPorTelefono, ventanaAbierta, enviarMensaje } from "../shared/mensajes.js";
@@ -54,9 +55,28 @@ export default function HiloTicket({ caso, onTomar, onResolver, analistaId }) {
 
   useEffect(() => { cargarHilo(); }, [cargarHilo]);
 
+  // Realtime: escuchar mensajes nuevos de este caso y mostrarlos al instante
   useEffect(() => {
     if (!caso?.case_id) return;
-    const t = setInterval(cargarHilo, 15000);
+    const canal = sb
+      .channel(`mensajes-caso-${caso.case_id}`)
+      .on(
+        "postgres_changes",
+        { event: "INSERT", schema: "public", table: "crm_inc_mensajes", filter: `case_id=eq.${caso.case_id}` },
+        (payload) => {
+          const nuevo = payload.new;
+          // agregar solo si no lo tenemos ya (evita duplicar con el envío local)
+          setMensajes((prev) => prev.some((m) => m.id === nuevo.id) ? prev : [...prev, nuevo]);
+        },
+      )
+      .subscribe();
+    return () => { sb.removeChannel(canal); };
+  }, [caso?.case_id]);
+
+  // respaldo: refrescar cada 30s por si Realtime se cae (red, etc.)
+  useEffect(() => {
+    if (!caso?.case_id) return;
+    const t = setInterval(cargarHilo, 30000);
     return () => clearInterval(t);
   }, [caso?.case_id, cargarHilo]);
 
