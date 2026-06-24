@@ -3,6 +3,7 @@ import { useAuth } from "./shared/auth.jsx";
 import Login from "./modulos/Login.jsx";
 import Ticketera from "./modulos/Ticketera.jsx";
 import Historico from "./modulos/Historico.jsx";
+import Consultas from "./modulos/Consultas.jsx";
 import Topbar from "./componentes/Topbar.jsx";
 
 function Cargando() {
@@ -48,6 +49,7 @@ export default function App() {
         <Routes>
           <Route path="/" element={<Ticketera />} />
           <Route path="/historico" element={<Historico />} />
+          <Route path="/consultas" element={<Consultas />} />
           <Route path="/login" element={<Navigate to="/" replace />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
