@@ -43,3 +43,37 @@ export async function enviarMensaje({ telefono, texto, caseId, emisorId }) {
   if (!data || data.ok === false) throw new Error(data?.error || "No se pudo enviar");
   return data;
 }
+
+// Lista las conversaciones (chats con conductores), más reciente primero.
+// Para la pestaña "Consultas en ruta".
+export async function listarConversaciones() {
+  const { data, error } = await sb
+    .from("crm_inc_conversaciones")
+    .select("id, telefono, conductor_nombre, ultimo_mensaje_texto, ultimo_mensaje_en, ultimo_entrante_en, no_leidos")
+    .order("ultimo_mensaje_en", { ascending: false, nullsFirst: false })
+    .limit(100);
+  if (error) throw error;
+  return data || [];
+}
+
+// Trae los mensajes de una conversación (todo el hilo, tenga o no caso).
+export async function mensajesDeConversacion(conversacionId) {
+  const { data, error } = await sb
+    .from("crm_inc_mensajes")
+    .select("id, case_id, direccion, emisor, tipo_contenido, texto, media_url, estado_entrega, creado_en")
+    .eq("conversacion_id", conversacionId)
+    .order("creado_en", { ascending: true });
+  if (error) throw error;
+  return data || [];
+}
+
+// Crea (o reusa) un caso de consulta desde una conversación. Devuelve el case_id.
+// Llama al RPC fn_crear_caso_consulta.
+export async function crearCasoConsulta(conversacionId, analistaId) {
+  const { data, error } = await sb.rpc("fn_crear_caso_consulta", {
+    p_conversacion_id: conversacionId,
+    p_analista_id: analistaId,
+  });
+  if (error) throw error;
+  return data; // case_id numérico
+}
