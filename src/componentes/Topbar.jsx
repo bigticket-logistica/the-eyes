@@ -37,7 +37,8 @@ export default function Topbar() {
           Torre de soporte · {analista?.pais || "MX"}
         </span>
         <nav style={{ display: "flex", alignItems: "center", gap: 4, marginLeft: 10 }}>
-          <Tab to="/">Cola</Tab>
+          <Tab to="/">Tickets hoy</Tab>
+          <Tab to="/consultas">Consultas en ruta</Tab>
           <Tab to="/historico">Histórico</Tab>
         </nav>
       </div>
