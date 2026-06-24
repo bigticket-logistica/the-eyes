@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { sb } from "../shared/supabase.js";
-import { detalleEstado, estiloPrioridad, motivoLegible } from "../shared/constantes.js";
+import { detalleEstado, estiloPrioridad, motivoLegible, ESTADOS_ABIERTOS } from "../shared/constantes.js";
 import { hace, fechaHora } from "../shared/fechas.js";
 import { mensajesDelCaso, conversacionPorTelefono, ventanaAbierta, enviarMensaje } from "../shared/mensajes.js";
 
@@ -92,8 +92,9 @@ export default function HiloTicket({ caso, onTomar, onResolver, analistaId }) {
 
   const est = detalleEstado(caso.estado_id, caso.sub_estado_id);
   const pr = estiloPrioridad(caso.prioridad);
+  const cerrado = !ESTADOS_ABIERTOS.includes(caso.estado_id);
   const esMio = caso.analista_actual && caso.analista_actual === analistaId;
-  const sinDueno = !caso.analista_actual;
+  const sinDueno = !caso.analista_actual && !cerrado;
   const ventana = ventanaAbierta(conversacion);
 
   async function handleEnviar() {
@@ -156,43 +157,52 @@ export default function HiloTicket({ caso, onTomar, onResolver, analistaId }) {
         {error && (
           <div style={{ padding: "6px 16px", fontSize: 12, color: "#bb4444", background: "#fff5f5" }}>{error}</div>
         )}
-        {!ventana && conversacion && esMio && (
-          <div style={{ padding: "6px 16px", fontSize: 11, color: "#92722a", background: "#fffbeb" }}>
-            Ventana de 24h cerrada. El conductor debe escribir primero, o se requiere una plantilla.
+        {cerrado ? (
+          <div style={{ padding: "12px 16px", display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
+            background: "#ecfdf3", borderTop: "2px solid #16a34a", color: "#15803d", fontSize: 13, fontWeight: 600 }}>
+            ✓ Caso resuelto y cerrado · {est.label}
           </div>
-        )}
-        <div style={{ padding: "11px 16px", display: "flex", gap: 8, alignItems: "center" }}>
-          {sinDueno ? (
-            <button className="btn-navy" onClick={() => onTomar(caso)} style={{ padding: "9px 18px" }}>
-              Tomar ticket
-            </button>
-          ) : esMio ? (
-            <>
-              <input
-                value={texto}
-                onChange={(e) => setTexto(e.target.value)}
-                onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleEnviar(); } }}
-                placeholder={caso.conductor_telefono ? "Escribe al conductor…" : "Sin teléfono del conductor"}
-                disabled={enviando || !caso.conductor_telefono}
-                style={{ flex: 1 }}
-              />
-              <button className="btn-navy" onClick={handleEnviar} disabled={enviando || !texto.trim() || !caso.conductor_telefono}
-                style={{ padding: "9px 16px", whiteSpace: "nowrap" }}>
-                {enviando ? "Enviando…" : "Enviar"}
-              </button>
-              <button className="btn-naranja" onClick={() => onResolver(caso)} style={{ padding: "9px 16px", whiteSpace: "nowrap" }}>
-                Resolver
-              </button>
-            </>
-          ) : (
-            <div style={{ fontSize: 12, color: "var(--texto-suave)" }}>
-              Atendido por otro analista.
-              <button onClick={() => onTomar(caso)} style={{ marginLeft: 10, padding: "5px 12px", fontSize: 12 }}>
-                Tomar
-              </button>
+        ) : (
+          <>
+            {!ventana && conversacion && esMio && (
+              <div style={{ padding: "6px 16px", fontSize: 11, color: "#92722a", background: "#fffbeb" }}>
+                Ventana de 24h cerrada. El conductor debe escribir primero, o se requiere una plantilla.
+              </div>
+            )}
+            <div style={{ padding: "11px 16px", display: "flex", gap: 8, alignItems: "center" }}>
+              {sinDueno ? (
+                <button className="btn-navy" onClick={() => onTomar(caso)} style={{ padding: "9px 18px" }}>
+                  Tomar ticket
+                </button>
+              ) : esMio ? (
+                <>
+                  <input
+                    value={texto}
+                    onChange={(e) => setTexto(e.target.value)}
+                    onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleEnviar(); } }}
+                    placeholder={caso.conductor_telefono ? "Escribe al conductor…" : "Sin teléfono del conductor"}
+                    disabled={enviando || !caso.conductor_telefono}
+                    style={{ flex: 1 }}
+                  />
+                  <button className="btn-navy" onClick={handleEnviar} disabled={enviando || !texto.trim() || !caso.conductor_telefono}
+                    style={{ padding: "9px 16px", whiteSpace: "nowrap" }}>
+                    {enviando ? "Enviando…" : "Enviar"}
+                  </button>
+                  <button className="btn-naranja" onClick={() => onResolver(caso)} style={{ padding: "9px 16px", whiteSpace: "nowrap" }}>
+                    Cerrar ticket
+                  </button>
+                </>
+              ) : (
+                <div style={{ fontSize: 12, color: "var(--texto-suave)" }}>
+                  Atendido por otro analista.
+                  <button onClick={() => onTomar(caso)} style={{ marginLeft: 10, padding: "5px 12px", fontSize: 12 }}>
+                    Tomar
+                  </button>
+                </div>
+              )}
             </div>
-          )}
-        </div>
+          </>
+        )}
       </div>
     </div>
   );
