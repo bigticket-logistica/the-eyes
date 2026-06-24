@@ -5,6 +5,7 @@ import Ticketera from "./modulos/Ticketera.jsx";
 import Historico from "./modulos/Historico.jsx";
 import Consultas from "./modulos/Consultas.jsx";
 import Topbar from "./componentes/Topbar.jsx";
+import { AlertasProvider, ContenedorToasts } from "./shared/alertas.jsx";
 
 function Cargando() {
   return (
@@ -43,17 +44,20 @@ export default function App() {
 
   // Sesión + analista: app completa
   return (
-    <div style={{ display: "flex", flexDirection: "column", height: "100vh" }}>
-      <Topbar />
-      <div style={{ flex: 1, overflow: "hidden" }}>
-        <Routes>
-          <Route path="/" element={<Ticketera />} />
-          <Route path="/historico" element={<Historico />} />
-          <Route path="/consultas" element={<Consultas />} />
-          <Route path="/login" element={<Navigate to="/" replace />} />
-          <Route path="*" element={<Navigate to="/" replace />} />
-        </Routes>
+    <AlertasProvider>
+      <div style={{ display: "flex", flexDirection: "column", height: "100vh" }}>
+        <Topbar />
+        <div style={{ flex: 1, overflow: "hidden" }}>
+          <Routes>
+            <Route path="/" element={<Ticketera />} />
+            <Route path="/historico" element={<Historico />} />
+            <Route path="/consultas" element={<Consultas />} />
+            <Route path="/login" element={<Navigate to="/" replace />} />
+            <Route path="*" element={<Navigate to="/" replace />} />
+          </Routes>
+        </div>
       </div>
-    </div>
+      <ContenedorToasts />
+    </AlertasProvider>
   );
 }
