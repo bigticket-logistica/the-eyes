@@ -3,6 +3,7 @@ import { sb } from "../shared/supabase.js";
 import { useAuth } from "../shared/auth.jsx";
 import { hace } from "../shared/fechas.js";
 import { listarConversaciones, mensajesDeConversacion, crearCasoConsulta, ventanaAbierta } from "../shared/mensajes.js";
+import { useAlertas } from "../shared/alertas.jsx";
 import HiloTicket from "../componentes/HiloTicket.jsx";
 import { fechaHora } from "../shared/fechas.js";
 
@@ -25,6 +26,7 @@ function Burbuja({ m }) {
 
 export default function Consultas() {
   const { analista } = useAuth();
+  const { marcarVistos } = useAlertas();
   const [convs, setConvs] = useState([]);
   const [sel, setSel] = useState(null);          // conversación seleccionada
   const [mensajes, setMensajes] = useState([]);
@@ -39,6 +41,9 @@ export default function Consultas() {
   }, []);
 
   useEffect(() => { cargarConvs(); }, [cargarConvs]);
+
+  // al entrar a esta pestaña, marcar los mensajes como vistos (resetea el badge)
+  useEffect(() => { marcarVistos(); }, [marcarVistos]);
 
   // Realtime: nuevas conversaciones / mensajes refrescan la lista
   useEffect(() => {
