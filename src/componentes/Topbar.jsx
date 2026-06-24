@@ -1,25 +1,33 @@
 import { useAuth } from "../shared/auth.jsx";
 import { NavLink } from "react-router-dom";
+import { useAlertas } from "../shared/alertas.jsx";
 
 function iniciales(nombre) {
   if (!nombre) return "··";
   return nombre.split(" ").slice(0, 2).map((p) => p[0]).join("").toUpperCase();
 }
 
-function Tab({ to, children }) {
+function Tab({ to, children, badge }) {
   return (
     <NavLink to={to} end style={({ isActive }) => ({
       color: isActive ? "#fff" : "#bcd0ec",
       fontSize: 13, fontWeight: isActive ? 600 : 400,
       padding: "5px 12px", borderRadius: 7,
       background: isActive ? "var(--navy-suave)" : "transparent",
-      textDecoration: "none",
-    })}>{children}</NavLink>
+      textDecoration: "none", display: "inline-flex", alignItems: "center", gap: 6,
+    })}>
+      {children}
+      {badge > 0 && (
+        <span style={{ fontSize: 10, fontWeight: 700, background: "var(--naranja)", color: "#fff",
+          borderRadius: 10, padding: "1px 7px", minWidth: 18, textAlign: "center" }}>{badge}</span>
+      )}
+    </NavLink>
   );
 }
 
 export default function Topbar() {
   const { analista, salir } = useAuth();
+  const { noLeidos, sonidoActivo, setSonidoActivo } = useAlertas();
 
   return (
     <header style={{
@@ -38,12 +46,17 @@ export default function Topbar() {
         </span>
         <nav style={{ display: "flex", alignItems: "center", gap: 4, marginLeft: 10 }}>
           <Tab to="/">Tickets hoy</Tab>
-          <Tab to="/consultas">Consultas en ruta</Tab>
+          <Tab to="/consultas" badge={noLeidos}>Consultas en ruta</Tab>
           <Tab to="/historico">Histórico</Tab>
         </nav>
       </div>
 
       <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
+        <button onClick={() => setSonidoActivo(!sonidoActivo)}
+          title={sonidoActivo ? "Sonido activado" : "Sonido silenciado"}
+          style={{ background: "transparent", border: "none", color: "#bcd0ec", cursor: "pointer", fontSize: 16, padding: 2 }}>
+          {sonidoActivo ? "🔔" : "🔕"}
+        </button>
         <span style={{ color: "#bcd0ec", fontSize: 13 }}>{analista?.nombre}</span>
         <div style={{
           width: 28, height: 28, borderRadius: "50%", background: "var(--naranja)",
