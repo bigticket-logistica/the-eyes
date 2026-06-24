@@ -1,8 +1,21 @@
 import { useAuth } from "../shared/auth.jsx";
+import { NavLink } from "react-router-dom";
 
 function iniciales(nombre) {
   if (!nombre) return "··";
   return nombre.split(" ").slice(0, 2).map((p) => p[0]).join("").toUpperCase();
+}
+
+function Tab({ to, children }) {
+  return (
+    <NavLink to={to} end style={({ isActive }) => ({
+      color: isActive ? "#fff" : "#bcd0ec",
+      fontSize: 13, fontWeight: isActive ? 600 : 400,
+      padding: "5px 12px", borderRadius: 7,
+      background: isActive ? "var(--navy-suave)" : "transparent",
+      textDecoration: "none",
+    })}>{children}</NavLink>
+  );
 }
 
 export default function Topbar() {
@@ -23,6 +36,10 @@ export default function Topbar() {
         <span style={{ color: "#bcd0ec", fontSize: 12, paddingLeft: 12, borderLeft: "1px solid var(--navy-suave)" }}>
           Torre de soporte · {analista?.pais || "MX"}
         </span>
+        <nav style={{ display: "flex", alignItems: "center", gap: 4, marginLeft: 10 }}>
+          <Tab to="/">Cola</Tab>
+          <Tab to="/historico">Histórico</Tab>
+        </nav>
       </div>
 
       <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
