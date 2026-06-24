@@ -2,6 +2,7 @@ import { Routes, Route, Navigate } from "react-router-dom";
 import { useAuth } from "./shared/auth.jsx";
 import Login from "./modulos/Login.jsx";
 import Ticketera from "./modulos/Ticketera.jsx";
+import Historico from "./modulos/Historico.jsx";
 import Topbar from "./componentes/Topbar.jsx";
 
 function Cargando() {
@@ -46,6 +47,7 @@ export default function App() {
       <div style={{ flex: 1, overflow: "hidden" }}>
         <Routes>
           <Route path="/" element={<Ticketera />} />
+          <Route path="/historico" element={<Historico />} />
           <Route path="/login" element={<Navigate to="/" replace />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
