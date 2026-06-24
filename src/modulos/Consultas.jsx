@@ -85,6 +85,18 @@ export default function Consultas() {
     finally { setCreando(false); }
   }
 
+  // resolver/cerrar el caso de verdad (RPC), luego volver a la lista
+  async function resolverCaso(caso) {
+    if (!caso) return;
+    try {
+      const { error } = await sb.rpc("fn_resolver_ticket", { p_caso_id: caso.id, p_estado: "CLOSED" });
+      if (error) { setError("No se pudo cerrar: " + error.message); return; }
+      setCasoAbierto(null);
+      await cargarConvs();
+      if (sel) await abrirConv(sel);  // recarga el hilo, ahora cerrado
+    } catch (e) { setError(e.message); }
+  }
+
   return (
     <div style={{ display: "grid", gridTemplateColumns: "minmax(320px, 0.9fr) 1.4fr", height: "100%" }}>
       {/* lista de conversaciones */}
@@ -130,7 +142,7 @@ export default function Consultas() {
       ) : casoAbierto ? (
         // ya tiene caso: usar el hilo normal con todas sus funciones
         <HiloTicket caso={casoAbierto} analistaId={analista?.id}
-          onTomar={() => {}} onResolver={() => { setCasoAbierto(null); abrirConv(sel); }} />
+          onTomar={() => {}} onResolver={resolverCaso} />
       ) : (
         // conversación sin caso: mostrar hilo + botón Tomar consulta
         <div style={{ display: "flex", flexDirection: "column", height: "100%", minHeight: 0, background: "#fff" }}>
