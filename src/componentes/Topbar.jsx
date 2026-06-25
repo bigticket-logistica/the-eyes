@@ -45,7 +45,7 @@ export default function Topbar() {
           Torre de soporte · {analista?.pais || "MX"}
         </span>
         <nav style={{ display: "flex", alignItems: "center", gap: 4, marginLeft: 10 }}>
-          <Tab to="/">Tickets hoy</Tab>
+          <Tab to="/">Incidencias</Tab>
           <Tab to="/consultas" badge={noLeidos}>Consultas en ruta</Tab>
           <Tab to="/historico">Histórico</Tab>
         </nav>
