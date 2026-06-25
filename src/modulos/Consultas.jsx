@@ -59,6 +59,12 @@ export default function Consultas() {
     try {
       const msgs = await mensajesDeConversacion(conv.id);
       setMensajes(msgs);
+      // marcar la conversación como leída: el badge naranja desaparece al abrir
+      if (conv.no_leidos > 0) {
+        setConvs((prev) => prev.map((c) => c.id === conv.id ? { ...c, no_leidos: 0 } : c));
+        sb.from("crm_inc_conversaciones").update({ no_leidos: 0 }).eq("id", conv.id)
+          .then(() => {});  // no bloquea la carga del hilo
+      }
       // ¿algún mensaje ya tiene caso? buscar el caso abierto
       const conCaso = msgs.find((m) => m.case_id);
       if (conCaso) {
