@@ -1,13 +1,13 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { sb } from "../shared/supabase.js";
 import { useAuth } from "../shared/auth.jsx";
-import { hace } from "../shared/fechas.js";
-import { listarConversaciones, mensajesDeConversacion, crearCasoConsulta, ventanaAbierta } from "../shared/mensajes.js";
+import { hace, fechaHora } from "../shared/fechas.js";
+import { listarConversaciones, mensajesDeConversacion, crearCasoConsulta } from "../shared/mensajes.js";
 import { useAlertas } from "../shared/alertas.jsx";
 import HiloTicket from "../componentes/HiloTicket.jsx";
-import { fechaHora } from "../shared/fechas.js";
 
-// Burbuja simple para el hilo de conversación (sin caso aún)
+const ABIERTOS = ["NEW", "OPEN", "ON_HOLD", "CHECKING"];
+
 function Burbuja({ m }) {
   const saliente = m.direccion === "saliente";
   return (
@@ -28,24 +28,32 @@ export default function Consultas() {
   const { analista } = useAuth();
   const { marcarVistos } = useAlertas();
   const [convs, setConvs] = useState([]);
-  const [sel, setSel] = useState(null);          // conversación seleccionada
+  const [sel, setSel] = useState(null);
   const [mensajes, setMensajes] = useState([]);
-  const [casoAbierto, setCasoAbierto] = useState(null); // caso si la conversación ya tiene uno
+  const [casoAbierto, setCasoAbierto] = useState(null);   // caso ABIERTO de la conversación
+  const [casoCerrado, setCasoCerrado] = useState(null);   // último caso CERRADO (para mostrar su hilo)
+  const [haySinCaso, setHaySinCaso] = useState(false);    // hay mensajes nuevos sin caso
   const [cargando, setCargando] = useState(false);
   const [creando, setCreando] = useState(false);
   const [error, setError] = useState(null);
+  const leidosRef = useRef(new Set());  // ids de conversaciones ya leídas (sobrevive recargas)
 
-  const cargarConvs = useCallback(async () => {
-    try { setConvs(await listarConversaciones()); }
-    catch (e) { setError(e.message); }
+  // aplica el "ya leído" local sobre la lista que llega de la base
+  const aplicarLeidos = useCallback((lista) => {
+    return lista.map((c) => leidosRef.current.has(c.id) ? { ...c, no_leidos: 0 } : c);
   }, []);
 
-  useEffect(() => { cargarConvs(); }, [cargarConvs]);
+  const cargarConvs = useCallback(async () => {
+    try {
+      const lista = await listarConversaciones();
+      setConvs(aplicarLeidos(lista));
+    } catch (e) { setError(e.message); }
+  }, [aplicarLeidos]);
 
-  // al entrar a esta pestaña, marcar los mensajes como vistos (resetea el badge)
+  useEffect(() => { cargarConvs(); }, [cargarConvs]);
   useEffect(() => { marcarVistos(); }, [marcarVistos]);
 
-  // Realtime: nuevas conversaciones / mensajes refrescan la lista
+  // Realtime: refresca la lista, respetando los ya leídos
   useEffect(() => {
     const canal = sb.channel("consultas-lista")
       .on("postgres_changes", { event: "*", schema: "public", table: "crm_inc_conversaciones" }, cargarConvs)
@@ -53,53 +61,58 @@ export default function Consultas() {
     return () => { sb.removeChannel(canal); };
   }, [cargarConvs]);
 
-  // al seleccionar una conversación, cargar su hilo y ver si ya tiene caso abierto
   const abrirConv = useCallback(async (conv) => {
-    setSel(conv); setCargando(true); setError(null); setCasoAbierto(null);
+    setSel(conv); setCargando(true); setError(null);
+    setCasoAbierto(null); setCasoCerrado(null); setHaySinCaso(false);
     try {
       const msgs = await mensajesDeConversacion(conv.id);
       setMensajes(msgs);
-      // marcar la conversación como leída: el badge naranja desaparece al abrir
-      if (conv.no_leidos > 0) {
-        setConvs((prev) => prev.map((c) => c.id === conv.id ? { ...c, no_leidos: 0 } : c));
-        sb.from("crm_inc_conversaciones").update({ no_leidos: 0 }).eq("id", conv.id)
-          .then(() => {});  // no bloquea la carga del hilo
-      }
-      // ¿algún mensaje ya tiene caso? buscar el caso abierto
-      const conCaso = msgs.find((m) => m.case_id);
-      if (conCaso) {
-        const { data } = await sb.from("crm_inc_casos")
-          .select("*").eq("case_id", conCaso.case_id).maybeSingle();
-        if (data && ["NEW","OPEN","ON_HOLD","CHECKING"].includes(data.estado_id)) {
-          setCasoAbierto(data);
+
+      // marcar leída: badge a 0 (local + persistente + base)
+      leidosRef.current.add(conv.id);
+      setConvs((prev) => prev.map((c) => c.id === conv.id ? { ...c, no_leidos: 0 } : c));
+      const { error: upErr } = await sb.from("crm_inc_conversaciones")
+        .update({ no_leidos: 0 }).eq("id", conv.id);
+      if (upErr) console.error("no_leidos update:", upErr.message);
+
+      // ver qué casos tiene esta conversación (abierto y/o cerrado)
+      const caseIds = [...new Set(msgs.map((m) => m.case_id).filter(Boolean))];
+      let abierto = null, cerrado = null;
+      if (caseIds.length) {
+        const { data: casos } = await sb.from("crm_inc_casos")
+          .select("*").in("case_id", caseIds).order("case_id", { ascending: false });
+        for (const c of (casos || [])) {
+          if (!abierto && ABIERTOS.includes(c.estado_id)) abierto = c;
+          if (!cerrado && !ABIERTOS.includes(c.estado_id)) cerrado = c;
         }
       }
+      setCasoAbierto(abierto);
+      setCasoCerrado(cerrado);
+      // ¿hay mensajes entrantes SIN caso? (nuevos, tras cerrar) → permitir crear caso
+      setHaySinCaso(msgs.some((m) => !m.case_id && m.direccion === "entrante"));
     } catch (e) { setError(e.message); }
     finally { setCargando(false); }
   }, []);
 
-  // tomar la consulta: crea el caso y cambia a la vista de hilo con caso
   async function tomarConsulta() {
     if (!sel || creando) return;
     setCreando(true); setError(null);
     try {
       const caseId = await crearCasoConsulta(sel.id, analista?.id);
       const { data } = await sb.from("crm_inc_casos").select("*").eq("case_id", caseId).maybeSingle();
-      setCasoAbierto(data);
+      setCasoAbierto(data); setHaySinCaso(false);
       await cargarConvs();
     } catch (e) { setError(e.message); }
     finally { setCreando(false); }
   }
 
-  // resolver/cerrar el caso de verdad (RPC), luego volver a la lista
   async function resolverCaso(caso) {
     if (!caso) return;
     try {
       const { error } = await sb.rpc("fn_resolver_ticket", { p_caso_id: caso.id, p_estado: "CLOSED" });
       if (error) { setError("No se pudo cerrar: " + error.message); return; }
-      setCasoAbierto(null);
       await cargarConvs();
-      if (sel) await abrirConv(sel);  // recarga el hilo, ahora cerrado
+      if (sel) await abrirConv(sel);
     } catch (e) { setError(e.message); }
   }
 
@@ -140,39 +153,70 @@ export default function Consultas() {
         })}
       </div>
 
-      {/* panel derecho: hilo de la conversación o caso tomado */}
+      {/* panel derecho */}
       {!sel ? (
         <div style={{ display: "flex", alignItems: "center", justifyContent: "center", color: "var(--texto-suave)" }}>
           Selecciona una conversación
         </div>
       ) : casoAbierto ? (
-        // ya tiene caso: usar el hilo normal con todas sus funciones
+        // hay un caso abierto: hilo normal con todas sus funciones
         <HiloTicket caso={casoAbierto} analistaId={analista?.id}
           onTomar={() => {}} onResolver={resolverCaso} />
       ) : (
-        // conversación sin caso: mostrar hilo + botón Tomar consulta
+        // no hay caso abierto: mostrar (si existe) el último caso cerrado con su línea verde,
+        // y abajo, si hay mensajes nuevos sin caso, el botón para crear caso nuevo.
         <div style={{ display: "flex", flexDirection: "column", height: "100%", minHeight: 0, background: "#fff" }}>
           <div style={{ padding: "11px 16px", borderBottom: "1px solid var(--borde)" }}>
             <div style={{ fontSize: 14, fontWeight: 600 }}>{sel.conductor_nombre || sel.telefono}</div>
-            <div style={{ fontSize: 12, color: "var(--texto-suave)" }}>{sel.telefono} · consulta sin caso</div>
+            <div style={{ fontSize: 12, color: "var(--texto-suave)" }}>{sel.telefono}</div>
           </div>
+
           <div style={{ flex: 1, minHeight: 0, overflowY: "auto", padding: 16, background: "var(--fondo)",
             display: "flex", flexDirection: "column", gap: 8 }}>
             {cargando ? (
               <div style={{ margin: "auto", fontSize: 12, color: "var(--texto-tenue)" }}>Cargando…</div>
             ) : mensajes.length === 0 ? (
               <div style={{ margin: "auto", fontSize: 12, color: "var(--texto-tenue)" }}>Sin mensajes</div>
-            ) : mensajes.map((m) => <Burbuja key={m.id} m={m} />)}
+            ) : (
+              mensajes.map((m, i) => {
+                // línea verde separadora: justo después del último mensaje del caso cerrado
+                const esUltimoDelCerrado = casoCerrado && m.case_id === casoCerrado.case_id &&
+                  (i === mensajes.length - 1 || mensajes[i + 1]?.case_id !== casoCerrado.case_id);
+                return (
+                  <div key={m.id}>
+                    <Burbuja m={m} />
+                    {esUltimoDelCerrado && (
+                      <div style={{ display: "flex", alignItems: "center", gap: 8, margin: "12px 0 4px" }}>
+                        <div style={{ flex: 1, height: 2, background: "#16a34a", opacity: 0.5 }} />
+                        <span style={{ fontSize: 11, fontWeight: 600, color: "#15803d" }}>
+                          ✓ {casoCerrado.codigo || "#" + casoCerrado.case_id} resuelto
+                        </span>
+                        <div style={{ flex: 1, height: 2, background: "#16a34a", opacity: 0.5 }} />
+                      </div>
+                    )}
+                  </div>
+                );
+              })
+            )}
           </div>
+
           <div style={{ borderTop: "1px solid var(--borde)", padding: "11px 16px" }}>
             {error && <div style={{ fontSize: 12, color: "#bb4444", marginBottom: 8 }}>{error}</div>}
-            <button className="btn-navy" onClick={tomarConsulta} disabled={creando}
-              style={{ width: "100%", padding: "10px" }}>
-              {creando ? "Creando caso…" : "Tomar consulta y crear caso"}
-            </button>
-            <div style={{ fontSize: 11, color: "var(--texto-tenue)", textAlign: "center", marginTop: 6 }}>
-              Se genera un caso (BT-…), se vinculan los mensajes y empieza el cronómetro de resolución.
-            </div>
+            {haySinCaso ? (
+              <>
+                <button className="btn-navy" onClick={tomarConsulta} disabled={creando}
+                  style={{ width: "100%", padding: "10px" }}>
+                  {creando ? "Creando caso…" : "Tomar consulta y crear caso"}
+                </button>
+                <div style={{ fontSize: 11, color: "var(--texto-tenue)", textAlign: "center", marginTop: 6 }}>
+                  Hay mensajes nuevos sin caso. Se generará un caso BT- y empieza el cronómetro.
+                </div>
+              </>
+            ) : (
+              <div style={{ fontSize: 12, color: "var(--texto-suave)", textAlign: "center" }}>
+                Sin consultas nuevas pendientes en esta conversación.
+              </div>
+            )}
           </div>
         </div>
       )}
