@@ -46,6 +46,7 @@ export default function Topbar() {
         </span>
         <nav style={{ display: "flex", alignItems: "center", gap: 4, marginLeft: 10 }}>
           <Tab to="/">Incidencias</Tab>
+          <Tab to="/detalle-dia">Detalle día</Tab>
           <Tab to="/consultas" badge={noLeidos}>Consultas en ruta</Tab>
           <Tab to="/historico">Histórico</Tab>
         </nav>
