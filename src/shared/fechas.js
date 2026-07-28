@@ -37,3 +37,10 @@ export function esDeHoyMX(fecha) {
   if (!fecha) return false;
   return fechaMX(new Date(fecha)) === fechaMX(new Date());
 }
+
+// Dia YYYY-MM-DD en zona CDMX (con timezone real). Sin argumento: hoy.
+export function diaMX(fecha) {
+  const d = fecha ? new Date(fecha) : new Date();
+  return new Intl.DateTimeFormat("en-CA", { timeZone: "America/Mexico_City",
+    year: "numeric", month: "2-digit", day: "2-digit" }).format(d);
+}

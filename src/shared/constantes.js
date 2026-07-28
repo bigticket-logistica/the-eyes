@@ -94,3 +94,22 @@ export const motivoLegible = (motivoId, fallback) =>
 export const estiloEstado    = (e) => ESTADOS[e]      || { label: e || "—", bg: "#f1f5f9", color: "#475569" };
 export const estiloPrioridad = (p) => PRIORIDADES[p]  || { label: p || "—", bg: "#f1f5f9", color: "#475569", peso: 0 };
 export const estiloGrupo     = (g) => GRUPOS[g]       || { label: g || "—", bg: "#f1f5f9", color: "#475569" };
+
+// Etiquetas de caracterizacion de tickets de consulta (The Eyes).
+// Las "graves" gatillan la Bitacora del dia al cerrar el ticket.
+export const ETIQUETAS_CASO = [
+  { id: "ambulancia",          label: "🚑 Ambulancia",          grave: true },
+  { id: "robo",                label: "🚨 Robo",                grave: true },
+  { id: "choque",              label: "💥 Choque",              grave: true },
+  { id: "atropello",           label: "⚠️ Atropello",           grave: true },
+  { id: "desperfecto_tecnico", label: "🔧 Desperfecto técnico", grave: true },
+  { id: "retraso",             label: "⏱ Retraso",             grave: false },
+  { id: "consulta",            label: "💬 Consulta general",    grave: false },
+  { id: "otro",                label: "📌 Otro",                grave: false },
+];
+
+// Service Centers de la operacion MX (mismos del monitor the-eyes-mx).
+export const SERVICE_CENTERS_MX = [
+  "SCY1","SHP1","SMX1","SMX7","SMX8","SMX10",
+  "SPY1","SQR1","STL1","STX1","SVH1",
+];
