@@ -4,6 +4,7 @@ import Login from "./modulos/Login.jsx";
 import Ticketera from "./modulos/Ticketera.jsx";
 import Historico from "./modulos/Historico.jsx";
 import Consultas from "./modulos/Consultas.jsx";
+import DetalleDia from "./modulos/DetalleDia.jsx";
 import Topbar from "./componentes/Topbar.jsx";
 import { AlertasProvider, ContenedorToasts } from "./shared/alertas.jsx";
 
@@ -50,6 +51,7 @@ export default function App() {
         <div style={{ flex: 1, overflow: "hidden" }}>
           <Routes>
             <Route path="/" element={<Ticketera />} />
+            <Route path="/detalle-dia" element={<DetalleDia />} />
             <Route path="/historico" element={<Historico />} />
             <Route path="/consultas" element={<Consultas />} />
             <Route path="/login" element={<Navigate to="/" replace />} />
