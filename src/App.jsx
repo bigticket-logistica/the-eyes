@@ -6,6 +6,7 @@ import Historico from "./modulos/Historico.jsx";
 import Consultas from "./modulos/Consultas.jsx";
 import DetalleDia from "./modulos/DetalleDia.jsx";
 import Directorio from "./modulos/Directorio.jsx";
+import Bitacora from "./modulos/Bitacora.jsx";
 import Topbar from "./componentes/Topbar.jsx";
 import { AlertasProvider, ContenedorToasts } from "./shared/alertas.jsx";
 
@@ -53,6 +54,7 @@ export default function App() {
           <Routes>
             <Route path="/" element={<Ticketera />} />
             <Route path="/detalle-dia" element={<DetalleDia />} />
+            <Route path="/bitacora" element={<Bitacora />} />
             <Route path="/directorio" element={<Directorio />} />
             <Route path="/historico" element={<Historico />} />
             <Route path="/consultas" element={<Consultas />} />
