@@ -3,7 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { sb } from "../shared/supabase.js";
 import { hace } from "../shared/fechas.js";
 import { useAuth } from "../shared/auth.jsx";
-import { enviarMensaje, conversacionPorTelefono, ventanaAbierta } from "../shared/mensajes.js";
+import { enviarMensaje, conversacionPorTelefono, ventanaAbierta, crearCasoConsulta } from "../shared/mensajes.js";
 
 // ═══════════════════════════════════════════════════════════════════════════
 // DETALLE DÍA v2 · Avance de rutas por SC + chat con el chofer
@@ -136,10 +136,23 @@ function EncabezadoRutas({ conSC }) {
 }
 
 // ── Panel de chat (overlay) ─────────────────────────────────────────────────
+// Ventana de Meta abierta (el chofer escribió hace <24h) → texto libre.
+// Ventana cerrada → plantilla aprobada de Meta: el analista solo edita el
+// motivo (variable {{3}}); nombre y ruta se completan solos.
+const PLANTILLA_CONTACTO = { nombre: "contacto_ruta_torre", idioma: "es_MX" };
+
+function motivoSugerido(ruta) {
+  if (ruta.alerta_inactividad_vehiculo === true) return "Vemos el vehículo detenido hace algunos minutos.";
+  if (ruta.alerta_ruta_demorada === true || ruta.atraso_inicial === true) return "Vemos tu ruta con demora.";
+  return "Queremos coordinar contigo un tema de tu ruta.";
+}
+
 function PanelChat({ chat, onCerrar, onEnviado, analistaId }) {
+  const primerNombre = chat.ruta.driver_name?.split(" ")[0] || "conductor";
   const [texto, setTexto] = useState(
-    `Hola ${chat.ruta.driver_name?.split(" ")[0] || ""}, te contactamos de la torre Bigticket por tu ruta ${chat.ruta.id_ruta}. `
+    `Hola ${primerNombre}, te contactamos de la torre Bigticket por tu ruta ${chat.ruta.id_ruta}. `
   );
+  const [motivo, setMotivo] = useState(motivoSugerido(chat.ruta));
   const [enviando, setEnviando] = useState(false);
   const [error, setError] = useState("");
   const [ventana, setVentana] = useState(null); // null = averiguando
@@ -152,14 +165,32 @@ function PanelChat({ chat, onCerrar, onEnviado, analistaId }) {
     return () => { activo = false; };
   }, [chat.telefono]);
 
+  const modoPlantilla = ventana === false;
+  const vistaPrevia = `Hola ${primerNombre}, te contactamos de la torre de soporte Bigticket por tu ruta ${chat.ruta.id_ruta}. ${motivo.trim()} Por favor respóndenos por aquí para poder ayudarte.`;
+
   async function enviar() {
-    const t = texto.trim();
-    if (!t || enviando) return;
+    if (enviando || ventana === null) return;
+    const cuerpo = modoPlantilla ? vistaPrevia : texto.trim();
+    if (!cuerpo || (modoPlantilla && !motivo.trim())) return;
     setEnviando(true);
     setError("");
     try {
-      await enviarMensaje({ telefono: chat.telefono, texto: t, caseId: null, emisorId: analistaId });
-      onEnviado();
+      const resp = await enviarMensaje({
+        telefono: chat.telefono,
+        texto: cuerpo,
+        caseId: null,
+        emisorId: analistaId,
+        plantilla: modoPlantilla
+          ? { ...PLANTILLA_CONTACTO, variables: [primerNombre, String(chat.ruta.id_ruta), motivo.trim()] }
+          : null,
+      });
+      // ticket propio en Consultas en ruta
+      let caseId = null;
+      if (resp?.conversacion_id) {
+        try { caseId = await crearCasoConsulta(resp.conversacion_id, analistaId); }
+        catch (e) { /* el mensaje ya salió; el ticket se puede crear desde Consultas */ }
+      }
+      onEnviado(caseId);
     } catch (e) {
       setError(e.message || "No se pudo enviar el mensaje.");
       setEnviando(false);
@@ -171,7 +202,7 @@ function PanelChat({ chat, onCerrar, onEnviado, analistaId }) {
       position: "fixed", inset: 0, background: "rgba(15,23,42,.45)", zIndex: 50,
       display: "flex", alignItems: "center", justifyContent: "center", padding: 20,
     }} onClick={onCerrar}>
-      <div style={{ background: "#fff", borderRadius: 12, width: 440, maxWidth: "100%", padding: 18 }}
+      <div style={{ background: "#fff", borderRadius: 12, width: 460, maxWidth: "100%", padding: 18 }}
         onClick={(e) => e.stopPropagation()}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 4 }}>
           <div style={{ fontWeight: 700, fontSize: 15 }}>💬 {chat.ruta.driver_name}</div>
@@ -181,28 +212,45 @@ function PanelChat({ chat, onCerrar, onEnviado, analistaId }) {
           Ruta {chat.ruta.id_ruta} · {chat.ruta.service_center_id} · {chat.telefono}
         </div>
 
-        {ventana === false && (
-          <div style={{ background: "#FAEEDA", color: "#633806", borderRadius: 8, padding: "8px 12px", fontSize: 12, marginBottom: 10 }}>
-            El conductor no ha escrito en las últimas 24h: Meta puede rechazar el texto libre.
-            Si no llega, pídele por otro canal que escriba "Hola" al número de Soporte.
-          </div>
+        {ventana === null && (
+          <div style={{ padding: "14px 0", textAlign: "center", color: "var(--texto-suave)", fontSize: 13 }}>Verificando ventana de contacto…</div>
         )}
 
-        <textarea
-          value={texto}
-          onChange={(e) => setTexto(e.target.value)}
-          rows={4}
-          autoFocus
-          style={{ width: "100%", boxSizing: "border-box", fontSize: 13, padding: 10, border: "1px solid var(--borde)", borderRadius: 8, resize: "vertical", fontFamily: "inherit" }}
-        />
+        {ventana === true && (
+          <textarea
+            value={texto}
+            onChange={(e) => setTexto(e.target.value)}
+            rows={4}
+            autoFocus
+            style={{ width: "100%", boxSizing: "border-box", fontSize: 13, padding: 10, border: "1px solid var(--borde)", borderRadius: 8, resize: "vertical", fontFamily: "inherit" }}
+          />
+        )}
+
+        {modoPlantilla && (
+          <div>
+            <div style={{ background: "#e0f2fe", color: "#075985", borderRadius: 8, padding: "8px 12px", fontSize: 12, marginBottom: 10 }}>
+              El conductor no ha escrito en las últimas 24h → se envía la <b>plantilla aprobada</b>. Edita el motivo si quieres:
+            </div>
+            <input
+              value={motivo}
+              onChange={(e) => setMotivo(e.target.value)}
+              autoFocus
+              style={{ width: "100%", boxSizing: "border-box", fontSize: 13, padding: "8px 10px", border: "1px solid var(--borde)", borderRadius: 8, marginBottom: 10 }}
+            />
+            <div style={{ background: "#fafbfc", border: "1px dashed var(--borde)", borderRadius: 8, padding: "10px 12px", fontSize: 12.5, color: "var(--texto)", lineHeight: 1.5 }}>
+              {vistaPrevia}
+            </div>
+          </div>
+        )}
 
         {error && <div style={{ color: "#791F1F", fontSize: 12, marginTop: 8 }}>{error}</div>}
 
         <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 12 }}>
           <button onClick={onCerrar} style={{ fontSize: 13, padding: "7px 14px" }}>Cancelar</button>
-          <button onClick={enviar} disabled={enviando || !texto.trim()}
-            style={{ fontSize: 13, padding: "7px 16px", background: "var(--navy)", color: "#fff", border: "none", borderRadius: 7, cursor: "pointer", opacity: enviando ? 0.6 : 1 }}>
-            {enviando ? "Enviando…" : "Enviar WhatsApp"}
+          <button onClick={enviar}
+            disabled={enviando || ventana === null || (modoPlantilla ? !motivo.trim() : !texto.trim())}
+            style={{ fontSize: 13, padding: "7px 16px", background: "var(--navy)", color: "#fff", border: "none", borderRadius: 7, cursor: "pointer", opacity: enviando || ventana === null ? 0.6 : 1 }}>
+            {enviando ? "Enviando…" : modoPlantilla ? "Enviar plantilla" : "Enviar WhatsApp"}
           </button>
         </div>
       </div>
@@ -241,10 +289,12 @@ export default function DetalleDia() {
   }, [cargar]);
 
   function abrirChat(ruta, telefono) { setEnviadoOk(""); setChat({ ruta, telefono }); }
-  function chatEnviado() {
+  function chatEnviado(caseId) {
     const nombre = chat?.ruta?.driver_name || "el conductor";
     setChat(null);
-    setEnviadoOk(`Mensaje enviado a ${nombre}. La conversación sigue en "Consultas en ruta".`);
+    setEnviadoOk(caseId
+      ? `Mensaje enviado a ${nombre} y ticket #${caseId} creado en "Consultas en ruta".`
+      : `Mensaje enviado a ${nombre}. La conversación sigue en "Consultas en ruta".`);
   }
 
   if (cargando) {
