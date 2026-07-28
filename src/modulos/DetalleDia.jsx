@@ -88,12 +88,15 @@ function BadgesAlertas({ ruta }) {
   );
 }
 
+const horaMX = (ts) => new Date(ts).toLocaleTimeString("es-MX", { hour: "2-digit", minute: "2-digit", timeZone: "America/Mexico_City" });
+
 // Fila de UNA ruta (se usa dentro del SC desplegado y en la tabla de problemas)
 function FilaRuta({ r, telefono, onChat }) {
   const st = estiloStatus(r.status);
   const sinTel = !telefono;
+  const fuera = r.vigente === false;
   return (
-    <tr style={{ borderTop: "1px solid var(--borde)" }}>
+    <tr style={{ borderTop: "1px solid var(--borde)", opacity: fuera ? 0.55 : 1 }}>
       <td style={{ padding: "8px 14px", fontWeight: 600 }}>
         {r.id_ruta}
         {r.cycle_name ? <span style={{ fontWeight: 400, color: "var(--texto-tenue)" }}> · {r.cycle_name}</span> : null}
@@ -107,7 +110,11 @@ function FilaRuta({ r, telefono, onChat }) {
         {(r.pkg_delivered ?? "—")} / {(r.pkg_total ?? "—")}
         {r.pkg_not_delivered > 0 && <span style={{ color: "#b45309" }}> · {r.pkg_not_delivered} fallidos</span>}
       </td>
-      <td style={{ padding: "8px 10px" }}><BadgesAlertas ruta={r} /></td>
+      <td style={{ padding: "8px 10px" }}>
+        {fuera
+          ? <span style={{ fontSize: 11, color: "var(--texto-tenue)" }}>fuera del feed · visto {horaMX(r.capturado_at)}</span>
+          : <BadgesAlertas ruta={r} />}
+      </td>
       <td style={{ padding: "8px 14px", textAlign: "right" }}>
         <button
           onClick={() => onChat(r, telefono)}
@@ -253,14 +260,17 @@ export default function DetalleDia() {
   }
 
   // ── Agregados ─────────────────────────────────────────────────────────────
+  // Avance/cierres: acumulado del DÍA (rutas fuera del feed siguen sumando).
+  // Alertas/en-ruta: solo rutas VIGENTES (presentes en el feed de MELI ahora).
   const reparto = rutas.filter((r) => r.is_line_haul === false);
   const entregados = reparto.reduce((a, r) => a + (r.pkg_delivered || 0), 0);
   const cargados   = reparto.reduce((a, r) => a + (r.pkg_total || 0), 0);
   const fallidos   = reparto.reduce((a, r) => a + (r.pkg_not_delivered || 0), 0);
-  const activas    = rutas.filter((r) => r.status === "active").length;
+  const vigentes   = rutas.filter((r) => r.vigente !== false);
+  const activas    = vigentes.filter((r) => r.status === "active").length;
   const cerradas   = rutas.filter((r) => r.status === "close").length;
-  const detenidas  = rutas.filter((r) => r.alerta_inactividad_vehiculo === true && r.status !== "close").length;
-  const demoradas  = rutas.filter((r) => (r.alerta_ruta_demorada === true || r.atraso_inicial === true) && r.status !== "close").length;
+  const detenidas  = vigentes.filter((r) => r.alerta_inactividad_vehiculo === true && r.status !== "close").length;
+  const demoradas  = vigentes.filter((r) => (r.alerta_ruta_demorada === true || r.atraso_inicial === true) && r.status !== "close").length;
   const capturaMax = rutas.reduce((m, r) => (r.capturado_at > m ? r.capturado_at : m), "");
 
   const porSC = {};
@@ -269,17 +279,20 @@ export default function DetalleDia() {
     if (!porSC[sc]) porSC[sc] = { sc, filas: [], activas: 0, cerradas: 0, entregados: 0, total: 0, conAlerta: 0 };
     const g = porSC[sc];
     g.filas.push(r);
-    if (r.status === "active") g.activas++;
+    if (r.status === "active" && r.vigente !== false) g.activas++;
     if (r.status === "close") g.cerradas++;
     if (r.is_line_haul === false) { g.entregados += r.pkg_delivered || 0; g.total += r.pkg_total || 0; }
-    if ((r.alertas_activas || 0) > 0 && r.status !== "close") g.conAlerta++;
+    if ((r.alertas_activas || 0) > 0 && r.status !== "close" && r.vigente !== false) g.conAlerta++;
   }
   const listaSC = Object.values(porSC).sort((a, b) => a.sc.localeCompare(b.sc));
   for (const g of listaSC) {
-    g.filas.sort((a, b) => (b.alertas_activas || 0) - (a.alertas_activas || 0) || avanceRuta(a) - avanceRuta(b));
+    g.filas.sort((a, b) =>
+      (b.vigente !== false ? 1 : 0) - (a.vigente !== false ? 1 : 0) ||
+      (b.alertas_activas || 0) - (a.alertas_activas || 0) ||
+      avanceRuta(a) - avanceRuta(b));
   }
 
-  const problema = rutas
+  const problema = vigentes
     .filter((r) => (r.alertas_activas || 0) > 0 && r.status !== "close")
     .sort((a, b) => (b.alertas_activas || 0) - (a.alertas_activas || 0));
 
