@@ -88,20 +88,18 @@ function BadgesAlertas({ ruta }) {
   );
 }
 
-const horaMX = (ts) => new Date(ts).toLocaleTimeString("es-MX", { hour: "2-digit", minute: "2-digit", timeZone: "America/Mexico_City" });
-
 // Fila de UNA ruta (se usa dentro del SC desplegado y en la tabla de problemas)
-function FilaRuta({ r, telefono, onChat }) {
+function FilaRuta({ r, telefono, onChat, conSC }) {
   const st = estiloStatus(r.status);
   const sinTel = !telefono;
-  const fuera = r.vigente === false;
   return (
-    <tr style={{ borderTop: "1px solid var(--borde)", opacity: fuera ? 0.55 : 1 }}>
+    <tr style={{ borderTop: "1px solid var(--borde)" }}>
       <td style={{ padding: "8px 14px", fontWeight: 600 }}>
         {r.id_ruta}
         {r.cycle_name ? <span style={{ fontWeight: 400, color: "var(--texto-tenue)" }}> · {r.cycle_name}</span> : null}
         {r.is_line_haul === true && <span className="pill" style={{ marginLeft: 6, background: "#f1f5f9", color: "#475569" }}>line-haul</span>}
       </td>
+      {conSC && <td style={{ padding: "8px 10px", fontWeight: 600 }}>{r.service_center_id || "—"}</td>}
       <td style={{ padding: "8px 10px" }}>{r.driver_name || "—"}</td>
       <td style={{ padding: "8px 10px" }}>{r.vehicle_license || "—"}</td>
       <td style={{ padding: "8px 10px" }}><span className="pill" style={{ background: st.bg, color: st.color }}>{st.label}</span></td>
@@ -110,11 +108,7 @@ function FilaRuta({ r, telefono, onChat }) {
         {(r.pkg_delivered ?? "—")} / {(r.pkg_total ?? "—")}
         {r.pkg_not_delivered > 0 && <span style={{ color: "#b45309" }}> · {r.pkg_not_delivered} fallidos</span>}
       </td>
-      <td style={{ padding: "8px 10px" }}>
-        {fuera
-          ? <span style={{ fontSize: 11, color: "var(--texto-tenue)" }}>fuera del feed · visto {horaMX(r.capturado_at)}</span>
-          : <BadgesAlertas ruta={r} />}
-      </td>
+      <td style={{ padding: "8px 10px" }}><BadgesAlertas ruta={r} /></td>
       <td style={{ padding: "8px 14px", textAlign: "right" }}>
         <button
           onClick={() => onChat(r, telefono)}
@@ -128,10 +122,11 @@ function FilaRuta({ r, telefono, onChat }) {
   );
 }
 
-function EncabezadoRutas() {
+function EncabezadoRutas({ conSC }) {
   return (
     <tr style={{ color: "var(--texto-suave)", fontSize: 11, textAlign: "left" }}>
       <th style={{ padding: "8px 14px", fontWeight: 500 }}>Ruta</th>
+      {conSC && <th style={{ padding: "8px 10px", fontWeight: 500 }}>SC</th>}
       <th style={{ padding: "8px 10px", fontWeight: 500 }}>Conductor</th>
       <th style={{ padding: "8px 10px", fontWeight: 500 }}>Patente</th>
       <th style={{ padding: "8px 10px", fontWeight: 500 }}>Estado</th>
@@ -278,16 +273,15 @@ export default function DetalleDia() {
     const sc = r.service_center_id || "—";
     if (!porSC[sc]) porSC[sc] = { sc, filas: [], activas: 0, cerradas: 0, entregados: 0, total: 0, conAlerta: 0 };
     const g = porSC[sc];
-    g.filas.push(r);
+    if (r.vigente !== false) g.filas.push(r);   // el desplegable muestra solo lo vivo en el feed
     if (r.status === "active" && r.vigente !== false) g.activas++;
-    if (r.status === "close") g.cerradas++;
+    if (r.status === "close") g.cerradas++;      // cierres del día completos
     if (r.is_line_haul === false) { g.entregados += r.pkg_delivered || 0; g.total += r.pkg_total || 0; }
     if ((r.alertas_activas || 0) > 0 && r.status !== "close" && r.vigente !== false) g.conAlerta++;
   }
   const listaSC = Object.values(porSC).sort((a, b) => a.sc.localeCompare(b.sc));
   for (const g of listaSC) {
     g.filas.sort((a, b) =>
-      (b.vigente !== false ? 1 : 0) - (a.vigente !== false ? 1 : 0) ||
       (b.alertas_activas || 0) - (a.alertas_activas || 0) ||
       avanceRuta(a) - avanceRuta(b));
   }
@@ -330,7 +324,7 @@ export default function DetalleDia() {
           {/* KPIs */}
           <div style={{ display: "flex", gap: 12, flexWrap: "wrap", marginBottom: 18 }}>
             <Kpi titulo="Avance de reparto" valor={`${pct(entregados, cargados)}%`} sub={`${entregados.toLocaleString("es-MX")} / ${cargados.toLocaleString("es-MX")} paquetes`} color="var(--navy)" />
-            <Kpi titulo="Rutas" valor={rutas.length} sub={`${activas} en ruta · ${cerradas} cerradas`} />
+            <Kpi titulo="Rutas en feed" valor={vigentes.length} sub={`${activas} en ruta · ${cerradas} cerradas hoy`} />
             <Kpi titulo="Detenidas" valor={detenidas} sub="sin actividad del vehículo" color={detenidas ? "#b91c1c" : "#16a34a"} />
             <Kpi titulo="Demoradas" valor={demoradas} sub="demora o atraso inicial" color={demoradas ? "#b45309" : "#16a34a"} />
             <Kpi titulo="No entregados" valor={fallidos.toLocaleString("es-MX")} sub="reparto de hoy" color={fallidos ? "#b45309" : undefined} />
@@ -347,10 +341,10 @@ export default function DetalleDia() {
               </div>
             ) : (
               <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
-                <thead><EncabezadoRutas /></thead>
+                <thead><EncabezadoRutas conSC /></thead>
                 <tbody>
                   {problema.map((r) => (
-                    <FilaRuta key={r.id_ruta} r={r} telefono={telefonos[r.driver_id]} onChat={abrirChat} />
+                    <FilaRuta key={r.id_ruta} r={r} telefono={telefonos[r.driver_id]} onChat={abrirChat} conSC />
                   ))}
                 </tbody>
               </table>
