@@ -48,6 +48,7 @@ export default function Topbar() {
           <Tab to="/">Incidencias</Tab>
           <Tab to="/detalle-dia">Detalle día</Tab>
           <Tab to="/consultas" badge={noLeidos}>Consultas en ruta</Tab>
+          <Tab to="/bitacora">Bitácora</Tab>
           <Tab to="/directorio">Directorio</Tab>
           <Tab to="/historico">Histórico</Tab>
         </nav>
