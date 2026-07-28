@@ -35,9 +35,13 @@ export function ventanaAbierta(conversacion) {
 
 // Envía un mensaje al conductor vía la Edge Function (proxy seguro al VPS).
 // La Edge Function valida al analista y reenvía al endpoint /whatsapp-enviar.
-export async function enviarMensaje({ telefono, texto, caseId, emisorId }) {
+// Si la ventana de 24h está cerrada, pasar `plantilla`:
+//   { nombre: "contacto_ruta_torre", idioma: "es_MX", variables: [nombre, ruta, motivo] }
+// (texto sigue siendo obligatorio: es lo que se guarda en el hilo).
+// Devuelve { ok, wa_message_id, conversacion_id }.
+export async function enviarMensaje({ telefono, texto, caseId, emisorId, plantilla }) {
   const { data, error } = await sb.functions.invoke("whatsapp-enviar", {
-    body: { telefono, texto, case_id: caseId, emisor: "analista", emisor_id: emisorId },
+    body: { telefono, texto, case_id: caseId, emisor: "analista", emisor_id: emisorId, plantilla: plantilla || null },
   });
   if (error) throw error;
   if (!data || data.ok === false) throw new Error(data?.error || "No se pudo enviar");
