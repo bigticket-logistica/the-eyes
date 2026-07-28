@@ -9,7 +9,7 @@ import { enviarMensaje, conversacionPorTelefono, ventanaAbierta } from "../share
 // DETALLE DÍA v2 · Avance de rutas por SC + chat con el chofer
 // Fuente: vw_rutas_mx_ultimo (una fila por ruta, última captura de HOY,
 // escrita cada 5 min por the-eyes-mx). El teléfono del conductor se resuelve
-// cruzando driver_id contra el padrón (meli_drivers_master, último snapshot).
+// cruzando driver_id contra el Directorio (padrón MELI + overrides de la torre).
 // ═══════════════════════════════════════════════════════════════════════════
 
 const STATUS_RUTA = {
@@ -40,14 +40,11 @@ async function resolverTelefonos(driverIds) {
   const mapa = {};
   for (const lote of chunk(ids, 100)) {
     const { data, error } = await sb
-      .from("meli_drivers_master")
-      .select("driver_id, phone, fecha_snapshot")
-      .in("driver_id", lote)
-      .order("fecha_snapshot", { ascending: false });
+      .from("vw_directorio_conductores")
+      .select("driver_id, telefono")
+      .in("driver_id", lote);
     if (error) throw error;
-    for (const d of data || []) {
-      if (mapa[d.driver_id] === undefined) mapa[d.driver_id] = d.phone || null;
-    }
+    for (const d of data || []) mapa[d.driver_id] = d.telefono || null;
   }
   return mapa;
 }
