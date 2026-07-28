@@ -81,3 +81,12 @@ export async function crearCasoConsulta(conversacionId, analistaId) {
   if (error) throw error;
   return data; // case_id numérico
 }
+
+// Genera un resumen operativo de la conversacion con IA (Edge Function ia-resumen).
+// transcript: texto plano "Conductor: ... / Analista: ..." linea por linea.
+export async function resumenIA(transcript) {
+  const { data, error } = await sb.functions.invoke("ia-resumen", { body: { transcript } });
+  if (error) throw error;
+  if (!data || data.ok === false) throw new Error(data?.error || "No se pudo generar el resumen");
+  return data.resumen;
+}
