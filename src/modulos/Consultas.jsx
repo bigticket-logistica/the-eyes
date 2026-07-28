@@ -1,9 +1,18 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { sb } from "../shared/supabase.js";
 import { useAuth } from "../shared/auth.jsx";
-import { hace, fechaHora } from "../shared/fechas.js";
-import { listarConversaciones, mensajesDeConversacion, crearCasoConsulta, conversacionPorTelefono, ventanaAbierta, enviarMensaje } from "../shared/mensajes.js";
+import { hace, fechaHora, diaMX } from "../shared/fechas.js";
+import { listarConversaciones, mensajesDeConversacion, crearCasoConsulta, conversacionPorTelefono, ventanaAbierta, enviarMensaje, resumenIA } from "../shared/mensajes.js";
 import { useAlertas } from "../shared/alertas.jsx";
+import { ETIQUETAS_CASO, SERVICE_CENTERS_MX } from "../shared/constantes.js";
+
+// ═══════════════════════════════════════════════════════════════════════════
+// CONSULTAS EN RUTA v2 · tres columnas
+//  [1] conversaciones del día (selector de fecha, hoy por defecto)
+//  [2] hilo de mensajes (la columna protagonista)
+//  [3] caracterización del ticket: etiquetas, SC, comentarios (con IA)
+// Al cerrar un ticket con etiqueta GRAVE se anota solo en la Bitácora del día.
+// ═══════════════════════════════════════════════════════════════════════════
 
 const ABIERTOS = ["NEW", "OPEN", "ON_HOLD", "CHECKING"];
 
@@ -18,7 +27,7 @@ function Burbuja({ m }) {
         border: saliente && !esIA ? "none" : "1px solid var(--borde)", borderRadius: 12, padding: "8px 12px" }}>
         {saliente && <div style={{ fontSize: 10, opacity: 0.7, marginBottom: 2 }}>{esIA ? "Asistente IA" : "Analista"}</div>}
         <div style={{ fontSize: 13, whiteSpace: "pre-wrap", wordBreak: "break-word" }}>
-          {m.tipo_contenido === "texto" ? m.texto : `[${m.tipo_contenido}]${m.texto ? " " + m.texto : ""}`}
+          {["texto", "plantilla"].includes(m.tipo_contenido) ? m.texto : `[${m.tipo_contenido}]${m.texto ? " " + m.texto : ""}`}
         </div>
         <div style={{ fontSize: 10, opacity: 0.6, marginTop: 3, textAlign: "right" }}>
           {fechaHora(m.creado_en)}{saliente && m.estado_entrega ? ` · ${m.estado_entrega}` : ""}
@@ -28,7 +37,6 @@ function Burbuja({ m }) {
   );
 }
 
-// separador verde de ticket cerrado
 function LineaCierre({ codigo }) {
   return (
     <div style={{ display: "flex", alignItems: "center", gap: 8, margin: "14px 0 6px" }}>
@@ -39,13 +47,34 @@ function LineaCierre({ codigo }) {
   );
 }
 
+// contexto del conductor: teléfono → directorio → ruta de hoy (SC prefill)
+async function buscarContexto(telefono) {
+  const out = { nombre: null, sc: null, ruta: null };
+  try {
+    const t10 = String(telefono || "").replace(/\D/g, "").slice(-10);
+    if (!t10) return out;
+    const { data: dir } = await sb.from("vw_directorio_conductores")
+      .select("driver_id, nombre").like("telefono", `%${t10}`).limit(1);
+    const d = dir && dir[0];
+    if (!d) return out;
+    out.nombre = d.nombre || null;
+    if (d.driver_id > 0) {
+      const { data: rt } = await sb.from("vw_rutas_mx_ultimo")
+        .select("service_center_id, id_ruta").eq("driver_id", d.driver_id).limit(1);
+      if (rt && rt[0]) { out.sc = rt[0].service_center_id; out.ruta = rt[0].id_ruta; }
+    }
+  } catch (e) { /* el contexto es opcional */ }
+  return out;
+}
+
 export default function Consultas() {
   const { analista } = useAuth();
   const { marcarVistos } = useAlertas();
   const [convs, setConvs] = useState([]);
+  const [fechaSel, setFechaSel] = useState(diaMX());
   const [sel, setSel] = useState(null);
   const [mensajes, setMensajes] = useState([]);
-  const [casos, setCasos] = useState({});          // {case_id: caso} de esta conversación
+  const [casos, setCasos] = useState({});
   const [ticketAbierto, setTicketAbierto] = useState(null);
   const [haySinCaso, setHaySinCaso] = useState(false);
   const [texto, setTexto] = useState("");
@@ -53,6 +82,12 @@ export default function Consultas() {
   const [cargando, setCargando] = useState(false);
   const [accion, setAccion] = useState(false);
   const [error, setError] = useState(null);
+  // panel de caracterización
+  const [caract, setCaract] = useState({ sc: "", etiquetas: [], comentarios: "" });
+  const [contexto, setContexto] = useState({ nombre: null, sc: null, ruta: null });
+  const [guardando, setGuardando] = useState(false);
+  const [generandoIA, setGenerandoIA] = useState(false);
+  const [avisoPanel, setAvisoPanel] = useState("");
   const leidosRef = useRef(new Set());
   const finRef = useRef(null);
   const selRef = useRef(null);
@@ -66,7 +101,6 @@ export default function Consultas() {
     catch (e) { setError(e.message); }
   }, [aplicarLeidos]);
 
-  // carga el hilo de una conversación: mensajes + casos + estado
   const cargarHilo = useCallback(async (conv) => {
     const msgs = await mensajesDeConversacion(conv.id);
     setMensajes(msgs);
@@ -90,7 +124,6 @@ export default function Consultas() {
   useEffect(() => { cargarConvs(); }, [cargarConvs]);
   useEffect(() => { marcarVistos(); }, [marcarVistos]);
 
-  // Realtime lista de conversaciones
   useEffect(() => {
     const canal = sb.channel("consultas-lista")
       .on("postgres_changes", { event: "*", schema: "public", table: "crm_inc_conversaciones" }, cargarConvs)
@@ -98,7 +131,6 @@ export default function Consultas() {
     return () => { sb.removeChannel(canal); };
   }, [cargarConvs]);
 
-  // Realtime mensajes de la conversación abierta (refresca el hilo al instante)
   useEffect(() => {
     if (!sel) return;
     const canal = sb.channel(`consulta-hilo-${sel.id}`)
@@ -110,11 +142,27 @@ export default function Consultas() {
 
   useEffect(() => { finRef.current?.scrollIntoView({ behavior: "smooth" }); }, [mensajes.length]);
 
+  // al cambiar el ticket abierto: cargar su caracterización + contexto de ruta
+  useEffect(() => {
+    setAvisoPanel("");
+    if (!sel) { setCaract({ sc: "", etiquetas: [], comentarios: "" }); setContexto({ nombre: null, sc: null, ruta: null }); return; }
+    let vivo = true;
+    buscarContexto(sel.telefono).then((ctx) => {
+      if (!vivo) return;
+      setContexto(ctx);
+      setCaract({
+        sc: ticketAbierto?.estacion_origen || ctx.sc || "",
+        etiquetas: Array.isArray(ticketAbierto?.etiquetas) ? ticketAbierto.etiquetas : [],
+        comentarios: ticketAbierto?.comentarios || "",
+      });
+    });
+    return () => { vivo = false; };
+  }, [sel?.id, ticketAbierto?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+
   async function abrirConv(conv) {
     setSel(conv); setCargando(true); setError(null);
     setMensajes([]); setCasos({}); setTicketAbierto(null); setHaySinCaso(false);
     try {
-      // marcar leída
       leidosRef.current.add(conv.id);
       setConvs((prev) => prev.map((c) => c.id === conv.id ? { ...c, no_leidos: 0 } : c));
       sb.from("crm_inc_conversaciones").update({ no_leidos: 0 }).eq("id", conv.id).then(() => {});
@@ -123,25 +171,62 @@ export default function Consultas() {
     finally { setCargando(false); }
   }
 
-  // tomar: crea el ticket (BT-) y queda abierto en el mismo hilo, sin salir
   async function tomar() {
     if (!sel || accion) return;
     setAccion(true); setError(null);
     try {
       await crearCasoConsulta(sel.id, analista?.id);
-      await cargarHilo(sel);     // recarga el hilo: ahora hay ticket abierto
+      await cargarHilo(sel);
       await cargarConvs();
     } catch (e) { setError(e.message); }
     finally { setAccion(false); }
   }
 
-  // cerrar el ticket abierto: genera la línea verde, el hilo sigue
+  // guarda etiquetas/SC/comentarios en el ticket abierto
+  async function guardarCaract(silencioso) {
+    if (!ticketAbierto) return false;
+    setGuardando(true);
+    try {
+      const { error } = await sb.rpc("fn_caracterizar_ticket", {
+        p_caso_id: ticketAbierto.id,
+        p_etiquetas: caract.etiquetas,
+        p_comentarios: caract.comentarios || null,
+      });
+      if (error) throw error;
+      if (!silencioso) setAvisoPanel("Guardado ✓");
+      return true;
+    } catch (e) {
+      setAvisoPanel("No se pudo guardar: " + e.message);
+      return false;
+    } finally { setGuardando(false); }
+  }
+
+  // cerrar: guarda caracterización, resuelve el ticket y, si hay etiqueta
+  // GRAVE, anota automáticamente en la Bitácora del día
   async function cerrar() {
     if (!ticketAbierto || accion) return;
     setAccion(true); setError(null);
     try {
+      const guardo = await guardarCaract(true);
+      if (!guardo) return;
       const { error } = await sb.rpc("fn_resolver_ticket", { p_caso_id: ticketAbierto.id, p_estado: "CLOSED" });
       if (error) { setError("No se pudo cerrar: " + error.message); return; }
+
+      const graves = ETIQUETAS_CASO.filter((e) => e.grave && caract.etiquetas.includes(e.id));
+      if (graves.length) {
+        const { error: eBit } = await sb.from("crm_bitacora_dia").insert({
+          sc: caract.sc || null,
+          chofer: sel.conductor_nombre || contexto.nombre || null,
+          telefono: sel.telefono,
+          case_id: String(ticketAbierto.case_id),
+          codigo: ticketAbierto.codigo || null,
+          etiquetas: caract.etiquetas,
+          detalle: caract.comentarios || null,
+          creado_por: analista?.user_id || null,
+        });
+        if (eBit) setError("Ticket cerrado, pero la Bitácora falló: " + eBit.message);
+        else setAvisoPanel(`Cerrado y anotado en Bitácora (${graves.map((g) => g.label).join(", ")})`);
+      }
       await cargarHilo(sel);
       await cargarConvs();
     } catch (e) { setError(e.message); }
@@ -160,9 +245,33 @@ export default function Consultas() {
     finally { setAccion(false); }
   }
 
-  const ventana = ventanaAbierta(conversacion);
+  // resumen IA de la conversación → campo comentarios
+  async function generarResumen() {
+    if (generandoIA || mensajes.length === 0) return;
+    setGenerandoIA(true); setAvisoPanel("");
+    try {
+      const transcript = mensajes.slice(-40)
+        .map((m) => `${m.direccion === "entrante" ? "Conductor" : (m.emisor === "ia" ? "IA" : "Analista")}: ${m.texto || `[${m.tipo_contenido}]`}`)
+        .join("\n");
+      const resumen = await resumenIA(transcript);
+      setCaract((p) => ({ ...p, comentarios: resumen }));
+      setAvisoPanel("Resumen generado — revísalo y guarda.");
+    } catch (e) {
+      setAvisoPanel("IA no disponible: " + (e.message || "error"));
+    } finally { setGenerandoIA(false); }
+  }
 
-  // construye el hilo intercalando líneas verdes al cambiar de ticket cerrado
+  function toggleEtiqueta(id) {
+    setCaract((p) => ({
+      ...p,
+      etiquetas: p.etiquetas.includes(id) ? p.etiquetas.filter((x) => x !== id) : [...p.etiquetas, id],
+    }));
+  }
+
+  const ventana = ventanaAbierta(conversacion);
+  const convsDelDia = convs.filter((c) => c.ultimo_mensaje_en && diaMX(c.ultimo_mensaje_en) === fechaSel);
+  const hayGrave = ETIQUETAS_CASO.some((e) => e.grave && caract.etiquetas.includes(e.id));
+
   function renderHilo() {
     const out = [];
     for (let i = 0; i < mensajes.length; i++) {
@@ -171,7 +280,6 @@ export default function Consultas() {
       const cid = m.case_id;
       const sig = mensajes[i + 1];
       const cambiaTicket = !sig || sig.case_id !== cid;
-      // si este mensaje pertenece a un ticket cerrado y el siguiente es de otro (o no hay), línea verde
       if (cid && cambiaTicket && casos[cid] && !ABIERTOS.includes(casos[cid].estado_id)) {
         out.push(<LineaCierre key={`cierre-${cid}`} codigo={casos[cid].codigo || "#" + cid} />);
       }
@@ -180,15 +288,27 @@ export default function Consultas() {
   }
 
   return (
-    <div style={{ display: "grid", gridTemplateColumns: "minmax(320px, 0.9fr) 1.6fr", height: "100%" }}>
-      {/* lista de conversaciones */}
+    <div style={{ display: "grid", gridTemplateColumns: "minmax(270px, 0.75fr) 1.7fr minmax(270px, 0.8fr)", height: "100%" }}>
+      {/* ── COLUMNA 1 · conversaciones del día ── */}
       <div style={{ borderRight: "1px solid var(--borde)", overflowY: "auto", background: "#fff" }}>
-        <div style={{ padding: "11px 14px", borderBottom: "1px solid var(--borde)", fontSize: 13, fontWeight: 600,
-          position: "sticky", top: 0, background: "#fff", zIndex: 2 }}>Consultas en ruta</div>
-        {convs.length === 0 && (
-          <div style={{ padding: 20, textAlign: "center", fontSize: 12, color: "var(--texto-tenue)" }}>Sin conversaciones todavía</div>
+        <div style={{ padding: "10px 14px", borderBottom: "1px solid var(--borde)",
+          position: "sticky", top: 0, background: "#fff", zIndex: 2 }}>
+          <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 8 }}>Consultas en ruta</div>
+          <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+            <input type="date" value={fechaSel} max={diaMX()}
+              onChange={(e) => setFechaSel(e.target.value || diaMX())}
+              style={{ fontSize: 12, padding: "5px 8px", border: "1px solid var(--borde)", borderRadius: 7, flex: 1 }} />
+            {fechaSel !== diaMX() && (
+              <button onClick={() => setFechaSel(diaMX())} style={{ fontSize: 12, padding: "5px 10px" }}>Hoy</button>
+            )}
+          </div>
+        </div>
+        {convsDelDia.length === 0 && (
+          <div style={{ padding: 20, textAlign: "center", fontSize: 12, color: "var(--texto-tenue)" }}>
+            {fechaSel === diaMX() ? "Sin conversaciones hoy todavía" : `Sin conversaciones el ${fechaSel}`}
+          </div>
         )}
-        {convs.map((c) => {
+        {convsDelDia.map((c) => {
           const activo = sel?.id === c.id;
           return (
             <div key={c.id} onClick={() => abrirConv(c)}
@@ -210,18 +330,17 @@ export default function Consultas() {
         })}
       </div>
 
-      {/* panel derecho: hilo único del conductor */}
+      {/* ── COLUMNA 2 · hilo (protagonista) ── */}
       {!sel ? (
         <div style={{ display: "flex", alignItems: "center", justifyContent: "center", color: "var(--texto-suave)" }}>
           Selecciona una conversación
         </div>
       ) : (
         <div style={{ display: "flex", flexDirection: "column", height: "100%", minHeight: 0, background: "#fff" }}>
-          {/* header */}
           <div style={{ padding: "11px 16px", borderBottom: "1px solid var(--borde)", display: "flex",
             alignItems: "center", justifyContent: "space-between" }}>
             <div>
-              <div style={{ fontSize: 14, fontWeight: 600 }}>{sel.conductor_nombre || sel.telefono}</div>
+              <div style={{ fontSize: 14, fontWeight: 600 }}>{sel.conductor_nombre || contexto.nombre || sel.telefono}</div>
               <div style={{ fontSize: 12, color: "var(--texto-suave)" }}>
                 {sel.telefono}{ticketAbierto ? ` · ${ticketAbierto.codigo || "#" + ticketAbierto.case_id} abierto` : " · sin ticket abierto"}
               </div>
@@ -233,7 +352,6 @@ export default function Consultas() {
             )}
           </div>
 
-          {/* hilo */}
           <div style={{ flex: 1, minHeight: 0, overflowY: "auto", padding: 16, background: "var(--fondo)",
             display: "flex", flexDirection: "column", gap: 8 }}>
             {cargando ? (
@@ -244,7 +362,6 @@ export default function Consultas() {
             <div ref={finRef} />
           </div>
 
-          {/* barra inferior según estado */}
           <div style={{ borderTop: "1px solid var(--borde)" }}>
             {error && <div style={{ padding: "6px 16px", fontSize: 12, color: "#bb4444", background: "#fff5f5" }}>{error}</div>}
             {ticketAbierto ? (
@@ -281,6 +398,84 @@ export default function Consultas() {
           </div>
         </div>
       )}
+
+      {/* ── COLUMNA 3 · caracterización del ticket ── */}
+      <div style={{ borderLeft: "1px solid var(--borde)", overflowY: "auto", background: "#fff" }}>
+        {!sel ? (
+          <div style={{ padding: 20, fontSize: 12, color: "var(--texto-tenue)", textAlign: "center" }}>—</div>
+        ) : (
+          <div style={{ padding: 14 }}>
+            <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 10 }}>Ficha del ticket</div>
+
+            {/* identidad */}
+            <div style={{ fontSize: 12, color: "var(--texto)", lineHeight: 1.9, marginBottom: 12 }}>
+              <div><span style={{ color: "var(--texto-suave)" }}>Ticket:</span> <b>{ticketAbierto ? (ticketAbierto.codigo || "#" + ticketAbierto.case_id) : "sin ticket abierto"}</b></div>
+              <div><span style={{ color: "var(--texto-suave)" }}>Conductor:</span> {sel.conductor_nombre || contexto.nombre || "—"}</div>
+              <div><span style={{ color: "var(--texto-suave)" }}>Teléfono:</span> {sel.telefono}</div>
+              {contexto.ruta && <div><span style={{ color: "var(--texto-suave)" }}>Ruta de hoy:</span> {contexto.ruta}</div>}
+            </div>
+
+            {ticketAbierto ? (
+              <>
+                {/* SC */}
+                <div style={{ fontSize: 11, color: "var(--texto-suave)", marginBottom: 4 }}>Service Center</div>
+                <select value={caract.sc} onChange={(e) => setCaract((p) => ({ ...p, sc: e.target.value }))}
+                  style={{ width: "100%", fontSize: 13, padding: "7px 8px", border: "1px solid var(--borde)", borderRadius: 7, marginBottom: 12, background: "#fff" }}>
+                  <option value="">— sin SC —</option>
+                  {SERVICE_CENTERS_MX.map((s) => <option key={s} value={s}>{s}</option>)}
+                </select>
+
+                {/* etiquetas */}
+                <div style={{ fontSize: 11, color: "var(--texto-suave)", marginBottom: 6 }}>Etiquetas</div>
+                <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 4 }}>
+                  {ETIQUETAS_CASO.map((e) => {
+                    const on = caract.etiquetas.includes(e.id);
+                    return (
+                      <button key={e.id} onClick={() => toggleEtiqueta(e.id)}
+                        style={{ fontSize: 12, padding: "5px 10px", borderRadius: 14, cursor: "pointer",
+                          border: `1px solid ${on ? (e.grave ? "#b91c1c" : "var(--navy)") : "var(--borde)"}`,
+                          background: on ? (e.grave ? "#FCEBEB" : "#e0e7ff") : "#fff",
+                          color: on ? (e.grave ? "#791F1F" : "var(--navy)") : "var(--texto-suave)" }}>
+                        {e.label}
+                      </button>
+                    );
+                  })}
+                </div>
+                {hayGrave && (
+                  <div style={{ fontSize: 11, color: "#791F1F", background: "#FCEBEB", borderRadius: 7, padding: "6px 10px", marginBottom: 10 }}>
+                    ⚠ Etiqueta grave: al cerrar el ticket se anota automáticamente en la Bitácora del día.
+                  </div>
+                )}
+
+                {/* comentarios + IA */}
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 4, marginTop: 8 }}>
+                  <span style={{ fontSize: 11, color: "var(--texto-suave)" }}>Comentarios / resumen</span>
+                  <button onClick={generarResumen} disabled={generandoIA || mensajes.length === 0}
+                    title="Genera un resumen de la conversación con IA"
+                    style={{ fontSize: 11, padding: "3px 10px" }}>
+                    {generandoIA ? "Generando…" : "✨ Resumen IA"}
+                  </button>
+                </div>
+                <textarea value={caract.comentarios}
+                  onChange={(e) => setCaract((p) => ({ ...p, comentarios: e.target.value }))}
+                  rows={6} placeholder="Qué pasó, qué se gestionó, cómo quedó…"
+                  style={{ width: "100%", boxSizing: "border-box", fontSize: 12.5, padding: 9, border: "1px solid var(--borde)", borderRadius: 8, resize: "vertical", fontFamily: "inherit" }} />
+
+                {avisoPanel && <div style={{ fontSize: 11, color: avisoPanel.startsWith("No") || avisoPanel.startsWith("IA") ? "#791F1F" : "#15803d", marginTop: 6 }}>{avisoPanel}</div>}
+
+                <button className="btn-navy" onClick={() => guardarCaract(false)} disabled={guardando}
+                  style={{ width: "100%", padding: "9px", marginTop: 10 }}>
+                  {guardando ? "Guardando…" : "Guardar ficha"}
+                </button>
+              </>
+            ) : (
+              <div style={{ fontSize: 12, color: "var(--texto-tenue)", background: "var(--fondo)", borderRadius: 8, padding: "10px 12px" }}>
+                Toma la consulta para caracterizar el ticket. Al cerrar uno y abrirse otra conversación, se genera un ID nuevo con su propia ficha.
+              </div>
+            )}
+          </div>
+        )}
+      </div>
     </div>
   );
 }
