@@ -250,7 +250,17 @@ export default function Consultas() {
     if (generandoIA || mensajes.length === 0) return;
     setGenerandoIA(true); setAvisoPanel("");
     try {
-      const transcript = mensajes.slice(-40)
+      // Solo el tramo del TICKET ACTUAL: se corta en el último mensaje que
+      // pertenezca a un ticket anterior (los mensajes sin caso posteriores,
+      // como la plantilla inicial, sí entran). Así un ticket nuevo en el mismo
+      // hilo no arrastra la historia del anterior.
+      const casoActual = String(ticketAbierto?.case_id ?? "");
+      let corte = -1;
+      mensajes.forEach((m, i) => {
+        if (m.case_id != null && String(m.case_id) !== casoActual) corte = i;
+      });
+      const delTicket = mensajes.slice(corte + 1);
+      const transcript = delTicket.slice(-40)
         .map((m) => `${m.direccion === "entrante" ? "Conductor" : (m.emisor === "ia" ? "IA" : "Analista")}: ${m.texto || `[${m.tipo_contenido}]`}`)
         .join("\n");
       const resumen = await resumenIA(transcript);
