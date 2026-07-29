@@ -1,6 +1,7 @@
 import { useEffect, useState, useCallback } from "react";
 import { sb } from "../shared/supabase.js";
 import { diaMX } from "../shared/fechas.js";
+import { useAuth } from "../shared/auth.jsx";
 import { ETIQUETAS_CASO } from "../shared/constantes.js";
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -16,22 +17,28 @@ const etiqueta = (id) => ETIQUETAS_CASO.find((e) => e.id === id) || { label: id,
 const horaMX = (ts) => new Date(ts).toLocaleTimeString("es-MX", { hour: "2-digit", minute: "2-digit", timeZone: "America/Mexico_City" });
 
 export default function Bitacora() {
+  const { analista } = useAuth();
   const [fechaSel, setFechaSel] = useState(diaMX());
   const [eventos, setEventos] = useState([]);
   const [ns, setNs] = useState([]);
+  const [cierre, setCierre] = useState(null);
+  const [enviando, setEnviando] = useState(false);
+  const [avisoEnvio, setAvisoEnvio] = useState("");
   const [cargando, setCargando] = useState(true);
   const [error, setError] = useState("");
 
   const cargar = useCallback(async (fecha) => {
     setError("");
     try {
-      const [ev, nsr] = await Promise.all([
+      const [ev, nsr, ci] = await Promise.all([
         sb.from("crm_bitacora_dia").select("*").eq("fecha", fecha).order("hora", { ascending: true }),
         sb.rpc("fn_ns_por_sc", { p_fecha: fecha }),
+        sb.from("crm_bitacora_cierres").select("*").eq("fecha", fecha).maybeSingle(),
       ]);
       if (ev.error) throw ev.error;
       setEventos(ev.data || []);
       setNs(nsr.error ? [] : (nsr.data || []));
+      setCierre(ci.error ? null : (ci.data || null));
     } catch (e) {
       setError("No pudimos cargar la bitácora.");
     } finally { setCargando(false); }
@@ -47,6 +54,23 @@ export default function Bitacora() {
       .subscribe();
     return () => { sb.removeChannel(canal); };
   }, [fechaSel, cargar]);
+
+  async function cerrarYEnviar() {
+    if (enviando) return;
+    const accion = cierre ? "reenviar" : "cerrar y enviar";
+    if (!window.confirm(`¿${accion.charAt(0).toUpperCase() + accion.slice(1)} la bitácora del ${fechaSel} por correo (PDF adjunto)?`)) return;
+    setEnviando(true);
+    setAvisoEnvio("");
+    try {
+      const { data, error } = await sb.functions.invoke("bitacora-enviar", { body: { fecha: fechaSel } });
+      if (error) throw error;
+      if (!data || data.ok === false) throw new Error(data?.error || "No se pudo enviar");
+      setAvisoEnvio(`📧 Enviada a ${(data.enviados || []).join(", ")} (${data.eventos} eventos, NS ${data.ns_general != null ? data.ns_general + "%" : "—"})`);
+      await cargar(fechaSel);
+    } catch (e) {
+      setAvisoEnvio("No se pudo enviar: " + (e.message || e));
+    } finally { setEnviando(false); }
+  }
 
   const totEntregados = ns.reduce((a, r) => a + Number(r.entregados || 0), 0);
   const totCargados   = ns.reduce((a, r) => a + Number(r.total || 0), 0);
@@ -68,8 +92,25 @@ export default function Bitacora() {
           {fechaSel !== diaMX() && (
             <button onClick={() => setFechaSel(diaMX())} style={{ fontSize: 12, padding: "6px 12px" }}>Hoy</button>
           )}
+          <button onClick={cerrarYEnviar} disabled={enviando || cargando}
+            style={{ fontSize: 13, padding: "7px 14px", background: cierre ? "#fff" : "var(--naranja)",
+              color: cierre ? "var(--navy)" : "#fff", border: cierre ? "1px solid var(--borde)" : "none",
+              borderRadius: 7, cursor: "pointer", opacity: enviando ? 0.6 : 1 }}>
+            {enviando ? "Enviando…" : cierre ? "📧 Reenviar" : "📧 Cerrar y enviar bitácora"}
+          </button>
         </div>
       </div>
+
+      {cierre && (
+        <div style={{ background: "#dcfce7", color: "#166534", borderRadius: 8, padding: "8px 14px", marginBottom: 12, fontSize: 12.5 }}>
+          ✅ Bitácora cerrada el {new Date(cierre.cerrada_en).toLocaleString("es-MX", { timeZone: "America/Mexico_City" })} · enviada a {(cierre.destinatarios || []).join(", ")}
+        </div>
+      )}
+      {avisoEnvio && (
+        <div style={{ background: avisoEnvio.startsWith("📧") ? "#dcfce7" : "#FCEBEB",
+          color: avisoEnvio.startsWith("📧") ? "#166534" : "#791F1F",
+          borderRadius: 8, padding: "8px 14px", marginBottom: 12, fontSize: 12.5 }}>{avisoEnvio}</div>
+      )}
 
       {error && <div style={{ background: "#FCEBEB", color: "#791F1F", borderRadius: 8, padding: "10px 14px", marginBottom: 14, fontSize: 13 }}>{error}</div>}
 
