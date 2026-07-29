@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import { sb } from "../shared/supabase.js";
 import { useAuth } from "../shared/auth.jsx";
 import { hace, fechaHora, diaMX } from "../shared/fechas.js";
-import { listarConversaciones, mensajesDeConversacion, crearCasoConsulta, conversacionPorTelefono, ventanaAbierta, enviarMensaje, resumenIA } from "../shared/mensajes.js";
+import { listarConversaciones, mensajesDeConversacion, crearCasoConsulta, conversacionPorTelefono, ventanaAbierta, enviarMensaje, resumenIA, consultarPaquete } from "../shared/mensajes.js";
 import { useAlertas } from "../shared/alertas.jsx";
 import { ETIQUETAS_CASO, SERVICE_CENTERS_MX } from "../shared/constantes.js";
 
@@ -65,6 +65,75 @@ async function buscarContexto(telefono) {
     }
   } catch (e) { /* el contexto es opcional */ }
   return out;
+}
+
+
+// ── Buscador puntual de paquetes (endpoint shipments de MELI) ───────────────
+const ESTADO_PKG = {
+  delivered: "Entregado", on_route: "En ruta", not_delivered: "No entregado",
+  to_be_dispatched: "Por despachar", at_the_door: "En la puerta",
+};
+function BuscadorPaquete({ onPasarAlChofer }) {
+  const [id, setId] = useState("");
+  const [pkg, setPkg] = useState(null);
+  const [buscando, setBuscando] = useState(false);
+  const [err, setErr] = useState("");
+
+  async function buscar() {
+    const limpio = id.replace(/\D/g, "");
+    if (!limpio || buscando) return;
+    setBuscando(true); setErr(""); setPkg(null);
+    try { setPkg(await consultarPaquete(limpio)); }
+    catch (e) { setErr(e.message || "No se pudo consultar"); }
+    finally { setBuscando(false); }
+  }
+
+  const textoChofer = pkg ? [
+    `📦 Paquete ${pkg.id}`,
+    pkg.comprador?.nombre ? `Cliente: ${pkg.comprador.nombre}` : null,
+    pkg.comprador?.telefono ? `Tel: ${pkg.comprador.telefono}` : null,
+    pkg.comprador?.direccion ? `Dirección: ${pkg.comprador.direccion}` : null,
+    pkg.comprador?.comentario ? `Referencia: ${pkg.comprador.comentario}` : null,
+  ].filter(Boolean).join("\n") : "";
+
+  return (
+    <div style={{ borderBottom: "1px solid var(--borde)", paddingBottom: 12, marginBottom: 12 }}>
+      <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 8 }}>🔍 Buscar paquete</div>
+      <div style={{ display: "flex", gap: 6, marginBottom: 8 }}>
+        <input value={id} onChange={(e) => setId(e.target.value)}
+          onKeyDown={(e) => e.key === "Enter" && buscar()}
+          placeholder="ID de envío (ej. 47622146432)"
+          style={{ flex: 1, fontSize: 12.5, padding: "6px 10px", border: "1px solid var(--borde)", borderRadius: 7 }} />
+        <button onClick={buscar} disabled={buscando || !id.trim()} style={{ fontSize: 12, padding: "6px 12px" }}>
+          {buscando ? "…" : "Buscar"}
+        </button>
+      </div>
+      {err && <div style={{ fontSize: 12, color: "#791F1F", marginBottom: 8 }}>{err}</div>}
+      {pkg && (
+        <div style={{ background: "#fafbfc", border: "1px solid var(--borde)", borderRadius: 8, padding: "10px 12px", fontSize: 12, lineHeight: 1.8 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
+            <b>{pkg.id}</b>
+            <span className="pill" style={{ background: pkg.substatus === "delivered" ? "#dcfce7" : "#fef3c7",
+              color: pkg.substatus === "delivered" ? "#166534" : "#92400e" }}>
+              {ESTADO_PKG[pkg.substatus] || ESTADO_PKG[pkg.status] || pkg.substatus || pkg.status}
+            </span>
+          </div>
+          {pkg.comprador?.nombre && <div><span style={{ color: "var(--texto-suave)" }}>Cliente:</span> {pkg.comprador.nombre}</div>}
+          {pkg.comprador?.telefono && <div><span style={{ color: "var(--texto-suave)" }}>Teléfono:</span> <b>{pkg.comprador.telefono}</b></div>}
+          {pkg.comprador?.direccion && <div><span style={{ color: "var(--texto-suave)" }}>Dirección:</span> {pkg.comprador.direccion}</div>}
+          {pkg.comprador?.comentario && <div><span style={{ color: "var(--texto-suave)" }}>Referencia:</span> {pkg.comprador.comentario}</div>}
+          {pkg.recibio && <div><span style={{ color: "var(--texto-suave)" }}>Recibió:</span> {pkg.recibio.nombre}{pkg.recibio.relacion ? ` (${pkg.recibio.relacion})` : ""}</div>}
+          {pkg.ruta && <div><span style={{ color: "var(--texto-suave)" }}>Ruta:</span> {pkg.ruta}</div>}
+          {onPasarAlChofer && (
+            <button onClick={() => onPasarAlChofer(textoChofer)}
+              style={{ marginTop: 8, fontSize: 12, padding: "6px 12px", background: "var(--navy)", color: "#fff", border: "none", borderRadius: 7, cursor: "pointer", width: "100%" }}>
+              📤 Pasar datos al chofer
+            </button>
+          )}
+        </div>
+      )}
+    </div>
+  );
 }
 
 export default function Consultas() {
@@ -415,6 +484,7 @@ export default function Consultas() {
           <div style={{ padding: 20, fontSize: 12, color: "var(--texto-tenue)", textAlign: "center" }}>—</div>
         ) : (
           <div style={{ padding: 14 }}>
+            <BuscadorPaquete onPasarAlChofer={(t) => setTexto((prev) => (prev ? prev + "\n" : "") + t)} />
             <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 10 }}>Ficha del ticket</div>
 
             {/* identidad */}
