@@ -90,3 +90,12 @@ export async function resumenIA(transcript) {
   if (!data || data.ok === false) throw new Error(data?.error || "No se pudo generar el resumen");
   return data.resumen;
 }
+
+// Consulta puntual de un paquete MELI (Edge Function paquete-info → VPS).
+// Devuelve { ok, paquete: { comprador, status, recibio, ... }, crudo }.
+export async function consultarPaquete(id) {
+  const { data, error } = await sb.functions.invoke("paquete-info", { body: { id } });
+  if (error) throw error;
+  if (!data || data.ok === false) throw new Error(data?.error || "No se pudo consultar el paquete");
+  return data.paquete;
+}
