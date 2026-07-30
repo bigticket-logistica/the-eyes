@@ -161,6 +161,11 @@ export default function Consultas() {
   const [caract, setCaract] = useState({ sc: "", etiquetas: [], comentarios: "" });
   // el ticket pertenece a otro analista → toda acción sobre él queda bloqueada
   const ticketDeOtro = !!(ticketAbierto && ticketAbierto.analista_actual && ticketAbierto.analista_actual !== analista?.id);
+
+  // Realtime: si cambia un caso del hilo abierto (toma, traspaso, cierre),
+  // recargar el hilo → el candado se alinea solo en todas las pantallas.
+  const ticketRef = useRef(null);
+  const casosRef = useRef({});
   const [contexto, setContexto] = useState({ nombre: null, sc: null, ruta: null });
   const [guardando, setGuardando] = useState(false);
   const [generandoIA, setGenerandoIA] = useState(false);
@@ -197,6 +202,20 @@ export default function Consultas() {
     const cv = await conversacionPorTelefono(conv.telefono);
     setConversacion(cv);
   }, []);
+
+  ticketRef.current = ticketAbierto;
+  casosRef.current = casos;
+  useEffect(() => {
+    const canal = sb.channel("consultas-casos-vivo")
+      .on("postgres_changes", { event: "UPDATE", schema: "public", table: "crm_inc_casos" }, (payload) => {
+        const c = payload.new || {};
+        const relevante = (ticketRef.current && c.id === ticketRef.current.id) ||
+                          (casosRef.current && casosRef.current[c.case_id] !== undefined);
+        if (relevante && selRef.current) cargarHilo(selRef.current);
+      })
+      .subscribe();
+    return () => { sb.removeChannel(canal); };
+  }, [cargarHilo]);
 
   useEffect(() => { cargarConvs(); }, [cargarConvs]);
   useEffect(() => { marcarVistos(); }, [marcarVistos]);

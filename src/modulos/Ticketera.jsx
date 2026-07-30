@@ -32,7 +32,9 @@ export default function Ticketera() {
     setCasos(lista);
     // la selección por defecto respeta el mismo filtro de la cola
     const elegibles = lista.filter((c) => esDeHoyMX(c.fecha_caso) && (c.origen || "meli") === "meli" && Number(c.case_id) < 900000000);
-    setSeleccionado((prev) => prev || elegibles[0] || null);
+    // si hay un ticket abierto en el panel, actualizarlo con los datos frescos
+    // (dueño, estado): así el candado aparece/desaparece sin refrescar la página
+    setSeleccionado((prev) => prev ? (lista.find((c) => c.id === prev.id) || prev) : (elegibles[0] || null));
     setCargando(false);
   }, []);
 
