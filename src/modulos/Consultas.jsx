@@ -37,12 +37,14 @@ function Burbuja({ m }) {
   );
 }
 
-function LineaCierre({ codigo }) {
+function LineaCierre({ codigo, anidadoEn }) {
+  const color = anidadoEn ? "#1a3a6b" : "#16a34a";
+  const texto = anidadoEn ? `↩ ${codigo} anidado en la incidencia #${anidadoEn}` : `✓ ${codigo} resuelto`;
   return (
     <div style={{ display: "flex", alignItems: "center", gap: 8, margin: "14px 0 6px" }}>
-      <div style={{ flex: 1, height: 2, background: "#16a34a", opacity: 0.45 }} />
-      <span style={{ fontSize: 11, fontWeight: 600, color: "#15803d", whiteSpace: "nowrap" }}>✓ {codigo} resuelto</span>
-      <div style={{ flex: 1, height: 2, background: "#16a34a", opacity: 0.45 }} />
+      <div style={{ flex: 1, height: 2, background: color, opacity: 0.45 }} />
+      <span style={{ fontSize: 11, fontWeight: 600, color: anidadoEn ? "#1a3a6b" : "#15803d", whiteSpace: "nowrap" }}>{texto}</span>
+      <div style={{ flex: 1, height: 2, background: color, opacity: 0.45 }} />
     </div>
   );
 }
@@ -225,7 +227,9 @@ export default function Consultas() {
       const { data: cs } = await sb.from("crm_inc_casos").select("*").in("case_id", caseIds);
       for (const c of (cs || [])) {
         mapa[c.case_id] = c;
-        if (ABIERTOS.includes(c.estado_id)) abierto = c;
+        // solo un ticket de CONSULTA puede ser el ticket abierto de esta pestaña;
+        // si el hilo fue anidado, su caso es una incidencia y se gestiona allá
+        if (ABIERTOS.includes(c.estado_id) && c.origen === "consulta") abierto = c;
       }
     }
     setCasos(mapa);
@@ -447,8 +451,15 @@ export default function Consultas() {
       const cid = m.case_id;
       const sig = mensajes[i + 1];
       const cambiaTicket = !sig || sig.case_id !== cid;
-      if (cid && cambiaTicket && casos[cid] && !ABIERTOS.includes(casos[cid].estado_id)) {
-        out.push(<LineaCierre key={`cierre-${cid}`} codigo={casos[cid].codigo || "#" + cid} />);
+      if (cid && cambiaTicket && casos[cid]) {
+        const c = casos[cid];
+        if (c.origen === "meli") {
+          // tramo anidado: la conversación se gestiona desde Incidencias
+          out.push(<LineaCierre key={`anid-${cid}`} codigo={"Conversación"} anidadoEn={cid} />);
+        } else if (!ABIERTOS.includes(c.estado_id)) {
+          out.push(<LineaCierre key={`cierre-${cid}`} codigo={c.codigo || "#" + cid}
+            anidadoEn={c.anidado_en_case_id || null} />);
+        }
       }
     }
     return out;

@@ -11,6 +11,7 @@ export default function Ticketera() {
   const { analista } = useAuth();
   const [casos, setCasos] = useState([]);
   const [nombres, setNombres] = useState({});
+  const [consultasLibres, setConsultasLibres] = useState([]);
   const [seleccionado, setSeleccionado] = useState(null);
   const [cargando, setCargando] = useState(true);
   const [error, setError] = useState("");
@@ -40,6 +41,30 @@ export default function Ticketera() {
 
   useEffect(() => { cargar(); }, [cargar]);
 
+  // consultas abiertas y NO anidadas: candidatas a anidarse en una incidencia
+  const cargarConsultas = useCallback(async () => {
+    const { data } = await sb.from("crm_inc_casos")
+      .select("id, case_id, codigo, conductor_nombre, conductor_telefono, fecha_caso")
+      .eq("origen", "consulta")
+      .in("estado_id", ["NEW", "OPEN", "ON_HOLD", "CHECKING"])
+      .is("anidado_en_case_id", null)
+      .order("fecha_caso", { ascending: false })
+      .limit(50);
+    setConsultasLibres(data || []);
+  }, []);
+  useEffect(() => { cargarConsultas(); }, [cargarConsultas]);
+
+  async function anidarConsulta(incidencia, consultaCaseId) {
+    const c = consultasLibres.find((x) => String(x.case_id) === String(consultaCaseId));
+    const etiqueta = c ? `${c.codigo || "#" + c.case_id}${c.conductor_nombre ? " · " + c.conductor_nombre : ""}` : "esa consulta";
+    if (!window.confirm(`¿Anidar ${etiqueta} en la incidencia ${incidencia.codigo || "#" + incidencia.case_id}?\n\nEl hilo de WhatsApp pasa a esta incidencia y la consulta se cierra.`)) return;
+    const { error } = await sb.rpc("fn_anidar_consulta", {
+      p_incidencia_id: incidencia.id, p_consulta_case_id: Number(consultaCaseId),
+    });
+    if (error) { alert("No se pudo anidar: " + error.message); return; }
+    await Promise.all([cargar(), cargarConsultas()]);
+  }
+
   // nombres de analistas (para "tomado por X")
   useEffect(() => {
     sb.from("crm_analistas").select("id, nombre").then(({ data }) => {
@@ -50,7 +75,7 @@ export default function Ticketera() {
   // Realtime: cualquier cambio en los casos refresca la cola al instante
   useEffect(() => {
     const canal = sb.channel("ticketera-casos")
-      .on("postgres_changes", { event: "*", schema: "public", table: "crm_inc_casos" }, () => cargar())
+      .on("postgres_changes", { event: "*", schema: "public", table: "crm_inc_casos" }, () => { cargar(); cargarConsultas(); })
       .subscribe();
     return () => { sb.removeChannel(canal); };
   }, [cargar]);
@@ -138,7 +163,7 @@ export default function Ticketera() {
         casosHoy={abiertosHoy}
         cerradosHoy={cerradosHoy}
         seleccionado={seleccionado}
-        onSeleccionar={setSeleccionado}
+        onSeleccionar={setSeleccionado} consultasLibres={consultasLibres} onAnidar={anidarConsulta} totalHoy={casos.filter((c) => esDeHoyMX(c.fecha_caso) && (c.origen || "meli") === "meli" && Number(c.case_id) < 900000000).length}
         analistaId={analista?.id} nombres={nombres} onTraspasar={traspasar}
       />
       <HiloTicket
