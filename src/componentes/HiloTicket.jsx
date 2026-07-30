@@ -33,7 +33,7 @@ function Burbuja({ m }) {
   );
 }
 
-export default function HiloTicket({ caso, onTomar, onResolver, analistaId }) {
+export default function HiloTicket({ caso, onTomar, onResolver, analistaId, nombres }) {
   const [mensajes, setMensajes] = useState([]);
   const [conversacion, setConversacion] = useState(null);
   const [texto, setTexto] = useState("");
@@ -126,7 +126,7 @@ export default function HiloTicket({ caso, onTomar, onResolver, analistaId }) {
             #{caso.case_id} · {motivoLegible(caso.motivo_id, caso.motivo_label)}
           </div>
           <div style={{ fontSize: 12, color: "var(--texto-suave)", marginTop: 2 }}>
-            Ruta {caso.route_code || "—"} · {caso.conductor_nombre || "sin conductor"} · {hace(caso.fecha_caso)}
+            Ruta {caso.route_code || "—"} · {caso.conductor_nombre || "sin conductor"} · {hace(caso.fecha_caso)}{caso.analista_actual ? <span style={{ color: "var(--naranja)", fontWeight: 600 }}> · 👤 {(nombres && nombres[caso.analista_actual]) || "analista"}</span> : null}
           </div>
         </div>
         <div style={{ display: "flex", gap: 6 }}>
@@ -194,7 +194,7 @@ export default function HiloTicket({ caso, onTomar, onResolver, analistaId }) {
                 </>
               ) : (
                 <div style={{ fontSize: 12, color: "var(--texto-suave)" }}>
-                  Atendido por otro analista.
+                  Atendido por {(nombres && nombres[caso.analista_actual]) || "otro analista"}.
                   <button onClick={() => onTomar(caso)} style={{ marginLeft: 10, padding: "5px 12px", fontSize: 12 }}>
                     Tomar
                   </button>

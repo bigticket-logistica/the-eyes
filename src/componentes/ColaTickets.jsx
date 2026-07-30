@@ -20,7 +20,7 @@ function agruparPorReja(casos) {
   return { rejas, presentes };
 }
 
-function Tarjeta({ c, seleccionado, onSeleccionar, analistaId, colorBorde, apagado }) {
+function Tarjeta({ c, seleccionado, onSeleccionar, analistaId, colorBorde, apagado, nombres }) {
   const activo = seleccionado?.id === c.id;
   const mio = c.analista_actual && c.analista_actual === analistaId;
   const est = detalleEstado(c.estado_id, c.sub_estado_id);
@@ -44,6 +44,11 @@ function Tarjeta({ c, seleccionado, onSeleccionar, analistaId, colorBorde, apaga
           }}>{est.label}</span>
         )}
         {!apagado && mio && <span style={{ fontSize: 11, color: "var(--naranja)", marginLeft: "auto" }}>tuyo</span>}
+        {!apagado && !mio && c.analista_actual && (
+          <span style={{ fontSize: 10.5, color: "var(--texto-suave)", marginLeft: "auto" }}>
+            👤 {((nombres && nombres[c.analista_actual]) || "analista").split(" ")[0]}
+          </span>
+        )}
       </div>
       <div style={{ fontSize: 13, fontWeight: 500, marginBottom: 2 }}>
         {motivoLegible(c.motivo_id, c.motivo_label)}
@@ -55,7 +60,7 @@ function Tarjeta({ c, seleccionado, onSeleccionar, analistaId, colorBorde, apaga
   );
 }
 
-export default function ColaTickets({ casosHoy = [], cerradosHoy = [], seleccionado, onSeleccionar, analistaId }) {
+export default function ColaTickets({ casosHoy = [], cerradosHoy = [], seleccionado, onSeleccionar, analistaId, nombres }) {
   const { rejas, presentes } = agruparPorReja(casosHoy);
   const total = casosHoy.length + cerradosHoy.length;
 
@@ -94,7 +99,7 @@ export default function ColaTickets({ casosHoy = [], cerradosHoy = [], seleccion
             </div>
             {lista.map((c) => (
               <Tarjeta key={c.id} c={c} seleccionado={seleccionado}
-                onSeleccionar={onSeleccionar} analistaId={analistaId} colorBorde={pr.color} />
+                onSeleccionar={onSeleccionar} analistaId={analistaId} nombres={nombres} colorBorde={pr.color} />
             ))}
           </div>
         );
@@ -116,7 +121,7 @@ export default function ColaTickets({ casosHoy = [], cerradosHoy = [], seleccion
           </div>
           {cerrados.map((c) => (
             <Tarjeta key={c.id} c={c} seleccionado={seleccionado}
-              onSeleccionar={onSeleccionar} analistaId={analistaId} colorBorde="#d1d5db" apagado />
+              onSeleccionar={onSeleccionar} analistaId={analistaId} nombres={nombres} colorBorde="#d1d5db" apagado />
           ))}
         </div>
       )}
