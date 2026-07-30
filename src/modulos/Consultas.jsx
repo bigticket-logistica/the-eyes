@@ -137,6 +137,12 @@ function BuscadorPaquete({ onPasarAlChofer }) {
 }
 
 export default function Consultas() {
+  const [nombresAnalistas, setNombresAnalistas] = useState({});
+  useEffect(() => {
+    sb.from("crm_analistas").select("id, nombre").then(({ data }) => {
+      setNombresAnalistas(Object.fromEntries((data || []).map((a) => [a.id, a.nombre])));
+    });
+  }, []);
   const { analista } = useAuth();
   const { marcarVistos } = useAlertas();
   const [convs, setConvs] = useState([]);
@@ -492,6 +498,12 @@ export default function Consultas() {
               <div><span style={{ color: "var(--texto-suave)" }}>Ticket:</span> <b>{ticketAbierto ? (ticketAbierto.codigo || "#" + ticketAbierto.case_id) : "sin ticket abierto"}</b></div>
               <div><span style={{ color: "var(--texto-suave)" }}>Conductor:</span> {sel.conductor_nombre || contexto.nombre || "—"}</div>
               <div><span style={{ color: "var(--texto-suave)" }}>Teléfono:</span> {sel.telefono}</div>
+              {ticketAbierto?.analista_actual && (
+                <div style={{ marginTop: 2 }}>
+                  <span style={{ color: "var(--texto-suave)" }}>Atendida por:</span>{" "}
+                  <b style={{ color: "var(--naranja)" }}>👤 {nombresAnalistas[ticketAbierto.analista_actual] || "analista"}</b>
+                </div>
+              )}
               {contexto.ruta && <div><span style={{ color: "var(--texto-suave)" }}>Ruta de hoy:</span> {contexto.ruta}</div>}
             </div>
 
