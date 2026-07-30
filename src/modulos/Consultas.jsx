@@ -471,8 +471,11 @@ export default function Consultas() {
                 <div style={{ padding: "11px 16px", display: "flex", gap: 8, alignItems: "center" }}>
                   <input value={texto} onChange={(e) => setTexto(e.target.value)}
                     onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); enviar(); } }}
-                    placeholder="Escribe al conductor…" disabled={accion} style={{ flex: 1 }} />
-                  <button className="btn-navy" onClick={enviar} disabled={accion || !texto.trim()}
+                    placeholder={ticketAbierto && ticketAbierto.analista_actual && ticketAbierto.analista_actual !== analista?.id
+                      ? `Ticket de ${nombresAnalistas[ticketAbierto.analista_actual] || "otro analista"} — traspásatelo para escribir`
+                      : "Escribe al conductor…"}
+                    disabled={accion || (ticketAbierto && ticketAbierto.analista_actual && ticketAbierto.analista_actual !== analista?.id)} style={{ flex: 1 }} />
+                  <button className="btn-navy" onClick={enviar} disabled={accion || !texto.trim() || (ticketAbierto && ticketAbierto.analista_actual && ticketAbierto.analista_actual !== analista?.id)}
                     style={{ padding: "9px 16px", whiteSpace: "nowrap" }}>{accion ? "…" : "Enviar"}</button>
                   <button className="btn-naranja" onClick={cerrar} disabled={accion}
                     style={{ padding: "9px 16px", whiteSpace: "nowrap" }}>Cerrar ticket</button>

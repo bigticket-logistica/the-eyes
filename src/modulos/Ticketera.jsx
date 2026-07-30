@@ -28,8 +28,11 @@ export default function Ticketera() {
       setCargando(false);
       return;
     }
-    setCasos(data || []);
-    setSeleccionado((prev) => prev || (data && data[0]) || null);
+    const lista = data || [];
+    setCasos(lista);
+    // la selección por defecto respeta el mismo filtro de la cola
+    const elegibles = lista.filter((c) => esDeHoyMX(c.fecha_caso) && (c.origen || "meli") === "meli" && Number(c.case_id) < 900000000);
+    setSeleccionado((prev) => prev || elegibles[0] || null);
     setCargando(false);
   }, []);
 
