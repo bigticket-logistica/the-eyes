@@ -47,6 +47,32 @@ function LineaCierre({ codigo }) {
   );
 }
 
+// Resuelve nombres del Directorio para una lista de conversaciones (en lote,
+// por sufijo de 10 dígitos). Devuelve { telefono: nombre }.
+async function nombresParaLista(convs) {
+  const mapa = {};
+  try {
+    const pendientes = (convs || []).filter((c) => !c.conductor_nombre);
+    const sufijos = [...new Set(pendientes
+      .map((c) => String(c.telefono || "").replace(/\D/g, "").slice(-10))
+      .filter((t) => t.length === 10))];
+    if (!sufijos.length) return mapa;
+    const filtros = sufijos.map((t) => `telefono.like.%${t}`).join(",");
+    const { data } = await sb.from("vw_directorio_conductores")
+      .select("nombre, telefono").or(filtros).limit(300);
+    const porSufijo = {};
+    for (const d of (data || [])) {
+      const suf = String(d.telefono || "").replace(/\D/g, "").slice(-10);
+      if (suf && porSufijo[suf] === undefined) porSufijo[suf] = d.nombre || null;
+    }
+    for (const c of pendientes) {
+      const suf = String(c.telefono || "").replace(/\D/g, "").slice(-10);
+      if (porSufijo[suf]) mapa[c.telefono] = porSufijo[suf];
+    }
+  } catch (e) { /* sin nombres, la lista muestra teléfonos */ }
+  return mapa;
+}
+
 // contexto del conductor: teléfono → directorio → ruta de hoy (SC prefill)
 async function buscarContexto(telefono) {
   const out = { nombre: null, sc: null, ruta: null };
@@ -178,8 +204,13 @@ export default function Consultas() {
   const aplicarLeidos = useCallback((lista) =>
     lista.map((c) => leidosRef.current.has(c.id) ? { ...c, no_leidos: 0 } : c), []);
 
+  const [nombresLista, setNombresLista] = useState({});
   const cargarConvs = useCallback(async () => {
-    try { setConvs(aplicarLeidos(await listarConversaciones())); }
+    try {
+      const lista = aplicarLeidos(await listarConversaciones());
+      setConvs(lista);
+      setNombresLista(await nombresParaLista(lista));
+    }
     catch (e) { setError(e.message); }
   }, [aplicarLeidos]);
 
@@ -299,6 +330,23 @@ export default function Consultas() {
 
   // cerrar: guarda caracterización, resuelve el ticket y, si hay etiqueta
   // GRAVE, anota automáticamente en la Bitácora del día
+  async function guardarNumeroNuevo() {
+    if (!sel) return;
+    const nombre = window.prompt("Nombre del conductor para " + sel.telefono + ":");
+    if (!nombre || !nombre.trim()) return;
+    const { error } = await sb.from("crm_directorio_conductores").insert({
+      driver_id: -Date.now(),
+      nombre: nombre.trim(),
+      telefono: String(sel.telefono || "").replace(/\D/g, ""),
+      origen: "manual",
+      notas: "Guardado desde Consultas en ruta",
+      actualizado_por: analista?.user_id || null,
+    });
+    if (error) { setAvisoPanel("No se pudo guardar en el directorio: " + error.message); return; }
+    setNombresLista((p) => ({ ...p, [sel.telefono]: nombre.trim() }));
+    if (sel) await cargarHilo(sel);
+  }
+
   async function tomarTicketConsulta() {
     if (!ticketAbierto) return;
     const forzar = !!(ticketAbierto.analista_actual && ticketAbierto.analista_actual !== analista?.id);
@@ -434,7 +482,7 @@ export default function Consultas() {
                 background: activo ? "var(--naranja-suave)" : "#fff",
                 borderLeft: `3px solid ${activo ? "var(--naranja)" : "transparent"}` }}>
               <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                <span style={{ fontSize: 13, fontWeight: 500 }}>{c.conductor_nombre || c.telefono}</span>
+                <span style={{ fontSize: 13, fontWeight: 500 }}>{c.conductor_nombre || nombresLista[c.telefono] || c.telefono}</span>
                 {c.no_leidos > 0 && (
                   <span style={{ marginLeft: "auto", fontSize: 10, fontWeight: 600, background: "var(--naranja)",
                     color: "#fff", borderRadius: 10, padding: "1px 7px" }}>{c.no_leidos}</span>
@@ -442,7 +490,7 @@ export default function Consultas() {
               </div>
               <div style={{ fontSize: 12, color: "var(--texto-suave)", marginTop: 2, overflow: "hidden",
                 textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{c.ultimo_mensaje_texto || "—"}</div>
-              <div style={{ fontSize: 10, color: "var(--texto-tenue)", marginTop: 2 }}>{hace(c.ultimo_mensaje_en)}</div>
+              <div style={{ fontSize: 10, color: "var(--texto-tenue)", marginTop: 2 }}>{hace(c.ultimo_mensaje_en)}{(c.conductor_nombre || nombresLista[c.telefono]) ? ` · ${c.telefono}` : ""}</div>
             </div>
           );
         })}
@@ -458,7 +506,13 @@ export default function Consultas() {
           <div style={{ padding: "11px 16px", borderBottom: "1px solid var(--borde)", display: "flex",
             alignItems: "center", justifyContent: "space-between" }}>
             <div>
-              <div style={{ fontSize: 14, fontWeight: 600 }}>{sel.conductor_nombre || contexto.nombre || sel.telefono}</div>
+              <div style={{ fontSize: 14, fontWeight: 600, display: "flex", alignItems: "center", gap: 8 }}>
+                {sel.conductor_nombre || contexto.nombre || nombresLista[sel.telefono] || sel.telefono}
+                {!(sel.conductor_nombre || contexto.nombre || nombresLista[sel.telefono]) && (
+                  <button onClick={guardarNumeroNuevo} title="Guardar este número en el Directorio"
+                    style={{ fontSize: 11, padding: "3px 10px" }}>💾 Guardar nombre</button>
+                )}
+              </div>
               <div style={{ fontSize: 12, color: "var(--texto-suave)" }}>
                 {sel.telefono}{ticketAbierto ? ` · ${ticketAbierto.codigo || "#" + ticketAbierto.case_id} abierto` : " · sin ticket abierto"}
               </div>
