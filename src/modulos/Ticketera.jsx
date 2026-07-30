@@ -83,6 +83,14 @@ export default function Ticketera() {
     cargar();
   }
 
+  async function traspasar(caso, destino) {
+    const nombre = nombres[destino] || "ese analista";
+    if (!window.confirm(`¿Traspasar el ticket a ${nombre}?`)) return;
+    const { error } = await sb.rpc("fn_traspasar_ticket", { p_caso_id: caso.id, p_destino: destino });
+    if (error) { alert("No se pudo traspasar: " + error.message); return; }
+    cargar();
+  }
+
   async function resolver(caso) {
     const { error } = await sb.rpc("fn_resolver_ticket", { p_caso_id: caso.id, p_estado: "CLOSED" });
     if (error) { alert("No se pudo resolver: " + error.message); return; }
@@ -129,13 +137,13 @@ export default function Ticketera() {
         cerradosHoy={cerradosHoy}
         seleccionado={seleccionado}
         onSeleccionar={setSeleccionado}
-        analistaId={analista?.id} nombres={nombres}
+        analistaId={analista?.id} nombres={nombres} onTraspasar={traspasar}
       />
       <HiloTicket
         caso={seleccionado}
         onTomar={tomar}
         onResolver={resolver}
-        analistaId={analista?.id} nombres={nombres}
+        analistaId={analista?.id} nombres={nombres} onTraspasar={traspasar}
       />
       <PanelContexto caso={seleccionado} />
     </div>
