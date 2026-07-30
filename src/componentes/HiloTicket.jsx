@@ -33,7 +33,7 @@ function Burbuja({ m }) {
   );
 }
 
-export default function HiloTicket({ caso, onTomar, onResolver, analistaId, nombres }) {
+export default function HiloTicket({ caso, onTomar, onResolver, onTraspasar, analistaId, nombres }) {
   const [mensajes, setMensajes] = useState([]);
   const [conversacion, setConversacion] = useState(null);
   const [texto, setTexto] = useState("");
@@ -192,6 +192,15 @@ export default function HiloTicket({ caso, onTomar, onResolver, analistaId, nomb
                   <button className="btn-naranja" onClick={() => onResolver(caso)} style={{ padding: "9px 16px", whiteSpace: "nowrap" }}>
                     Cerrar ticket
                   </button>
+                  {onTraspasar && (
+                    <select defaultValue="" onChange={(e) => { const d = e.target.value; e.target.value = ""; if (d) onTraspasar(caso, d); }}
+                      title="Traspasar este ticket a otro analista"
+                      style={{ fontSize: 12, padding: "8px 6px", border: "1px solid var(--borde)", borderRadius: 7, maxWidth: 130 }}>
+                      <option value="" disabled>↪ Traspasar…</option>
+                      {Object.entries(nombres || {}).filter(([id]) => id !== analistaId)
+                        .map(([id, n]) => <option key={id} value={id}>{n}</option>)}
+                    </select>
+                  )}
                 </>
               ) : (
                 <div style={{ fontSize: 12, color: "var(--texto-suave)" }}>
