@@ -10,6 +10,7 @@ import PanelContexto from "../componentes/PanelContexto.jsx";
 export default function Ticketera() {
   const { analista } = useAuth();
   const [casos, setCasos] = useState([]);
+  const [nombres, setNombres] = useState({});
   const [seleccionado, setSeleccionado] = useState(null);
   const [cargando, setCargando] = useState(true);
   const [error, setError] = useState("");
@@ -33,6 +34,21 @@ export default function Ticketera() {
   }, []);
 
   useEffect(() => { cargar(); }, [cargar]);
+
+  // nombres de analistas (para "tomado por X")
+  useEffect(() => {
+    sb.from("crm_analistas").select("id, nombre").then(({ data }) => {
+      setNombres(Object.fromEntries((data || []).map((a) => [a.id, a.nombre])));
+    });
+  }, []);
+
+  // Realtime: cualquier cambio en los casos refresca la cola al instante
+  useEffect(() => {
+    const canal = sb.channel("ticketera-casos")
+      .on("postgres_changes", { event: "*", schema: "public", table: "crm_inc_casos" }, () => cargar())
+      .subscribe();
+    return () => { sb.removeChannel(canal); };
+  }, [cargar]);
 
   // refresco automatico cada 30s
   useEffect(() => {
@@ -99,13 +115,13 @@ export default function Ticketera() {
         cerradosHoy={cerradosHoy}
         seleccionado={seleccionado}
         onSeleccionar={setSeleccionado}
-        analistaId={analista?.id}
+        analistaId={analista?.id} nombres={nombres}
       />
       <HiloTicket
         caso={seleccionado}
         onTomar={tomar}
         onResolver={resolver}
-        analistaId={analista?.id}
+        analistaId={analista?.id} nombres={nombres}
       />
       <PanelContexto caso={seleccionado} />
     </div>
