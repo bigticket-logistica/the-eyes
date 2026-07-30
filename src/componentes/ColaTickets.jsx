@@ -60,7 +60,7 @@ function Tarjeta({ c, seleccionado, onSeleccionar, analistaId, colorBorde, apaga
   );
 }
 
-export default function ColaTickets({ casosHoy = [], cerradosHoy = [], seleccionado, onSeleccionar, analistaId, nombres }) {
+export default function ColaTickets({ casosHoy = [], cerradosHoy = [], seleccionado, onSeleccionar, analistaId, nombres, consultasLibres = [], onAnidar, totalHoy }) {
   const { rejas, presentes } = agruparPorReja(casosHoy);
   const total = casosHoy.length + cerradosHoy.length;
 
@@ -74,11 +74,43 @@ export default function ColaTickets({ casosHoy = [], cerradosHoy = [], seleccion
         display: "flex", alignItems: "center", justifyContent: "space-between",
         position: "sticky", top: 0, background: "#fff", zIndex: 2,
       }}>
-        <span style={{ fontSize: 13, fontWeight: 600 }}>Cola de hoy</span>
-        <span style={{ fontSize: 12, color: "var(--texto-suave)" }}>
-          {casosHoy.length} {casosHoy.length === 1 ? "abierto" : "abiertos"}
+        <div>
+          <div style={{ fontSize: 13, fontWeight: 600 }}>Cola de hoy</div>
+          <div style={{ fontSize: 11, color: "var(--texto-suave)", marginTop: 2 }}>
+            {casosHoy.length} {casosHoy.length === 1 ? "abierto" : "abiertos"} · {cerradosHoy.length} sin gestión pendiente
+          </div>
+        </div>
+        <span style={{ fontSize: 20, fontWeight: 700, color: "var(--navy)" }}
+          title="Total de incidencias del día">
+          {(totalHoy ?? (casosHoy.length + cerradosHoy.length))}
         </span>
       </div>
+
+      {/* ANIDAR CONSULTA: une un ticket de Consultas en ruta a esta incidencia */}
+      {onAnidar && (
+        <div style={{ padding: "8px 14px", borderBottom: "1px solid var(--borde)", background: "#fafbfc" }}>
+          <div style={{ fontSize: 11, color: "var(--texto-suave)", marginBottom: 5 }}>
+            ↩ Anidar consulta en la incidencia seleccionada
+          </div>
+          {(() => {
+            const mia = seleccionado && seleccionado.analista_actual && seleccionado.analista_actual === analistaId;
+            if (!seleccionado) return <div style={{ fontSize: 11, color: "var(--texto-tenue)" }}>Elige una incidencia primero.</div>;
+            if (!mia) return <div style={{ fontSize: 11, color: "var(--texto-tenue)" }}>Toma la incidencia para poder anidar.</div>;
+            if (!consultasLibres.length) return <div style={{ fontSize: 11, color: "var(--texto-tenue)" }}>No hay consultas abiertas sin anidar.</div>;
+            return (
+              <select defaultValue="" onChange={(e) => { const v = e.target.value; e.target.value = ""; if (v) onAnidar(seleccionado, v); }}
+                style={{ width: "100%", fontSize: 12, padding: "6px 8px", border: "1px solid var(--borde)", borderRadius: 7 }}>
+                <option value="" disabled>Elegir consulta… ({consultasLibres.length})</option>
+                {consultasLibres.map((c) => (
+                  <option key={c.case_id} value={c.case_id}>
+                    {(c.codigo || "#" + c.case_id) + " · " + (c.conductor_nombre || c.conductor_telefono || "sin nombre")}
+                  </option>
+                ))}
+              </select>
+            );
+          })()}
+        </div>
+      )}
 
       {/* REJAS DE CRITICIDAD: abiertos de hoy (lo prioritario) */}
       {presentes.map((p) => {

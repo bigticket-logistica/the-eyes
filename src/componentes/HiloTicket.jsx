@@ -127,7 +127,7 @@ export default function HiloTicket({ caso, onTomar, onResolver, onTraspasar, ana
             #{caso.case_id} · {motivoLegible(caso.motivo_id, caso.motivo_label)}
           </div>
           <div style={{ fontSize: 12, color: "var(--texto-suave)", marginTop: 2 }}>
-            Ruta {caso.route_code || "—"} · {caso.conductor_nombre || "sin conductor"} · {hace(caso.fecha_caso)}{caso.analista_actual ? <span style={{ color: "var(--naranja)", fontWeight: 600 }}> · 👤 {(nombres && nombres[caso.analista_actual]) || "analista"}</span> : null}
+            Ruta {caso.route_code || "—"} · {caso.conductor_nombre || "sin conductor"} · {hace(caso.fecha_caso)}{caso.analista_actual ? <span style={{ color: "var(--naranja)", fontWeight: 600 }}> · 👤 {(nombres && nombres[caso.analista_actual]) || "analista"}</span> : null}{caso.conductor_telefono_meli && caso.conductor_telefono_meli !== caso.conductor_telefono ? <span style={{ color: "var(--texto-tenue)" }}> · ↩ consulta anidada</span> : null}
           </div>
         </div>
         <div style={{ display: "flex", gap: 6 }}>
