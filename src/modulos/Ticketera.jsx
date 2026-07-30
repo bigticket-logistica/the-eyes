@@ -1,7 +1,7 @@
 import { useEffect, useState, useCallback } from "react";
 import { sb } from "../shared/supabase.js";
 import { useAuth } from "../shared/auth.jsx";
-import { esAbierto } from "../shared/constantes.js";
+import { esAbierto, motivoLegible } from "../shared/constantes.js";
 import { esDeHoyMX } from "../shared/fechas.js";
 import ColaTickets from "../componentes/ColaTickets.jsx";
 import HiloTicket from "../componentes/HiloTicket.jsx";
@@ -20,7 +20,7 @@ const suf10 = (t) => String(t || "").replace(/\D/g, "").slice(-10);
 function PanelTomar({ caso, onCerrar, onListo, analistaId }) {
   const [candidatos, setCandidatos] = useState([]);
   const [elegido, setElegido] = useState(suf10(caso.conductor_telefono) ? String(caso.conductor_telefono).replace(/\D/g, "") : "");
-  const [motivo, setMotivo] = useState(`Tenemos una incidencia en tu ruta: ${caso.motivo_label || "revisión de entrega"}.`);
+  const [motivo, setMotivo] = useState(`Tenemos una incidencia en tu ruta: ${motivoLegible(caso.motivo_id, caso.motivo_label)}.`);
   const [ventana, setVentana] = useState(null);
   const [ocupado, setOcupado] = useState(false);
   const [error, setError] = useState("");
@@ -108,7 +108,7 @@ function PanelTomar({ caso, onCerrar, onListo, analistaId }) {
           <button onClick={onCerrar} style={{ fontSize: 12, padding: "2px 10px" }}>✕</button>
         </div>
         <div style={{ fontSize: 12, color: "var(--texto-suave)", marginBottom: 12 }}>
-          {caso.motivo_label || "Incidencia"} · {caso.conductor_nombre || "sin conductor"}
+          {motivoLegible(caso.motivo_id, caso.motivo_label)} · {caso.conductor_nombre || "sin conductor"}
           {caso.patente ? " · " + caso.patente : ""}
         </div>
 
