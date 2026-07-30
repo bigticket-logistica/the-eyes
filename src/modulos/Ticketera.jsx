@@ -330,7 +330,7 @@ export default function Ticketera() {
         onResolver={resolver}
         analistaId={analista?.id} nombres={nombres} onTraspasar={traspasar}
       />
-      <PanelContexto caso={seleccionado} />
+      <PanelContexto caso={seleccionado} analistaId={analista?.id} />
     </div>
       {porTomar && (
         <PanelTomar caso={porTomar} analistaId={analista?.id}
