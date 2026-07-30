@@ -109,9 +109,10 @@ function BuscadorPaquete({ onPasarAlChofer }) {
     const limpio = id.replace(/\D/g, "");
     if (!limpio || buscando) return;
     setBuscando(true); setErr(""); setPkg(null);
-    try { setPkg(await consultarPaquete(limpio)); }
-    catch (e) { setErr(e.message || "No se pudo consultar"); }
-    finally { setBuscando(false); }
+    const aviso = setTimeout(() => setErr("Despertando el buscador… un momento."), 2500);
+    try { setPkg(await consultarPaquete(limpio)); setErr(""); }
+    catch (e) { setErr(e.message || "No se pudo consultar. Reintenta en unos segundos."); }
+    finally { clearTimeout(aviso); setBuscando(false); }
   }
 
   const textoChofer = pkg ? [
