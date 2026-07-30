@@ -125,3 +125,14 @@ export async function consultarPaquete(id) {
     }
   }
 }
+
+// Envía un correo al comprador desde la torre (Edge Function correo-cliente →
+// VPS → Brevo). Queda registrado en crm_inc_correos, ligado al caso.
+export async function enviarCorreoCliente({ caseId, casoId, destinatario, asunto, cuerpo, plantilla }) {
+  const { data, error } = await sb.functions.invoke("correo-cliente", {
+    body: { case_id: caseId, caso_id: casoId, destinatario, asunto, cuerpo, plantilla },
+  });
+  if (error) throw new Error("No se pudo enviar el correo. Reintenta en unos segundos.");
+  if (!data || data.ok === false) throw new Error(data?.error || "No se pudo enviar el correo");
+  return data;
+}
