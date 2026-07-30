@@ -159,6 +159,8 @@ export default function Consultas() {
   const [error, setError] = useState(null);
   // panel de caracterización
   const [caract, setCaract] = useState({ sc: "", etiquetas: [], comentarios: "" });
+  // el ticket pertenece a otro analista → toda acción sobre él queda bloqueada
+  const ticketDeOtro = !!(ticketAbierto && ticketAbierto.analista_actual && ticketAbierto.analista_actual !== analista?.id);
   const [contexto, setContexto] = useState({ nombre: null, sc: null, ruta: null });
   const [guardando, setGuardando] = useState(false);
   const [generandoIA, setGenerandoIA] = useState(false);
@@ -471,13 +473,13 @@ export default function Consultas() {
                 <div style={{ padding: "11px 16px", display: "flex", gap: 8, alignItems: "center" }}>
                   <input value={texto} onChange={(e) => setTexto(e.target.value)}
                     onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); enviar(); } }}
-                    placeholder={ticketAbierto && ticketAbierto.analista_actual && ticketAbierto.analista_actual !== analista?.id
+                    placeholder={ticketDeOtro
                       ? `Ticket de ${nombresAnalistas[ticketAbierto.analista_actual] || "otro analista"} — traspásatelo para escribir`
                       : "Escribe al conductor…"}
-                    disabled={accion || (ticketAbierto && ticketAbierto.analista_actual && ticketAbierto.analista_actual !== analista?.id)} style={{ flex: 1 }} />
-                  <button className="btn-navy" onClick={enviar} disabled={accion || !texto.trim() || (ticketAbierto && ticketAbierto.analista_actual && ticketAbierto.analista_actual !== analista?.id)}
+                    disabled={accion || ticketDeOtro} style={{ flex: 1 }} />
+                  <button className="btn-navy" onClick={enviar} disabled={accion || !texto.trim() || ticketDeOtro || (ticketAbierto && ticketAbierto.analista_actual && ticketAbierto.analista_actual !== analista?.id)}
                     style={{ padding: "9px 16px", whiteSpace: "nowrap" }}>{accion ? "…" : "Enviar"}</button>
-                  <button className="btn-naranja" onClick={cerrar} disabled={accion || (ticketAbierto && ticketAbierto.analista_actual && ticketAbierto.analista_actual !== analista?.id)}
+                  <button className="btn-naranja" onClick={cerrar} disabled={accion || ticketDeOtro}
                     style={{ padding: "9px 16px", whiteSpace: "nowrap" }}>Cerrar ticket</button>
                 </div>
               </>
@@ -547,7 +549,7 @@ export default function Consultas() {
               <>
                 {/* SC */}
                 <div style={{ fontSize: 11, color: "var(--texto-suave)", marginBottom: 4 }}>Service Center</div>
-                <select value={caract.sc} onChange={(e) => setCaract((p) => ({ ...p, sc: e.target.value }))}
+                <select value={caract.sc} disabled={ticketDeOtro} onChange={(e) => setCaract((p) => ({ ...p, sc: e.target.value }))}
                   style={{ width: "100%", fontSize: 13, padding: "7px 8px", border: "1px solid var(--borde)", borderRadius: 7, marginBottom: 12, background: "#fff" }}>
                   <option value="">— sin SC —</option>
                   {SERVICE_CENTERS_MX.map((s) => <option key={s} value={s}>{s}</option>)}
@@ -559,8 +561,8 @@ export default function Consultas() {
                   {ETIQUETAS_CASO.map((e) => {
                     const on = caract.etiquetas.includes(e.id);
                     return (
-                      <button key={e.id} onClick={() => toggleEtiqueta(e.id)}
-                        style={{ fontSize: 12, padding: "5px 10px", borderRadius: 14, cursor: "pointer",
+                      <button key={e.id} onClick={() => toggleEtiqueta(e.id)} disabled={ticketDeOtro}
+                        style={{ fontSize: 12, padding: "5px 10px", borderRadius: 14, cursor: ticketDeOtro ? "not-allowed" : "pointer", opacity: ticketDeOtro ? 0.55 : 1,
                           border: `1px solid ${on ? (e.grave ? "#b91c1c" : "var(--navy)") : "var(--borde)"}`,
                           background: on ? (e.grave ? "#FCEBEB" : "#e0e7ff") : "#fff",
                           color: on ? (e.grave ? "#791F1F" : "var(--navy)") : "var(--texto-suave)" }}>
@@ -578,20 +580,20 @@ export default function Consultas() {
                 {/* comentarios + IA */}
                 <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 4, marginTop: 8 }}>
                   <span style={{ fontSize: 11, color: "var(--texto-suave)" }}>Comentarios / resumen</span>
-                  <button onClick={generarResumen} disabled={generandoIA || mensajes.length === 0}
+                  <button onClick={generarResumen} disabled={generandoIA || mensajes.length === 0 || ticketDeOtro}
                     title="Genera un resumen de la conversación con IA"
                     style={{ fontSize: 11, padding: "3px 10px" }}>
                     {generandoIA ? "Generando…" : "✨ Resumen IA"}
                   </button>
                 </div>
-                <textarea value={caract.comentarios}
+                <textarea value={caract.comentarios} disabled={ticketDeOtro}
                   onChange={(e) => setCaract((p) => ({ ...p, comentarios: e.target.value }))}
                   rows={6} placeholder="Qué pasó, qué se gestionó, cómo quedó…"
                   style={{ width: "100%", boxSizing: "border-box", fontSize: 12.5, padding: 9, border: "1px solid var(--borde)", borderRadius: 8, resize: "vertical", fontFamily: "inherit" }} />
 
                 {avisoPanel && <div style={{ fontSize: 11, color: avisoPanel.startsWith("No") || avisoPanel.startsWith("IA") ? "#791F1F" : "#15803d", marginTop: 6 }}>{avisoPanel}</div>}
 
-                <button className="btn-navy" onClick={() => guardarCaract(false)} disabled={guardando || (ticketAbierto && ticketAbierto.analista_actual && ticketAbierto.analista_actual !== analista?.id)}
+                <button className="btn-navy" onClick={() => guardarCaract(false)} disabled={guardando || ticketDeOtro}
                   style={{ width: "100%", padding: "9px", marginTop: 10 }}>
                   {guardando ? "Guardando…" : "Guardar ficha"}
                 </button>
