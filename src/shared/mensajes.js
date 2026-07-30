@@ -93,9 +93,35 @@ export async function resumenIA(transcript) {
 
 // Consulta puntual de un paquete MELI (Edge Function paquete-info → VPS).
 // Devuelve { ok, paquete: { comprador, status, recibio, ... }, crudo }.
-export async function consultarPaquete(id) {
+// Reintenta UNA vez tras 2s si falla la infraestructura (arranque en frío de
+// la Edge Function o del navegador del VPS). Un 404 (paquete inexistente) es
+// respuesta real y no se reintenta.
+async function invocarPaquete(id) {
   const { data, error } = await sb.functions.invoke("paquete-info", { body: { id } });
-  if (error) throw error;
-  if (!data || data.ok === false) throw new Error(data?.error || "No se pudo consultar el paquete");
+  if (error) {
+    // error de transporte/función (cold start, timeout, red) → reintentable
+    const e = new Error("infra"); e.reintentable = true; throw e;
+  }
+  if (!data || data.ok === false) {
+    const msg = data?.error || "";
+    if (/no encontrado/i.test(msg)) throw new Error(`No existe un envío con el ID ${id}. Revisa el número.`);
+    if (/sesi[oó]n/i.test(msg)) throw new Error("La sesión de MELI está vencida. Pide sincronizar Don B y reintenta.");
+    const e = new Error(msg || "infra"); e.reintentable = !msg; throw e;
+  }
   return data.paquete;
+}
+
+export async function consultarPaquete(id) {
+  try {
+    return await invocarPaquete(id);
+  } catch (e1) {
+    if (!e1.reintentable && e1.message !== "infra") throw e1;
+    await new Promise((r) => setTimeout(r, 2000));   // segundo intento (frío → caliente)
+    try {
+      return await invocarPaquete(id);
+    } catch (e2) {
+      if (!e2.reintentable && e2.message !== "infra") throw e2;
+      throw new Error("El buscador tardó en despertar y no alcanzó a responder. Espera unos segundos y vuelve a intentar.");
+    }
+  }
 }
