@@ -57,15 +57,26 @@ export default function Ticketera() {
   }, [cargar]);
 
   // Solo casos de HOY (el pasado vive en el historico, no en la cola).
-  const casosHoy = casos.filter((c) => esDeHoyMX(c.fecha_caso) && (c.origen || "meli") === "meli");
+  const casosHoy = casos.filter((c) => esDeHoyMX(c.fecha_caso) && (c.origen || "meli") === "meli" && Number(c.case_id) < 900000000);
   const abiertosHoy = casosHoy.filter((c) => esAbierto(c.estado_id, c.sub_estado_id));
   const cerradosHoy = casosHoy.filter((c) => !esAbierto(c.estado_id, c.sub_estado_id));
   // para la condicion de "vacio" y seleccion inicial
   const abiertos = abiertosHoy;
 
   async function tomar(caso) {
-    const { error } = await sb.rpc("fn_tomar_ticket", { p_caso_id: caso.id });
-    if (error) { alert("No se pudo tomar el ticket: " + error.message); return; }
+    // sobre un ticket ajeno, el clic es un traspaso declarado
+    const forzar = !!(caso.analista_actual && caso.analista_actual !== analista?.id);
+    if (forzar) {
+      const dueno = nombres[caso.analista_actual] || "otro analista";
+      if (!window.confirm(`Este ticket lo tiene ${dueno}. ¿Traspasártelo?`)) return;
+    }
+    const { error } = await sb.rpc("fn_tomar_ticket", { p_caso_id: caso.id, p_forzar: forzar });
+    if (error) {
+      // perdió el empate: alguien lo tomó un instante antes
+      alert(error.message.includes("ya tomado") ? error.message : "No se pudo tomar el ticket: " + error.message);
+      cargar();
+      return;
+    }
     cargar();
   }
 

@@ -278,6 +278,18 @@ export default function Consultas() {
 
   // cerrar: guarda caracterización, resuelve el ticket y, si hay etiqueta
   // GRAVE, anota automáticamente en la Bitácora del día
+  async function tomarTicketConsulta() {
+    if (!ticketAbierto) return;
+    const forzar = !!(ticketAbierto.analista_actual && ticketAbierto.analista_actual !== analista?.id);
+    if (forzar) {
+      const dueno = nombresAnalistas[ticketAbierto.analista_actual] || "otro analista";
+      if (!window.confirm(`Este ticket lo tiene ${dueno}. ¿Traspasártelo?`)) return;
+    }
+    const { error } = await sb.rpc("fn_tomar_ticket", { p_caso_id: ticketAbierto.id, p_forzar: forzar });
+    if (error) { setAvisoPanel(error.message.includes("ya tomado") ? error.message : "No se pudo tomar: " + error.message); return; }
+    if (sel) await cargarHilo(sel);
+  }
+
   async function cerrar() {
     if (!ticketAbierto || accion) return;
     setAccion(true); setError(null);
@@ -498,10 +510,17 @@ export default function Consultas() {
               <div><span style={{ color: "var(--texto-suave)" }}>Ticket:</span> <b>{ticketAbierto ? (ticketAbierto.codigo || "#" + ticketAbierto.case_id) : "sin ticket abierto"}</b></div>
               <div><span style={{ color: "var(--texto-suave)" }}>Conductor:</span> {sel.conductor_nombre || contexto.nombre || "—"}</div>
               <div><span style={{ color: "var(--texto-suave)" }}>Teléfono:</span> {sel.telefono}</div>
-              {ticketAbierto?.analista_actual && (
-                <div style={{ marginTop: 2 }}>
-                  <span style={{ color: "var(--texto-suave)" }}>Atendida por:</span>{" "}
-                  <b style={{ color: "var(--naranja)" }}>👤 {nombresAnalistas[ticketAbierto.analista_actual] || "analista"}</b>
+              {ticketAbierto && (
+                <div style={{ marginTop: 2, display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                  <span style={{ color: "var(--texto-suave)" }}>Atendida por:</span>
+                  {ticketAbierto.analista_actual
+                    ? <b style={{ color: "var(--naranja)" }}>👤 {nombresAnalistas[ticketAbierto.analista_actual] || "analista"}</b>
+                    : <span style={{ color: "var(--texto-tenue)" }}>nadie aún</span>}
+                  {(!ticketAbierto.analista_actual || ticketAbierto.analista_actual !== analista?.id) && (
+                    <button onClick={tomarTicketConsulta} style={{ fontSize: 11, padding: "3px 10px" }}>
+                      {ticketAbierto.analista_actual ? "Traspasar a mí" : "Tomar"}
+                    </button>
+                  )}
                 </div>
               )}
               {contexto.ruta && <div><span style={{ color: "var(--texto-suave)" }}>Ruta de hoy:</span> {contexto.ruta}</div>}
