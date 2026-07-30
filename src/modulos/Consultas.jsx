@@ -477,7 +477,7 @@ export default function Consultas() {
                     disabled={accion || (ticketAbierto && ticketAbierto.analista_actual && ticketAbierto.analista_actual !== analista?.id)} style={{ flex: 1 }} />
                   <button className="btn-navy" onClick={enviar} disabled={accion || !texto.trim() || (ticketAbierto && ticketAbierto.analista_actual && ticketAbierto.analista_actual !== analista?.id)}
                     style={{ padding: "9px 16px", whiteSpace: "nowrap" }}>{accion ? "…" : "Enviar"}</button>
-                  <button className="btn-naranja" onClick={cerrar} disabled={accion}
+                  <button className="btn-naranja" onClick={cerrar} disabled={accion || (ticketAbierto && ticketAbierto.analista_actual && ticketAbierto.analista_actual !== analista?.id)}
                     style={{ padding: "9px 16px", whiteSpace: "nowrap" }}>Cerrar ticket</button>
                 </div>
               </>
@@ -523,6 +523,20 @@ export default function Consultas() {
                     <button onClick={tomarTicketConsulta} style={{ fontSize: 11, padding: "3px 10px" }}>
                       {ticketAbierto.analista_actual ? "Traspasar a mí" : "Tomar"}
                     </button>
+                  )}
+                  {ticketAbierto.analista_actual === analista?.id && (
+                    <select defaultValue="" onChange={async (e) => {
+                      const d = e.target.value; e.target.value = "";
+                      if (!d) return;
+                      if (!window.confirm(`¿Traspasar el ticket a ${nombresAnalistas[d]}?`)) return;
+                      const { error } = await sb.rpc("fn_traspasar_ticket", { p_caso_id: ticketAbierto.id, p_destino: d });
+                      if (error) { setAvisoPanel("No se pudo traspasar: " + error.message); return; }
+                      if (sel) await cargarHilo(sel);
+                    }} style={{ fontSize: 11, padding: "3px 6px", border: "1px solid var(--borde)", borderRadius: 6 }}>
+                      <option value="" disabled>↪ Traspasar…</option>
+                      {Object.entries(nombresAnalistas).filter(([id]) => id !== analista?.id)
+                        .map(([id, n]) => <option key={id} value={id}>{n}</option>)}
+                    </select>
                   )}
                 </div>
               )}
@@ -577,7 +591,7 @@ export default function Consultas() {
 
                 {avisoPanel && <div style={{ fontSize: 11, color: avisoPanel.startsWith("No") || avisoPanel.startsWith("IA") ? "#791F1F" : "#15803d", marginTop: 6 }}>{avisoPanel}</div>}
 
-                <button className="btn-navy" onClick={() => guardarCaract(false)} disabled={guardando}
+                <button className="btn-navy" onClick={() => guardarCaract(false)} disabled={guardando || (ticketAbierto && ticketAbierto.analista_actual && ticketAbierto.analista_actual !== analista?.id)}
                   style={{ width: "100%", padding: "9px", marginTop: 10 }}>
                   {guardando ? "Guardando…" : "Guardar ficha"}
                 </button>
