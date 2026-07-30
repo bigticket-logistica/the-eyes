@@ -38,6 +38,7 @@ function PanelPasarChofer({ caso, comp, dir, numero, onCerrar, analistaId }) {
   const [ocupado, setOcupado] = useState(false);
   const [error, setError] = useState("");
   const [ok, setOk] = useState("");
+  const [forzarTexto, setForzarTexto] = useState(false);
 
   useEffect(() => {
     let vivo = true;
@@ -48,7 +49,7 @@ function PanelPasarChofer({ caso, comp, dir, numero, onCerrar, analistaId }) {
     return () => { vivo = false; };
   }, [caso.conductor_telefono]);
 
-  const conPlantilla = ventana === false;
+  const conPlantilla = ventana === false && !forzarTexto;
   const primerNombre = (caso.conductor_nombre || "").split(" ")[0] || "conductor";
   const rutaTxt = caso.route_code || String(caso.case_id);
 
@@ -93,8 +94,15 @@ function PanelPasarChofer({ caso, comp, dir, numero, onCerrar, analistaId }) {
       <div style={{ fontSize: 11, color: "var(--texto-suave)", marginTop: 6 }}>
         {ventana === null ? "Verificando conversación…"
           : ventana ? "✓ Conversación abierta: va como mensaje normal."
+          : forzarTexto ? "Se enviará como texto normal (si Meta lo rechaza, desmarca la casilla)."
           : "Sin conversación en 24h: va por plantilla aprobada de Meta."}
       </div>
+      {ventana === false && (
+        <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11.5, marginTop: 6, cursor: "pointer" }}>
+          <input type="checkbox" checked={forzarTexto} onChange={(e) => setForzarTexto(e.target.checked)} />
+          El conductor ya escribió: enviar como texto normal
+        </label>
+      )}
       {error && <div style={{ color: "#791F1F", fontSize: 12, marginTop: 8 }}>{error}</div>}
       {ok && <div style={{ color: "#166534", fontSize: 12, marginTop: 8 }}>{ok}</div>}
     </Modal>
