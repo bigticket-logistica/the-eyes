@@ -22,7 +22,22 @@ export async function conversacionPorTelefono(telefono) {
     .like("telefono", `%${t.slice(-10)}`)
     .limit(1);
   if (error) throw error;
-  return data && data[0] ? data[0] : null;
+  const conv = data && data[0] ? data[0] : null;
+  if (!conv) return null;
+  // La ventana de 24h de Meta se mide con el último mensaje ENTRANTE. El campo
+  // denormalizado de la conversación no siempre viene poblado, así que lo
+  // verificamos contra los mensajes reales, que son la fuente de verdad.
+  if (!conv.ultimo_entrante_en) {
+    const { data: ent } = await sb
+      .from("crm_inc_mensajes")
+      .select("creado_en")
+      .eq("conversacion_id", conv.id)
+      .eq("direccion", "entrante")
+      .order("creado_en", { ascending: false })
+      .limit(1);
+    if (ent && ent[0]) conv.ultimo_entrante_en = ent[0].creado_en;
+  }
+  return conv;
 }
 
 // ¿La ventana de 24h de Meta está abierta? (hay texto libre si el conductor
@@ -40,8 +55,15 @@ export function ventanaAbierta(conversacion) {
 // (texto sigue siendo obligatorio: es lo que se guarda en el hilo).
 // Devuelve { ok, wa_message_id, conversacion_id }.
 export async function enviarMensaje({ telefono, texto, caseId, emisorId, plantilla }) {
+  // Meta rechaza parámetros de plantilla con saltos de línea, tabulaciones o
+  // 4+ espacios seguidos. Se aplanan antes de enviar (el texto que se guarda
+  // en el hilo conserva su formato original).
+  const aplanar = (v) => String(v ?? "").replace(/[\r\n\t]+/g, " · ").replace(/\s{2,}/g, " ").trim();
+  const plt = plantilla
+    ? { ...plantilla, variables: (plantilla.variables || []).map(aplanar) }
+    : null;
   const { data, error } = await sb.functions.invoke("whatsapp-enviar", {
-    body: { telefono, texto, case_id: caseId, emisor: "analista", emisor_id: emisorId, plantilla: plantilla || null },
+    body: { telefono, texto, case_id: caseId, emisor: "analista", emisor_id: emisorId, plantilla: plt },
   });
   if (error) throw error;
   if (!data || data.ok === false) throw new Error(data?.error || "No se pudo enviar");
