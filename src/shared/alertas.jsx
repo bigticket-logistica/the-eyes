@@ -70,41 +70,30 @@ export function AlertasProvider({ children }) {
     return () => { sb.removeChannel(canal); };
   }, []);
 
-  // Realtime: aviso en vivo cuando OTRO analista (o Biggy) toma un ticket.
-  // Se siembra el estado actual de dueños para avisar solo en la transición.
-  const duenosRef = useRef(new Map());     // caso.id → analista_actual
-  const nombresRef = useRef({});           // analista.id → nombre
+  // Realtime: aviso en vivo cuando OTRO analista (o Biggy) toma o recibe un
+  // ticket. Fuente: crm_inc_asignaciones — cada toma/traspaso es un INSERT,
+  // así el toast salta en el momento exacto, sin inferir transiciones.
+  const nombresRef = useRef({});
   useEffect(() => {
     let vivo = true;
-    (async () => {
-      try {
-        const [{ data: an }, { data: cs }] = await Promise.all([
-          sb.from("crm_analistas").select("id, nombre"),
-          sb.from("crm_inc_casos").select("id, analista_actual")
-            .order("fecha_caso", { ascending: false }).limit(300),
-        ]);
-        if (!vivo) return;
-        nombresRef.current = Object.fromEntries((an || []).map((a) => [a.id, a.nombre]));
-        for (const c of (cs || [])) duenosRef.current.set(c.id, c.analista_actual);
-      } catch { /* sin nombres, los toasts dirán "un analista" */ }
-    })();
+    sb.from("crm_analistas").select("id, nombre").then(({ data }) => {
+      if (vivo) nombresRef.current = Object.fromEntries((data || []).map((a) => [a.id, a.nombre]));
+    });
 
-    const canal = sb.channel("alertas-tickets")
+    const canal = sb.channel("alertas-asignaciones")
       .on("postgres_changes",
-        { event: "UPDATE", schema: "public", table: "crm_inc_casos" },
+        { event: "INSERT", schema: "public", table: "crm_inc_asignaciones" },
         (payload) => {
-          const c = payload.new;
-          const previo = duenosRef.current.get(c.id);
-          duenosRef.current.set(c.id, c.analista_actual);
-          // avisar solo en la transición a un dueño nuevo, que no sea yo
-          if (!c.analista_actual) return;
-          if (previo === c.analista_actual) return;
-          if (analista?.id && c.analista_actual === analista.id) return;
-          const nombre = nombresRef.current[c.analista_actual] || "Un analista";
-          const id = "tk-" + c.id + "-" + Date.now();
+          const a = payload.new;
+          if (analista?.id && a.analista_id === analista.id) return;  // mis tomas no me avisan
+          const nombre = nombresRef.current[a.analista_id] || "Un analista";
+          const cod = Number(a.case_id) >= 900000000
+            ? "BT-" + String(Number(a.case_id) - 900000000).padStart(8, "0")
+            : "#" + a.case_id;
+          const id = "as-" + a.id + "-" + Date.now();
           setToasts((prev) => [...prev, {
             id, titulo: "🎫 Ticket tomado",
-            texto: `${nombre} tomó el ticket ${c.codigo || "#" + c.case_id}`,
+            texto: `${nombre} tomó el ticket ${cod}`,
           }].slice(-4));
           if (sonidoRef.current) reproducirDing();
           setTimeout(() => setToasts((prev) => prev.filter((t) => t.id !== id)), 6000);
