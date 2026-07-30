@@ -95,6 +95,7 @@ export default function HiloTicket({ caso, onTomar, onResolver, analistaId, nomb
   const cerrado = !ESTADOS_ABIERTOS.includes(caso.estado_id);
   const esMio = caso.analista_actual && caso.analista_actual === analistaId;
   const sinDueno = !caso.analista_actual && !cerrado;
+  const deOtro = !!caso.analista_actual && caso.analista_actual !== analistaId;
   const ventana = ventanaAbierta(conversacion);
 
   async function handleEnviar() {
@@ -180,11 +181,11 @@ export default function HiloTicket({ caso, onTomar, onResolver, analistaId, nomb
                     value={texto}
                     onChange={(e) => setTexto(e.target.value)}
                     onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleEnviar(); } }}
-                    placeholder={caso.conductor_telefono ? "Escribe al conductor…" : "Sin teléfono del conductor"}
-                    disabled={enviando || !caso.conductor_telefono}
+                    placeholder={deOtro ? `Ticket de ${(nombres && nombres[caso.analista_actual]) || "otro analista"} — tómalo para escribir` : (caso.conductor_telefono ? "Escribe al conductor…" : "Sin teléfono del conductor")}
+                    disabled={enviando || !caso.conductor_telefono || deOtro}
                     style={{ flex: 1 }}
                   />
-                  <button className="btn-navy" onClick={handleEnviar} disabled={enviando || !texto.trim() || !caso.conductor_telefono}
+                  <button className="btn-navy" onClick={handleEnviar} disabled={enviando || !texto.trim() || !caso.conductor_telefono || deOtro}
                     style={{ padding: "9px 16px", whiteSpace: "nowrap" }}>
                     {enviando ? "Enviando…" : "Enviar"}
                   </button>
