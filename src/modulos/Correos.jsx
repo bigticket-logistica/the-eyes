@@ -73,6 +73,9 @@ export default function Correos() {
   const [cargando, setCargando] = useState(true);
   const [error, setError] = useState("");
   const [soloNoLeidos, setSoloNoLeidos] = useState(false);
+  const [busqueda, setBusqueda] = useState("");
+  const [hilosBusqueda, setHilosBusqueda] = useState(null);   // null = sin búsqueda activa
+  const [fecha, setFecha] = useState("");                     // "" = todas las fechas
 
   // redacción / respuesta
   const [nuevo, setNuevo] = useState(false);
@@ -87,7 +90,7 @@ export default function Correos() {
 
   const cargarHilos = useCallback(async () => {
     const { data, error } = await sb.from("vw_correos_hilos")
-      .select("*").order("ultimo_en", { ascending: false }).limit(100);
+      .select("*").order("ultimo_en", { ascending: false }).limit(300);
     if (error) { setError("No pudimos cargar la bandeja."); setCargando(false); return; }
     setHilos(data || []);
     setCargando(false);
@@ -116,6 +119,18 @@ export default function Correos() {
   }, [cargarHilos]);
 
   useEffect(() => { cargarHilos(); }, [cargarHilos]);
+
+  // Búsqueda en TODOS los correos (no solo en lo cargado): pide al servidor
+  // las claves de hilo que contienen el texto y filtra la lista con eso.
+  useEffect(() => {
+    const t = busqueda.trim();
+    if (t.length < 3) { setHilosBusqueda(null); return; }
+    const timer = setTimeout(async () => {
+      const { data, error } = await sb.rpc("fn_buscar_correos", { p_texto: t });
+      setHilosBusqueda(error ? [] : (data || []).map((r) => r.hilo_key));
+    }, 350);
+    return () => clearTimeout(timer);
+  }, [busqueda]);
 
   // Realtime: un correo nuevo refresca la bandeja y el hilo abierto
   useEffect(() => {
@@ -153,8 +168,12 @@ export default function Correos() {
     setDestinatario(""); setAsunto(""); setCuerpo("");
   }
 
-  const visibles = soloNoLeidos ? hilos.filter((h) => h.no_leidos > 0) : hilos;
   const totalNoLeidos = hilos.reduce((a, h) => a + Number(h.no_leidos || 0), 0);
+  const visibles = hilos
+    .filter((h) => (soloNoLeidos ? h.no_leidos > 0 : true))
+    .filter((h) => (fecha ? h.ultimo_dia === fecha : true))
+    .filter((h) => (hilosBusqueda ? hilosBusqueda.includes(h.hilo_key) : true));
+  const filtrando = soloNoLeidos || !!fecha || !!hilosBusqueda;
 
   return (
     <div style={{ display: "grid", gridTemplateColumns: "minmax(260px, 0.75fr) 1.65fr", height: "100%", minHeight: 0, overflow: "hidden" }}>
@@ -165,7 +184,7 @@ export default function Correos() {
             <div>
               <div style={{ fontSize: 13, fontWeight: 600 }}>Correos</div>
               <div style={{ fontSize: 11, color: "var(--texto-suave)" }}>
-                {hilos.length} {hilos.length === 1 ? "hilo" : "hilos"}
+                {filtrando ? `${visibles.length} de ${hilos.length}` : `${hilos.length} ${hilos.length === 1 ? "hilo" : "hilos"}`}
                 {totalNoLeidos > 0 ? ` · ${totalNoLeidos} sin leer` : ""}
               </div>
             </div>
@@ -173,6 +192,19 @@ export default function Correos() {
               style={{ fontSize: 12, padding: "6px 12px", background: "var(--navy)", color: "#fff", border: "none", borderRadius: 7, cursor: "pointer" }}>
               ✉️ Nuevo
             </button>
+          </div>
+          <input value={busqueda} onChange={(e) => setBusqueda(e.target.value)}
+            placeholder="🔍 Buscar en asunto, texto o remitente…"
+            style={{ width: "100%", boxSizing: "border-box", fontSize: 12, padding: "6px 10px",
+              border: "1px solid var(--borde)", borderRadius: 7, marginBottom: 6 }} />
+          <div style={{ display: "flex", gap: 6, alignItems: "center", marginBottom: 6 }}>
+            <input type="date" value={fecha} onChange={(e) => setFecha(e.target.value)}
+              title="Filtrar por día del último correo"
+              style={{ fontSize: 11.5, padding: "4px 8px", border: "1px solid var(--borde)", borderRadius: 7, flex: 1 }} />
+            {(fecha || busqueda) && (
+              <button onClick={() => { setFecha(""); setBusqueda(""); }}
+                style={{ fontSize: 11, padding: "4px 10px", flexShrink: 0 }}>Limpiar</button>
+            )}
           </div>
           <div style={{ display: "flex", gap: 5 }}>
             {[{ v: false, t: "Todos" }, { v: true, t: `Sin leer${totalNoLeidos ? " (" + totalNoLeidos + ")" : ""}` }].map((o) => (
@@ -190,7 +222,10 @@ export default function Correos() {
           <div style={{ padding: 20, textAlign: "center", color: "var(--texto-suave)", fontSize: 13 }}>Cargando…</div>
         ) : visibles.length === 0 ? (
           <div style={{ padding: 20, textAlign: "center", color: "var(--texto-suave)", fontSize: 12.5, lineHeight: 1.6 }}>
-            {soloNoLeidos ? "Nada sin leer. 👌" : "Sin correos todavía. Los que envíes desde una incidencia y las respuestas de los clientes aparecerán acá."}
+            {busqueda.trim().length >= 3 ? `Sin resultados para "${busqueda.trim()}".`
+              : fecha ? `Sin correos del ${fecha}.`
+              : soloNoLeidos ? "Nada sin leer. 👌"
+              : "Sin correos todavía. Los que envíes desde una incidencia y las respuestas de los clientes aparecerán acá."}
           </div>
         ) : visibles.map((h) => {
           const activo = sel?.hilo_key === h.hilo_key;
