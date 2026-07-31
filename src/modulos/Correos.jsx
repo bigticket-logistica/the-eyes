@@ -72,7 +72,7 @@ export default function Correos() {
   const [correos, setCorreos] = useState([]);
   const [cargando, setCargando] = useState(true);
   const [error, setError] = useState("");
-  const [soloNoLeidos, setSoloNoLeidos] = useState(false);
+  const [vista, setVista] = useState("todos");   // todos | noleidos | archivados
   const [busqueda, setBusqueda] = useState("");
   const [hilosBusqueda, setHilosBusqueda] = useState(null);   // null = sin búsqueda activa
   const [fecha, setFecha] = useState("");                     // "" = todas las fechas
@@ -163,6 +163,19 @@ export default function Correos() {
     } finally { setEnviando(false); }
   }
 
+  async function archivarHilo(h, archivar) {
+    if (!h) return;
+    const msg = archivar
+      ? "¿Archivar este hilo? Sale de la bandeja; si el cliente responde, vuelve solo."
+      : "¿Devolver este hilo a la bandeja?";
+    if (!window.confirm(msg)) return;
+    const { error } = await sb.from("crm_inc_correos")
+      .update({ archivado: archivar }).eq("hilo_key", h.hilo_key);
+    if (error) { setAviso("No se pudo archivar: " + error.message); return; }
+    setSel(null); setCorreos([]);
+    await cargarHilos();
+  }
+
   function nuevoCorreo() {
     setSel(null); setCorreos([]); setNuevo(true); setAviso("");
     setDestinatario(""); setAsunto(""); setCuerpo("");
@@ -170,10 +183,13 @@ export default function Correos() {
 
   const totalNoLeidos = hilos.reduce((a, h) => a + Number(h.no_leidos || 0), 0);
   const visibles = hilos
-    .filter((h) => (soloNoLeidos ? h.no_leidos > 0 : true))
+    .filter((h) => (vista === "archivados" ? h.todo_archivado : !h.todo_archivado))
+    .filter((h) => (vista === "noleidos" ? h.no_leidos > 0 : true))
     .filter((h) => (fecha ? h.ultimo_dia === fecha : true))
     .filter((h) => (hilosBusqueda ? hilosBusqueda.includes(h.hilo_key) : true));
-  const filtrando = soloNoLeidos || !!fecha || !!hilosBusqueda;
+  const archivados = hilos.filter((h) => h.todo_archivado).length;
+  const activos = hilos.length - archivados;
+  const filtrando = vista !== "todos" || !!fecha || !!hilosBusqueda;
 
   return (
     <div style={{ display: "grid", gridTemplateColumns: "minmax(260px, 0.75fr) 1.65fr", height: "100%", minHeight: 0, overflow: "hidden" }}>
@@ -184,7 +200,7 @@ export default function Correos() {
             <div>
               <div style={{ fontSize: 13, fontWeight: 600 }}>Correos</div>
               <div style={{ fontSize: 11, color: "var(--texto-suave)" }}>
-                {filtrando ? `${visibles.length} de ${hilos.length}` : `${hilos.length} ${hilos.length === 1 ? "hilo" : "hilos"}`}
+                {filtrando ? `${visibles.length} de ${activos}` : `${activos} ${activos === 1 ? "hilo" : "hilos"}`}
                 {totalNoLeidos > 0 ? ` · ${totalNoLeidos} sin leer` : ""}
               </div>
             </div>
@@ -206,13 +222,18 @@ export default function Correos() {
                 style={{ fontSize: 11, padding: "4px 10px", flexShrink: 0 }}>Limpiar</button>
             )}
           </div>
-          <div style={{ display: "flex", gap: 5 }}>
-            {[{ v: false, t: "Todos" }, { v: true, t: `Sin leer${totalNoLeidos ? " (" + totalNoLeidos + ")" : ""}` }].map((o) => (
-              <button key={String(o.v)} onClick={() => setSoloNoLeidos(o.v)}
-                style={{ fontSize: 11.5, padding: "4px 12px", borderRadius: 14, cursor: "pointer",
-                  border: `1px solid ${soloNoLeidos === o.v ? "var(--naranja)" : "var(--borde)"}`,
-                  background: soloNoLeidos === o.v ? "var(--naranja-suave)" : "#fff",
-                  fontWeight: soloNoLeidos === o.v ? 600 : 400 }}>{o.t}</button>
+          <div style={{ display: "flex", gap: 5, flexWrap: "wrap" }}>
+            {[
+              { v: "todos", t: "Todos" },
+              { v: "noleidos", t: `Sin leer${totalNoLeidos ? " (" + totalNoLeidos + ")" : ""}` },
+              { v: "archivados", t: `🗄 ${archivados}` },
+            ].map((o) => (
+              <button key={o.v} onClick={() => setVista(o.v)}
+                title={o.v === "archivados" ? "Hilos archivados" : undefined}
+                style={{ fontSize: 11.5, padding: "4px 11px", borderRadius: 14, cursor: "pointer",
+                  border: `1px solid ${vista === o.v ? "var(--naranja)" : "var(--borde)"}`,
+                  background: vista === o.v ? "var(--naranja-suave)" : "#fff",
+                  fontWeight: vista === o.v ? 600 : 400 }}>{o.t}</button>
             ))}
           </div>
         </div>
@@ -224,7 +245,8 @@ export default function Correos() {
           <div style={{ padding: 20, textAlign: "center", color: "var(--texto-suave)", fontSize: 12.5, lineHeight: 1.6 }}>
             {busqueda.trim().length >= 3 ? `Sin resultados para "${busqueda.trim()}".`
               : fecha ? `Sin correos del ${fecha}.`
-              : soloNoLeidos ? "Nada sin leer. 👌"
+              : vista === "noleidos" ? "Nada sin leer. 👌"
+              : vista === "archivados" ? "No hay hilos archivados."
               : "Sin correos todavía. Los que envíes desde una incidencia y las respuestas de los clientes aparecerán acá."}
           </div>
         ) : visibles.map((h) => {
@@ -284,6 +306,13 @@ export default function Correos() {
                   {nuevo ? "Sale desde la torre de control" : `${sel.total} ${sel.total === 1 ? "correo" : "correos"}${sel.case_id ? ` · ticket #${sel.case_id}` : ""}`}
                 </div>
               </div>
+              {!nuevo && sel && (
+                <button onClick={() => archivarHilo(sel, !sel.todo_archivado)}
+                  title={sel.todo_archivado ? "Devolver a la bandeja" : "Archivar: sale de la bandeja, vuelve si el cliente responde"}
+                  style={{ marginLeft: "auto", fontSize: 12, padding: "5px 11px", flexShrink: 0, whiteSpace: "nowrap" }}>
+                  {sel.todo_archivado ? "↩ Restaurar" : "🗄 Archivar"}
+                </button>
+              )}
             </div>
 
             {!nuevo && (
