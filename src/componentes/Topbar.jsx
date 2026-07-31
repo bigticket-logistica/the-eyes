@@ -11,10 +11,11 @@ function Tab({ to, children, badge }) {
   return (
     <NavLink to={to} end style={({ isActive }) => ({
       color: isActive ? "#fff" : "#bcd0ec",
-      fontSize: 13, fontWeight: isActive ? 600 : 400,
-      padding: "5px 12px", borderRadius: 7,
+      fontSize: 12.5, fontWeight: isActive ? 600 : 400,
+      padding: "5px 9px", borderRadius: 7,
       background: isActive ? "var(--navy-suave)" : "transparent",
-      textDecoration: "none", display: "inline-flex", alignItems: "center", gap: 6,
+      textDecoration: "none", display: "inline-flex", alignItems: "center", gap: 5,
+      whiteSpace: "nowrap", flexShrink: 0,
     })}>
       {children}
       {badge > 0 && (
@@ -32,22 +33,23 @@ export default function Topbar() {
   return (
     <header style={{
       display: "flex", alignItems: "center", justifyContent: "space-between",
-      padding: "10px 18px", background: "var(--navy)", flexShrink: 0,
+      padding: "9px 16px", background: "var(--navy)", flexShrink: 0, gap: 12,
     }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 0 }}>
         <div style={{
           width: 28, height: 28, borderRadius: 8, background: "var(--naranja)",
           display: "flex", alignItems: "center", justifyContent: "center",
           color: "#fff", fontWeight: 700, fontSize: 15,
         }}>◉</div>
-        <span style={{ color: "#fff", fontWeight: 600, fontSize: 16 }}>The Eyes</span>
-        <span style={{ color: "#bcd0ec", fontSize: 12, paddingLeft: 12, borderLeft: "1px solid var(--navy-suave)" }}>
-          Torre de soporte · {analista?.pais || "MX"}
+        <span style={{ color: "#fff", fontWeight: 600, fontSize: 15, whiteSpace: "nowrap" }}>The Eyes</span>
+        <span style={{ color: "#bcd0ec", fontSize: 11.5, paddingLeft: 10, borderLeft: "1px solid var(--navy-suave)", whiteSpace: "nowrap" }}
+          title={`Torre de soporte · ${analista?.pais || "MX"}`}>
+          {analista?.pais || "MX"}
         </span>
-        <nav style={{ display: "flex", alignItems: "center", gap: 4, marginLeft: 10 }}>
+        <nav style={{ display: "flex", alignItems: "center", gap: 2, marginLeft: 6, overflowX: "auto" }}>
           <Tab to="/">Incidencias</Tab>
-          <Tab to="/detalle-dia">Detalle día</Tab>
-          <Tab to="/consultas" badge={noLeidos}>Consultas en ruta</Tab>
+          <Tab to="/detalle-dia">Detalle</Tab>
+          <Tab to="/consultas" badge={noLeidos}>Consultas</Tab>
           <Tab to="/correos" badge={correosNoLeidos}>Correos</Tab>
           <Tab to="/bitacora">Bitácora</Tab>
           <Tab to="/directorio">Directorio</Tab>
@@ -55,13 +57,13 @@ export default function Topbar() {
         </nav>
       </div>
 
-      <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 10, flexShrink: 0 }}>
         <button onClick={() => setSonidoActivo(!sonidoActivo)}
           title={sonidoActivo ? "Sonido activado" : "Sonido silenciado"}
           style={{ background: "transparent", border: "none", color: "#bcd0ec", cursor: "pointer", fontSize: 16, padding: 2 }}>
           {sonidoActivo ? "🔔" : "🔕"}
         </button>
-        <span style={{ color: "#bcd0ec", fontSize: 13 }}>{analista?.nombre}</span>
+        <span style={{ color: "#bcd0ec", fontSize: 12.5, whiteSpace: "nowrap", maxWidth: 130, overflow: "hidden", textOverflow: "ellipsis" }} title={analista?.nombre}>{analista?.nombre}</span>
         <div style={{
           width: 28, height: 28, borderRadius: "50%", background: "var(--naranja)",
           display: "flex", alignItems: "center", justifyContent: "center",
@@ -69,7 +71,7 @@ export default function Topbar() {
         }}>{iniciales(analista?.nombre)}</div>
         <button onClick={salir} style={{
           background: "transparent", border: "1px solid var(--navy-suave)",
-          color: "#bcd0ec", fontSize: 12, padding: "5px 12px",
+          color: "#bcd0ec", fontSize: 12, padding: "5px 11px", whiteSpace: "nowrap",
         }}>Salir</button>
       </div>
     </header>
