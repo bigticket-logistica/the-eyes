@@ -22,6 +22,7 @@ export default function Bitacora() {
   const [eventos, setEventos] = useState([]);
   const [ns, setNs] = useState([]);
   const [cierre, setCierre] = useState(null);
+  const [incidencias, setIncidencias] = useState([]);
   const [enviando, setEnviando] = useState(false);
   const [avisoEnvio, setAvisoEnvio] = useState("");
   const [cargando, setCargando] = useState(true);
@@ -38,7 +39,16 @@ export default function Bitacora() {
       if (ev.error) throw ev.error;
       setEventos(ev.data || []);
       setNs(nsr.error ? [] : (nsr.data || []));
-      setCierre(ci.error ? null : (ci.data || null));
+      const c = ci.error ? null : (ci.data || null);
+      setCierre(c);
+      // Si el día ya se cerró, mostramos la FOTO guardada al cerrar (no un
+      // recálculo): la bitácora debe reflejar lo que la analista cerró.
+      if (c && Array.isArray(c.incidencias_detalle)) {
+        setIncidencias(c.incidencias_detalle);
+      } else {
+        const inc = await sb.rpc("fn_incidencias_del_dia", { p_fecha: fecha });
+        setIncidencias(inc.error ? [] : (inc.data || []));
+      }
     } catch (e) {
       setError("No pudimos cargar la bitácora.");
     } finally { setCargando(false); }
@@ -115,6 +125,54 @@ export default function Bitacora() {
       {error && <div style={{ background: "#FCEBEB", color: "#791F1F", borderRadius: 8, padding: "10px 14px", marginBottom: 14, fontSize: 13 }}>{error}</div>}
 
       {/* ── Eventos graves ── */}
+      {/* ─── INCIDENCIAS DEL DÍA ─── */}
+      {(() => {
+        const tot = incidencias.reduce((a, r) => a + Number(r.total || 0), 0);
+        const cer = incidencias.reduce((a, r) => a + Number(r.cerrados || 0), 0);
+        return (
+          <div style={{ background: "#fff", border: "1px solid var(--borde)", borderRadius: 10, overflow: "hidden", marginBottom: 18 }}>
+            <div style={{ padding: "10px 14px", borderBottom: "1px solid var(--borde)", display: "flex", alignItems: "baseline", gap: 8 }}>
+              <span style={{ fontWeight: 600, fontSize: 13 }}>Incidencias del día</span>
+              <span style={{ fontSize: 20, fontWeight: 700, color: "var(--navy)" }}>{tot}</span>
+              <span style={{ fontSize: 11.5, color: "var(--texto-suave)" }}>
+                {cer} cerradas · {tot - cer} pendientes
+              </span>
+              <span style={{ marginLeft: "auto", fontSize: 10.5, color: "var(--texto-tenue)" }}>
+                {cierre ? "cifras congeladas al cerrar" : "en curso, sube durante el día"}
+              </span>
+            </div>
+            {incidencias.length === 0 ? (
+              <div style={{ padding: 18, textAlign: "center", color: "var(--texto-suave)", fontSize: 13 }}>
+                Sin incidencias registradas este día.
+              </div>
+            ) : (
+              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+                <thead>
+                  <tr style={{ color: "var(--texto-suave)", fontSize: 11, textAlign: "left" }}>
+                    <th style={{ padding: "8px 14px", fontWeight: 500 }}>Motivo</th>
+                    <th style={{ padding: "8px 10px", fontWeight: 500 }}>Total</th>
+                    <th style={{ padding: "8px 10px", fontWeight: 500 }}>%</th>
+                    <th style={{ padding: "8px 14px", fontWeight: 500 }}>Cerradas</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {incidencias.map((r) => (
+                    <tr key={r.motivo_id} style={{ borderTop: "1px solid var(--borde)" }}>
+                      <td style={{ padding: "9px 14px" }}>{motivoLegible(r.motivo_id, null)}</td>
+                      <td style={{ padding: "9px 10px", fontWeight: 600 }}>{r.total}</td>
+                      <td style={{ padding: "9px 10px", color: "var(--texto-suave)" }}>
+                        {tot > 0 ? Math.round((100 * Number(r.total)) / tot) : 0}%
+                      </td>
+                      <td style={{ padding: "9px 14px" }}>{r.cerrados}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </div>
+        );
+      })()}
+
       <div style={{ background: "#fff", border: "1px solid var(--borde)", borderRadius: 10, overflow: "hidden", marginBottom: 18 }}>
         <div style={{ padding: "10px 14px", fontWeight: 600, fontSize: 13, borderBottom: "1px solid var(--borde)" }}>
           Eventos graves <span style={{ fontWeight: 400, color: "var(--texto-suave)", fontSize: 12 }}>({eventos.length})</span>
