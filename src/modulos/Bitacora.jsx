@@ -65,6 +65,16 @@ export default function Bitacora() {
     return () => { sb.removeChannel(canal); };
   }, [fechaSel, cargar]);
 
+  async function reabrir() {
+    if (!window.confirm(`¿Reabrir la bitácora del ${fechaSel}?\n\nSe borra el registro de cierre y las cifras vuelven a calcularse en vivo. El correo ya enviado no se puede deshacer.`)) return;
+    setEnviando(true);
+    const { error } = await sb.from("crm_bitacora_cierres").delete().eq("fecha", fechaSel);
+    setEnviando(false);
+    if (error) { setAvisoEnvio("No se pudo reabrir: " + error.message); return; }
+    setAvisoEnvio("Bitácora reabierta ✓ · las cifras vuelven a actualizarse solas");
+    await cargar(fechaSel);
+  }
+
   async function cerrarYEnviar() {
     if (enviando) return;
     const accion = cierre ? "reenviar" : "cerrar y enviar";
@@ -112,8 +122,17 @@ export default function Bitacora() {
       </div>
 
       {cierre && (
-        <div style={{ background: "#dcfce7", color: "#166534", borderRadius: 8, padding: "8px 14px", marginBottom: 12, fontSize: 12.5 }}>
-          ✅ Bitácora cerrada el {new Date(cierre.cerrada_en).toLocaleString("es-MX", { timeZone: "America/Mexico_City" })} · enviada a {(cierre.destinatarios || []).join(", ")}
+        <div style={{ background: "#dcfce7", color: "#166534", borderRadius: 8, padding: "8px 14px", marginBottom: 12,
+          fontSize: 12.5, display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+          <span>
+            ✅ Bitácora cerrada el {new Date(cierre.cerrada_en).toLocaleString("es-MX", { timeZone: "America/Mexico_City" })}
+            {" "}· enviada a {(cierre.destinatarios || []).join(", ")}
+          </span>
+          <button onClick={reabrir} disabled={enviando}
+            title="Borra el registro de cierre: las cifras vuelven a calcularse en vivo"
+            style={{ marginLeft: "auto", fontSize: 11.5, padding: "4px 11px", flexShrink: 0 }}>
+            🔓 Reabrir
+          </button>
         </div>
       )}
       {avisoEnvio && (
