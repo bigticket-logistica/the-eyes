@@ -165,6 +165,168 @@ function BuscadorPaquete({ onPasarAlChofer }) {
   );
 }
 
+
+// ── Guardar un número desconocido en el Directorio ─────────────────────────
+// Dos caminos: asociarlo a un conductor que YA existe (típico cuando cambió
+// de teléfono o escribe desde otro equipo) o crear uno nuevo. Asociar evita
+// registros duplicados del mismo chofer.
+function ModalGuardarNumero({ telefono, onCerrar, onGuardado, analistaId }) {
+  const [modo, setModo] = useState("existente");
+  const [q, setQ] = useState("");
+  const [candidatos, setCandidatos] = useState([]);
+  const [elegido, setElegido] = useState(null);
+  const [nuevo, setNuevo] = useState({ nombre: "", patente: "", email: "" });
+  const [guardando, setGuardando] = useState(false);
+  const [error, setError] = useState("");
+
+  // buscar conductores del padrón por nombre o patente
+  useEffect(() => {
+    const t = q.trim();
+    if (modo !== "existente" || t.length < 2) { setCandidatos([]); return; }
+    const timer = setTimeout(async () => {
+      const { data } = await sb.from("vw_directorio_conductores")
+        .select("driver_id, nombre, telefono, patente, email")
+        .or(`nombre.ilike.%${t}%,patente.ilike.%${t}%`)
+        .limit(12);
+      setCandidatos(data || []);
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [q, modo]);
+
+  const tel = String(telefono || "").replace(/\D/g, "");
+
+  async function guardar() {
+    if (guardando) return;
+    setGuardando(true); setError("");
+    try {
+      let fila;
+      if (modo === "existente") {
+        if (!elegido) throw new Error("Elige un conductor de la lista");
+        const anterior = elegido.telefono && elegido.telefono !== tel
+          ? `Tel. anterior: ${elegido.telefono}` : null;
+        fila = {
+          driver_id: elegido.driver_id,
+          nombre: elegido.nombre,
+          telefono: tel,
+          email: elegido.email || null,
+          patente: elegido.patente || null,
+          notas: [anterior, "Número tomado de Consultas en ruta"].filter(Boolean).join(" · "),
+          origen: "ajuste",
+        };
+      } else {
+        if (!nuevo.nombre.trim()) throw new Error("Escribe el nombre del conductor");
+        fila = {
+          driver_id: -Date.now(),
+          nombre: nuevo.nombre.trim(),
+          telefono: tel,
+          email: nuevo.email.trim() || null,
+          patente: nuevo.patente.trim() || null,
+          notas: "Creado desde Consultas en ruta",
+          origen: "manual",
+        };
+      }
+      fila.actualizado_en = new Date().toISOString();
+      fila.actualizado_por = analistaId || null;
+      const { error: e } = await sb.from("crm_directorio_conductores")
+        .upsert(fila, { onConflict: "driver_id" });
+      if (e) throw new Error(e.message);
+      onGuardado(fila.nombre);
+    } catch (e) {
+      setError(e.message || "No se pudo guardar");
+      setGuardando(false);
+    }
+  }
+
+  return (
+    <div style={{ position: "fixed", inset: 0, background: "rgba(15,23,42,.45)", zIndex: 60,
+      display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }} onClick={onCerrar}>
+      <div style={{ background: "#fff", borderRadius: 12, width: 460, maxWidth: "100%", padding: 18 }}
+        onClick={(e) => e.stopPropagation()}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 2 }}>
+          <div style={{ fontWeight: 700, fontSize: 15 }}>💾 Guardar en Directorio</div>
+          <button onClick={onCerrar} style={{ fontSize: 12, padding: "2px 10px" }}>✕</button>
+        </div>
+        <div style={{ fontSize: 12, color: "var(--texto-suave)", marginBottom: 12 }}>
+          Número <b>{tel}</b> · aún no está en el Directorio
+        </div>
+
+        <div style={{ display: "flex", gap: 5, marginBottom: 12 }}>
+          {[{ v: "existente", t: "Asociar a un conductor" }, { v: "nuevo", t: "Crear nuevo" }].map((o) => (
+            <button key={o.v} onClick={() => { setModo(o.v); setError(""); }}
+              style={{ fontSize: 11.5, padding: "5px 12px", borderRadius: 14, cursor: "pointer",
+                border: `1px solid ${modo === o.v ? "var(--naranja)" : "var(--borde)"}`,
+                background: modo === o.v ? "var(--naranja-suave)" : "#fff",
+                fontWeight: modo === o.v ? 600 : 400 }}>{o.t}</button>
+          ))}
+        </div>
+
+        {modo === "existente" ? (
+          <>
+            <input value={q} onChange={(e) => { setQ(e.target.value); setElegido(null); }}
+              placeholder="Buscar por nombre o patente…" autoFocus
+              style={{ width: "100%", boxSizing: "border-box", fontSize: 13, padding: "7px 10px",
+                border: "1px solid var(--borde)", borderRadius: 7, marginBottom: 8 }} />
+            <div style={{ maxHeight: 220, overflowY: "auto", border: "1px solid var(--borde)", borderRadius: 8 }}>
+              {q.trim().length < 2 ? (
+                <div style={{ padding: 14, fontSize: 12, color: "var(--texto-tenue)", textAlign: "center" }}>
+                  Escribe al menos 2 letras del nombre o la patente.
+                </div>
+              ) : candidatos.length === 0 ? (
+                <div style={{ padding: 14, fontSize: 12, color: "var(--texto-tenue)", textAlign: "center" }}>
+                  Sin coincidencias. Prueba con "Crear nuevo".
+                </div>
+              ) : candidatos.map((c) => (
+                <div key={c.driver_id} onClick={() => setElegido(c)}
+                  style={{ padding: "8px 12px", borderBottom: "1px solid #f1f2f4", cursor: "pointer",
+                    background: elegido?.driver_id === c.driver_id ? "var(--naranja-suave)" : "#fff" }}>
+                  <div style={{ fontSize: 13, fontWeight: 600 }}>{c.nombre || "—"}</div>
+                  <div style={{ fontSize: 11, color: "var(--texto-suave)" }}>
+                    {c.patente ? c.patente + " · " : ""}{c.telefono ? "tel. actual " + c.telefono : "sin teléfono"}
+                  </div>
+                </div>
+              ))}
+            </div>
+            {elegido && elegido.telefono && elegido.telefono.replace(/\D/g, "") !== tel && (
+              <div style={{ background: "#FAEEDA", color: "#633806", borderRadius: 8, padding: "8px 12px",
+                fontSize: 11.5, marginTop: 8 }}>
+                {elegido.nombre} ya tiene el teléfono {elegido.telefono}. Se reemplazará por {tel}
+                (el anterior queda anotado en el Directorio).
+              </div>
+            )}
+          </>
+        ) : (
+          <>
+            <input value={nuevo.nombre} onChange={(e) => setNuevo((p) => ({ ...p, nombre: e.target.value }))}
+              placeholder="Nombre y apellido" autoFocus
+              style={{ width: "100%", boxSizing: "border-box", fontSize: 13, padding: "7px 10px",
+                border: "1px solid var(--borde)", borderRadius: 7, marginBottom: 6 }} />
+            <input value={nuevo.patente} onChange={(e) => setNuevo((p) => ({ ...p, patente: e.target.value }))}
+              placeholder="Patente (opcional)"
+              style={{ width: "100%", boxSizing: "border-box", fontSize: 13, padding: "7px 10px",
+                border: "1px solid var(--borde)", borderRadius: 7, marginBottom: 6 }} />
+            <input value={nuevo.email} onChange={(e) => setNuevo((p) => ({ ...p, email: e.target.value }))}
+              placeholder="Correo (opcional)"
+              style={{ width: "100%", boxSizing: "border-box", fontSize: 13, padding: "7px 10px",
+                border: "1px solid var(--borde)", borderRadius: 7 }} />
+          </>
+        )}
+
+        {error && <div style={{ color: "#791F1F", fontSize: 12, marginTop: 8 }}>{error}</div>}
+
+        <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 12 }}>
+          <button onClick={onCerrar} style={{ fontSize: 13, padding: "7px 14px" }}>Cancelar</button>
+          <button onClick={guardar}
+            disabled={guardando || (modo === "existente" ? !elegido : !nuevo.nombre.trim())}
+            style={{ fontSize: 13, padding: "7px 16px", background: "var(--navy)", color: "#fff",
+              border: "none", borderRadius: 7, cursor: "pointer", opacity: guardando ? 0.6 : 1 }}>
+            {guardando ? "Guardando…" : "Guardar"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function Consultas() {
   const [nombresAnalistas, setNombresAnalistas] = useState({});
   useEffect(() => {
@@ -335,21 +497,13 @@ export default function Consultas() {
 
   // cerrar: guarda caracterización, resuelve el ticket y, si hay etiqueta
   // GRAVE, anota automáticamente en la Bitácora del día
-  async function guardarNumeroNuevo() {
-    if (!sel) return;
-    const nombre = window.prompt("Nombre del conductor para " + sel.telefono + ":");
-    if (!nombre || !nombre.trim()) return;
-    const { error } = await sb.from("crm_directorio_conductores").insert({
-      driver_id: -Date.now(),
-      nombre: nombre.trim(),
-      telefono: String(sel.telefono || "").replace(/\D/g, ""),
-      origen: "manual",
-      notas: "Guardado desde Consultas en ruta",
-      actualizado_por: analista?.user_id || null,
-    });
-    if (error) { setAvisoPanel("No se pudo guardar en el directorio: " + error.message); return; }
-    setNombresLista((p) => ({ ...p, [sel.telefono]: nombre.trim() }));
-    if (sel) await cargarHilo(sel);
+  const [modalGuardar, setModalGuardar] = useState(false);
+  async function numeroGuardado(nombre) {
+    setModalGuardar(false);
+    if (sel) {
+      setNombresLista((p) => ({ ...p, [sel.telefono]: nombre }));
+      await cargarHilo(sel);
+    }
   }
 
   async function tomarTicketConsulta() {
@@ -521,8 +675,8 @@ export default function Consultas() {
               <div style={{ fontSize: 14, fontWeight: 600, display: "flex", alignItems: "center", gap: 8 }}>
                 {sel.conductor_nombre || contexto.nombre || nombresLista[sel.telefono] || sel.telefono}
                 {!(sel.conductor_nombre || contexto.nombre || nombresLista[sel.telefono]) && (
-                  <button onClick={guardarNumeroNuevo} title="Guardar este número en el Directorio"
-                    style={{ fontSize: 11, padding: "3px 10px" }}>💾 Guardar nombre</button>
+                  <button onClick={() => setModalGuardar(true)} title="Guardar este número en el Directorio"
+                    style={{ fontSize: 11, padding: "3px 10px" }}>💾 Guardar en Directorio</button>
                 )}
               </div>
               <div style={{ fontSize: 12, color: "var(--texto-suave)" }}>
@@ -691,6 +845,11 @@ export default function Consultas() {
           </div>
         )}
       </div>
+
+      {modalGuardar && sel && (
+        <ModalGuardarNumero telefono={sel.telefono} analistaId={analista?.user_id}
+          onCerrar={() => setModalGuardar(false)} onGuardado={numeroGuardado} />
+      )}
     </div>
   );
 }
