@@ -28,6 +28,7 @@ function reproducirDing() {
 export function AlertasProvider({ children }) {
   const { analista } = useAuth();
   const [noLeidos, setNoLeidos] = useState(0);
+  const [correosNoLeidos, setCorreosNoLeidos] = useState(0);
   const [toasts, setToasts] = useState([]);
   const [sonidoActivo, setSonidoActivo] = useState(true);
   const sonidoRef = useRef(sonidoActivo);
@@ -38,6 +39,41 @@ export function AlertasProvider({ children }) {
   }, []);
 
   const marcarVistos = useCallback(() => setNoLeidos(0), []);
+
+  // contador de correos entrantes sin leer (badge de la pestaña Correos)
+  const cargarCorreos = useCallback(async () => {
+    try {
+      const { count } = await sb.from("crm_inc_correos")
+        .select("id", { count: "exact", head: true })
+        .eq("direccion", "entrante").eq("leido", false);
+      setCorreosNoLeidos(count || 0);
+    } catch { /* ignorar */ }
+  }, []);
+  useEffect(() => { cargarCorreos(); }, [cargarCorreos]);
+
+  // Realtime: correo entrante nuevo → badge + toast + sonido
+  useEffect(() => {
+    const canal = sb.channel("alertas-correos")
+      .on("postgres_changes",
+        { event: "INSERT", schema: "public", table: "crm_inc_correos", filter: "direccion=eq.entrante" },
+        (payload) => {
+          const c = payload.new || {};
+          cargarCorreos();
+          const id = "co-" + c.id + "-" + Date.now();
+          const quien = c.nombre_de || c.remitente || "un cliente";
+          setToasts((prev) => [...prev, {
+            id, titulo: "✉️ Correo nuevo",
+            texto: `${quien}: ${String(c.asunto || "(sin asunto)").slice(0, 70)}`,
+          }].slice(-4));
+          if (sonidoRef.current) reproducirDing();
+          setTimeout(() => setToasts((prev) => prev.filter((t) => t.id !== id)), 8000);
+        })
+      .on("postgres_changes",
+        { event: "UPDATE", schema: "public", table: "crm_inc_correos" },
+        () => cargarCorreos())
+      .subscribe();
+    return () => { sb.removeChannel(canal); };
+  }, [cargarCorreos]);
 
   // contador inicial de entrantes sin caso (consultas pendientes)
   const cargarContador = useCallback(async () => {
@@ -103,7 +139,7 @@ export function AlertasProvider({ children }) {
   }, [analista?.id]);
 
   return (
-    <AlertasCtx.Provider value={{ noLeidos, toasts, sonidoActivo, setSonidoActivo, marcarVistos, quitarToast }}>
+    <AlertasCtx.Provider value={{ noLeidos, correosNoLeidos, toasts, sonidoActivo, setSonidoActivo, marcarVistos, quitarToast }}>
       {children}
     </AlertasCtx.Provider>
   );
