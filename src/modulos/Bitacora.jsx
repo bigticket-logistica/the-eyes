@@ -2,7 +2,7 @@ import { useEffect, useState, useCallback } from "react";
 import { sb } from "../shared/supabase.js";
 import { diaMX } from "../shared/fechas.js";
 import { useAuth } from "../shared/auth.jsx";
-import { ETIQUETAS_CASO } from "../shared/constantes.js";
+import { ETIQUETAS_CASO, motivoLegible } from "../shared/constantes.js";
 
 // ═══════════════════════════════════════════════════════════════════════════
 // BITÁCORA DEL DÍA
