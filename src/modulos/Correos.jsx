@@ -12,20 +12,49 @@ import { enviarCorreoCliente } from "../shared/mensajes.js";
 // Agrupado por hilo: preferencia al ticket (case_id), si no al correo.
 // ═══════════════════════════════════════════════════════════════════════════
 
+// Los correos de sistema (rebotes de Exchange, etc.) llegan con MIME crudo:
+// headers, encoded-words y boundaries que ensucian y desbordan la vista.
+function limpiarCuerpo(texto) {
+  let t = String(texto || "");
+  t = t.replace(/^=\?[\w-]+\?[QB]\?.*\?=\s*$/gim, "");
+  t = t.replace(/^(Content-Type|Content-Transfer-Encoding|Content-Disposition|MIME-Version|Received|Return-Path|DKIM-Signature|Message-ID|In-Reply-To|References|Authentication-Results|ARC-[\w-]+|X-[\w-]+|boundary)\s*:.*$/gim, "");
+  t = t.replace(/^\s+[\w-]+=(&quot;|")[^\n]*$/gim, "");
+  t = t.replace(/^\s*--[_\w.=-]{10,}\s*$/gim, "");
+  t = t.replace(/&quot;/g, '"').replace(/&nbsp;/g, " ");
+  t = t.replace(/\n{3,}/g, "\n\n");
+  return t.trim();
+}
+
+const LIMITE = 1200;   // caracteres antes de plegar
+
 function Burbuja({ c }) {
   const entrante = c.direccion === "entrante";
+  const [abierto, setAbierto] = useState(false);
+  const limpio = limpiarCuerpo(c.cuerpo) || "(sin contenido)";
+  const largo = limpio.length > LIMITE;
+  const texto = abierto || !largo ? limpio : limpio.slice(0, LIMITE) + "…";
+
   return (
-    <div style={{ display: "flex", justifyContent: entrante ? "flex-start" : "flex-end", marginBottom: 10 }}>
+    <div style={{ display: "flex", justifyContent: entrante ? "flex-start" : "flex-end", marginBottom: 12 }}>
       <div style={{
-        maxWidth: "82%", padding: "10px 13px", borderRadius: 10, fontSize: 13, lineHeight: 1.55,
+        maxWidth: "82%", minWidth: 0, padding: "10px 13px", borderRadius: 10, fontSize: 13, lineHeight: 1.55,
         background: entrante ? "#fff" : "var(--navy)", color: entrante ? "var(--texto)" : "#fff",
-        border: entrante ? "1px solid var(--borde)" : "none", whiteSpace: "pre-wrap",
+        border: entrante ? "1px solid var(--borde)" : "none",
       }}>
         <div style={{ fontSize: 10.5, opacity: 0.75, marginBottom: 4 }}>
           {entrante ? (c.nombre_de || c.remitente) : "Torre de soporte"} · {fechaHora(c.creado_en)}
         </div>
         {c.asunto && <div style={{ fontWeight: 600, marginBottom: 4 }}>{c.asunto}</div>}
-        {c.cuerpo || "(sin contenido)"}
+        <div style={{ whiteSpace: "pre-wrap", overflowWrap: "anywhere", wordBreak: "break-word" }}>{texto}</div>
+        {largo && (
+          <button onClick={() => setAbierto(!abierto)}
+            style={{ marginTop: 6, fontSize: 11, padding: "2px 10px", cursor: "pointer",
+              background: entrante ? "#f1f5f9" : "rgba(255,255,255,.18)",
+              color: entrante ? "var(--texto-suave)" : "#fff",
+              border: "none", borderRadius: 12 }}>
+            {abierto ? "Ver menos" : "Ver completo"}
+          </button>
+        )}
         {c.adjuntos && c.adjuntos.length > 0 && (
           <div style={{ fontSize: 11, opacity: 0.8, marginTop: 6 }}>
             📎 {c.adjuntos.length} {c.adjuntos.length === 1 ? "adjunto" : "adjuntos"}
@@ -128,9 +157,9 @@ export default function Correos() {
   const totalNoLeidos = hilos.reduce((a, h) => a + Number(h.no_leidos || 0), 0);
 
   return (
-    <div style={{ display: "grid", gridTemplateColumns: "minmax(280px, 0.8fr) 1.6fr", height: "100%" }}>
+    <div style={{ display: "grid", gridTemplateColumns: "minmax(260px, 0.75fr) 1.65fr", height: "100%", minHeight: 0, overflow: "hidden" }}>
       {/* ─── LISTA DE HILOS ─── */}
-      <div style={{ borderRight: "1px solid var(--borde)", overflowY: "auto", background: "#fff" }}>
+      <div style={{ borderRight: "1px solid var(--borde)", overflowY: "auto", minHeight: 0, background: "#fff" }}>
         <div style={{ padding: "12px 14px", borderBottom: "1px solid var(--borde)", position: "sticky", top: 0, background: "#fff", zIndex: 2 }}>
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
             <div>
@@ -145,10 +174,15 @@ export default function Correos() {
               ✉️ Nuevo
             </button>
           </div>
-          <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11.5, cursor: "pointer", color: "var(--texto-suave)" }}>
-            <input type="checkbox" checked={soloNoLeidos} onChange={(e) => setSoloNoLeidos(e.target.checked)} />
-            Solo sin leer
-          </label>
+          <div style={{ display: "flex", gap: 5 }}>
+            {[{ v: false, t: "Todos" }, { v: true, t: `Sin leer${totalNoLeidos ? " (" + totalNoLeidos + ")" : ""}` }].map((o) => (
+              <button key={String(o.v)} onClick={() => setSoloNoLeidos(o.v)}
+                style={{ fontSize: 11.5, padding: "4px 12px", borderRadius: 14, cursor: "pointer",
+                  border: `1px solid ${soloNoLeidos === o.v ? "var(--naranja)" : "var(--borde)"}`,
+                  background: soloNoLeidos === o.v ? "var(--naranja-suave)" : "#fff",
+                  fontWeight: soloNoLeidos === o.v ? 600 : 400 }}>{o.t}</button>
+            ))}
+          </div>
         </div>
 
         {error && <div style={{ padding: 14, fontSize: 12, color: "#791F1F" }}>{error}</div>}
@@ -175,8 +209,16 @@ export default function Correos() {
                   </span>
                 )}
               </div>
-              <div style={{ fontSize: 12, color: "var(--texto)", marginTop: 2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                {h.ultima_direccion === "saliente" ? "↗ " : "↙ "}{h.ultimo_asunto || "(sin asunto)"}
+              <div style={{ display: "flex", alignItems: "center", gap: 5, marginTop: 3, minWidth: 0 }}>
+                <span style={{ flexShrink: 0, fontSize: 9.5, fontWeight: 700, letterSpacing: .3,
+                  padding: "1px 6px", borderRadius: 4,
+                  background: h.ultima_direccion === "saliente" ? "#e0e7f3" : "#dcfce7",
+                  color: h.ultima_direccion === "saliente" ? "#1a3a6b" : "#166534" }}>
+                  {h.ultima_direccion === "saliente" ? "ENVIADO" : "RECIBIDO"}
+                </span>
+                <span style={{ fontSize: 12, color: "var(--texto)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                  {h.ultimo_asunto || "(sin asunto)"}
+                </span>
               </div>
               <div style={{ fontSize: 10.5, color: "var(--texto-tenue)", marginTop: 2 }}>
                 {hace(h.ultimo_en)}{h.case_id ? ` · ticket #${h.case_id}` : ""}
@@ -187,24 +229,30 @@ export default function Correos() {
       </div>
 
       {/* ─── HILO / REDACCIÓN ─── */}
-      <div style={{ display: "flex", flexDirection: "column", height: "100%", background: "#f7f8fa" }}>
+      <div style={{ display: "flex", flexDirection: "column", height: "100%", minHeight: 0, minWidth: 0, background: "#f7f8fa" }}>
         {!sel && !nuevo ? (
           <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", color: "var(--texto-suave)", fontSize: 13 }}>
             Elige un hilo o escribe un correo nuevo.
           </div>
         ) : (
           <>
-            <div style={{ padding: "12px 18px", borderBottom: "1px solid var(--borde)", background: "#fff" }}>
-              <div style={{ fontSize: 14, fontWeight: 600 }}>
-                {nuevo ? "Correo nuevo" : (sel.contraparte || "Hilo")}
-              </div>
-              <div style={{ fontSize: 12, color: "var(--texto-suave)" }}>
-                {nuevo ? "Sale desde la torre de control" : `${sel.total} ${sel.total === 1 ? "correo" : "correos"}${sel.case_id ? ` · ticket #${sel.case_id}` : ""}`}
+            <div style={{ padding: "10px 18px", borderBottom: "1px solid var(--borde)", background: "#fff",
+              display: "flex", alignItems: "center", gap: 12 }}>
+              <button onClick={() => { setSel(null); setNuevo(false); setCorreos([]); }}
+                title="Volver a la bandeja"
+                style={{ fontSize: 12, padding: "5px 11px", flexShrink: 0 }}>← Volver</button>
+              <div style={{ minWidth: 0 }}>
+                <div style={{ fontSize: 14, fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                  {nuevo ? "Correo nuevo" : (sel.contraparte || "Hilo")}
+                </div>
+                <div style={{ fontSize: 12, color: "var(--texto-suave)" }}>
+                  {nuevo ? "Sale desde la torre de control" : `${sel.total} ${sel.total === 1 ? "correo" : "correos"}${sel.case_id ? ` · ticket #${sel.case_id}` : ""}`}
+                </div>
               </div>
             </div>
 
             {!nuevo && (
-              <div style={{ flex: 1, overflowY: "auto", padding: "16px 18px" }}>
+              <div style={{ flex: 1, overflowY: "auto", minHeight: 0, padding: "16px 18px" }}>
                 {correos.map((c) => <Burbuja key={c.id} c={c} />)}
                 <div ref={finRef} />
               </div>
