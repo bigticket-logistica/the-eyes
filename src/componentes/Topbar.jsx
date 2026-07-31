@@ -27,7 +27,7 @@ function Tab({ to, children, badge }) {
 
 export default function Topbar() {
   const { analista, salir } = useAuth();
-  const { noLeidos, sonidoActivo, setSonidoActivo } = useAlertas();
+  const { noLeidos, correosNoLeidos, sonidoActivo, setSonidoActivo } = useAlertas();
 
   return (
     <header style={{
@@ -48,6 +48,7 @@ export default function Topbar() {
           <Tab to="/">Incidencias</Tab>
           <Tab to="/detalle-dia">Detalle día</Tab>
           <Tab to="/consultas" badge={noLeidos}>Consultas en ruta</Tab>
+          <Tab to="/correos" badge={correosNoLeidos}>Correos</Tab>
           <Tab to="/bitacora">Bitácora</Tab>
           <Tab to="/directorio">Directorio</Tab>
           <Tab to="/historico">Histórico</Tab>
