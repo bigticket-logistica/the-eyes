@@ -2,6 +2,8 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import { sb } from "../shared/supabase.js";
 import { useAuth } from "../shared/auth.jsx";
 import { diaMX, fechaHora } from "../shared/fechas.js";
+import { Link } from "react-router-dom";
+import { detectarCaseId, trozosConTickets, rutaDeTicket, esConsulta } from "../shared/chat.js";
 
 // ═══════════════════════════════════════════════════════════════════════════
 // MENSAJES · chat interno de la torre, un hilo por día.
@@ -83,15 +85,25 @@ function Mensaje({ m, esMio, mostrarAutor }) {
           </div>
         )}
         <div style={{ fontSize: 13, lineHeight: 1.5, whiteSpace: "pre-wrap", wordBreak: "break-word" }}>
-          {m.texto}
+          {trozosConTickets(m.texto).map((t, i) =>
+            t.tipo === "ticket" ? (
+              <Link key={i} to={rutaDeTicket(t.caseId)}
+                style={{ color: esMio ? "#c7d2fe" : "var(--naranja)", fontWeight: 600 }}>
+                {t.valor}
+              </Link>
+            ) : <span key={i}>{t.valor}</span>
+          )}
         </div>
         {m.case_id && (
-          <div style={{
-            marginTop: 5, fontSize: 11, opacity: 0.85,
-            borderTop: `1px solid ${esMio ? "rgba(255,255,255,.25)" : "var(--borde)"}`, paddingTop: 4,
-          }}>
-            🎫 Ticket #{m.case_id}
-          </div>
+          <Link to={rutaDeTicket(m.case_id)}
+            title={esConsulta(m.case_id) ? "Abrir en Consultas" : "Abrir en Incidencias"}
+            style={{
+              marginTop: 5, fontSize: 11, display: "block", textDecoration: "none",
+              borderTop: `1px solid ${esMio ? "rgba(255,255,255,.25)" : "var(--borde)"}`,
+              paddingTop: 4, color: esMio ? "#c7d2fe" : "var(--naranja)", fontWeight: 600,
+            }}>
+            🎫 Abrir #{m.case_id} en {esConsulta(m.case_id) ? "Consultas" : "Incidencias"} →
+          </Link>
         )}
         <div style={{ fontSize: 9.5, opacity: 0.6, marginTop: 4, textAlign: "right" }}>
           {fechaHora(m.creado_en)}
@@ -170,8 +182,9 @@ export default function Mensajes() {
     if (!t || enviando || !analista?.id) return;
     setEnviando(true); setError(null);
     // La fecha la pone el trigger en hora de México: no se manda desde acá.
+    // Si mencionas un #123456 en el texto, el chip del ticket se genera solo.
     const { error } = await sb.from("crm_chat_analistas")
-      .insert({ analista_id: analista.id, texto: t });
+      .insert({ analista_id: analista.id, texto: t, case_id: detectarCaseId(t) });
     if (error) setError(error.message);
     else { setTexto(""); await cargar(); }
     setEnviando(false);
@@ -238,7 +251,7 @@ export default function Mensajes() {
               value={texto} rows={2}
               onChange={(e) => setTexto(e.target.value)}
               onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); enviar(); } }}
-              placeholder="Escribe al equipo…  (Enter envía · Shift+Enter salta línea)"
+              placeholder="Escribe al equipo…  menciona #900000021 para enlazar un ticket"
               disabled={enviando}
               style={{
                 flex: 1, border: "1px solid var(--borde)", borderRadius: 10,
