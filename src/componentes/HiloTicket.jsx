@@ -3,35 +3,7 @@ import { sb } from "../shared/supabase.js";
 import { detalleEstado, estiloPrioridad, motivoLegible, ESTADOS_ABIERTOS } from "../shared/constantes.js";
 import { hace, fechaHora } from "../shared/fechas.js";
 import { mensajesDelCaso, conversacionPorTelefono, ventanaAbierta, enviarMensaje } from "../shared/mensajes.js";
-
-function Burbuja({ m }) {
-  const saliente = m.direccion === "saliente";
-  const esIA = m.emisor === "ia";
-  const align = saliente ? "flex-end" : "flex-start";
-  const bg = saliente ? (esIA ? "#EEF2FF" : "var(--navy)") : "#fff";
-  const color = saliente && !esIA ? "#fff" : "var(--texto)";
-  return (
-    <div style={{ display: "flex", justifyContent: align }}>
-      <div style={{
-        maxWidth: "78%", background: bg, color,
-        border: saliente && !esIA ? "none" : "1px solid var(--borde)",
-        borderRadius: 12, padding: "8px 12px",
-      }}>
-        {saliente && (
-          <div style={{ fontSize: 10, opacity: 0.7, marginBottom: 2 }}>
-            {esIA ? "Asistente IA" : "Analista"}
-          </div>
-        )}
-        <div style={{ fontSize: 13, whiteSpace: "pre-wrap", wordBreak: "break-word" }}>
-          {m.tipo_contenido === "texto" ? m.texto : `[${m.tipo_contenido}]${m.texto ? " " + m.texto : ""}`}
-        </div>
-        <div style={{ fontSize: 10, opacity: 0.6, marginTop: 3, textAlign: "right" }}>
-          {fechaHora(m.creado_en)}{saliente && m.estado_entrega ? ` · ${m.estado_entrega}` : ""}
-        </div>
-      </div>
-    </div>
-  );
-}
+import Burbuja from "./Burbuja.jsx";
 
 export default function HiloTicket({ caso, onTomar, onResolver, onTraspasar, analistaId, nombres }) {
   const [mensajes, setMensajes] = useState([]);
