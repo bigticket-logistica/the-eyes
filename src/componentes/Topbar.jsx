@@ -1,6 +1,7 @@
 import { useAuth } from "../shared/auth.jsx";
 import { NavLink } from "react-router-dom";
 import { useAlertas } from "../shared/alertas.jsx";
+import { useChatNoLeidos } from "../modulos/Mensajes.jsx";
 
 function iniciales(nombre) {
   if (!nombre) return "··";
@@ -29,6 +30,7 @@ function Tab({ to, children, badge }) {
 export default function Topbar() {
   const { analista, salir } = useAuth();
   const { noLeidos, correosNoLeidos, sonidoActivo, setSonidoActivo } = useAlertas();
+  const chatNoLeidos = useChatNoLeidos();
 
   return (
     <header style={{
@@ -51,6 +53,7 @@ export default function Topbar() {
           <Tab to="/detalle-dia">Detalle</Tab>
           <Tab to="/consultas" badge={noLeidos}>Consultas</Tab>
           <Tab to="/correos" badge={correosNoLeidos}>Correos</Tab>
+          <Tab to="/mensajes" badge={chatNoLeidos}>Mensajes</Tab>
           <Tab to="/bitacora">Bitácora</Tab>
           <Tab to="/directorio">Directorio</Tab>
           <Tab to="/historico">Histórico</Tab>
