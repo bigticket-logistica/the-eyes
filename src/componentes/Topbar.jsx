@@ -57,6 +57,7 @@ export default function Topbar() {
           <Tab to="/bitacora">Bitácora</Tab>
           <Tab to="/directorio">Directorio</Tab>
           <Tab to="/historico">Histórico</Tab>
+          <Tab to="/meli">MELI</Tab>
         </nav>
       </div>
 
