@@ -5,6 +5,7 @@ import { hace, fechaHora, diaMX } from "../shared/fechas.js";
 import { listarConversaciones, mensajesDeConversacion, crearCasoConsulta, conversacionPorTelefono, ventanaAbierta, enviarMensaje, resumenIA, consultarPaquete } from "../shared/mensajes.js";
 import { useAlertas } from "../shared/alertas.jsx";
 import { ETIQUETAS_CASO, SERVICE_CENTERS_MX } from "../shared/constantes.js";
+import Burbuja from "../componentes/Burbuja.jsx";
 
 // ═══════════════════════════════════════════════════════════════════════════
 // CONSULTAS EN RUTA v2 · tres columnas
@@ -15,27 +16,6 @@ import { ETIQUETAS_CASO, SERVICE_CENTERS_MX } from "../shared/constantes.js";
 // ═══════════════════════════════════════════════════════════════════════════
 
 const ABIERTOS = ["NEW", "OPEN", "ON_HOLD", "CHECKING"];
-
-function Burbuja({ m }) {
-  const saliente = m.direccion === "saliente";
-  const esIA = m.emisor === "ia";
-  const bg = saliente ? (esIA ? "#EEF2FF" : "var(--navy)") : "#fff";
-  const color = saliente && !esIA ? "#fff" : "var(--texto)";
-  return (
-    <div style={{ display: "flex", justifyContent: saliente ? "flex-end" : "flex-start" }}>
-      <div style={{ maxWidth: "78%", background: bg, color,
-        border: saliente && !esIA ? "none" : "1px solid var(--borde)", borderRadius: 12, padding: "8px 12px" }}>
-        {saliente && <div style={{ fontSize: 10, opacity: 0.7, marginBottom: 2 }}>{esIA ? "Asistente IA" : "Analista"}</div>}
-        <div style={{ fontSize: 13, whiteSpace: "pre-wrap", wordBreak: "break-word" }}>
-          {["texto", "plantilla"].includes(m.tipo_contenido) ? m.texto : `[${m.tipo_contenido}]${m.texto ? " " + m.texto : ""}`}
-        </div>
-        <div style={{ fontSize: 10, opacity: 0.6, marginTop: 3, textAlign: "right" }}>
-          {fechaHora(m.creado_en)}{saliente && m.estado_entrega ? ` · ${m.estado_entrega}` : ""}
-        </div>
-      </div>
-    </div>
-  );
-}
 
 function LineaCierre({ codigo, anidadoEn }) {
   const color = anidadoEn ? "#1a3a6b" : "#16a34a";
@@ -576,7 +556,7 @@ export default function Consultas() {
       });
       const delTicket = mensajes.slice(corte + 1);
       const transcript = delTicket.slice(-40)
-        .map((m) => `${m.direccion === "entrante" ? "Conductor" : (m.emisor === "ia" ? "IA" : "Analista")}: ${m.texto || `[${m.tipo_contenido}]`}`)
+        .map((m) => `${m.direccion === "entrante" ? "Conductor" : (m.emisor === "ia" ? "IA" : "Analista")}: ${m.texto || m.transcripcion || `[${m.tipo_contenido}]`}`)
         .join("\n");
       const resumen = await resumenIA(transcript);
       setCaract((p) => ({ ...p, comentarios: resumen }));
