@@ -4,6 +4,7 @@ import { detalleEstado, estiloPrioridad, motivoLegible, ESTADOS_ABIERTOS } from 
 import { hace, fechaHora } from "../shared/fechas.js";
 import { mensajesDelCaso, conversacionPorTelefono, ventanaAbierta, enviarMensaje } from "../shared/mensajes.js";
 import Burbuja from "./Burbuja.jsx";
+import BotonCompartirChat from "./BotonCompartirChat.jsx";
 
 export default function HiloTicket({ caso, onTomar, onResolver, onTraspasar, analistaId, nombres }) {
   const [mensajes, setMensajes] = useState([]);
@@ -102,7 +103,8 @@ export default function HiloTicket({ caso, onTomar, onResolver, onTraspasar, ana
             Ruta {caso.route_code || "—"} · {caso.conductor_nombre || "sin conductor"} · {hace(caso.fecha_caso)}{caso.analista_actual ? <span style={{ color: "var(--naranja)", fontWeight: 600 }}> · 👤 {(nombres && nombres[caso.analista_actual]) || "analista"}</span> : null}{caso.conductor_telefono_meli && caso.conductor_telefono_meli !== caso.conductor_telefono ? <span style={{ color: "var(--texto-tenue)" }}> · ↩ consulta anidada</span> : null}
           </div>
         </div>
-        <div style={{ display: "flex", gap: 6 }}>
+        <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+          <BotonCompartirChat caso={caso} analistaId={analistaId} compacto />
           <span className="pill" style={{ background: pr.bg, color: pr.color }}>{pr.label}</span>
           <span className="pill" style={{ background: est.bg, color: est.color }}>{est.label}</span>
         </div>
