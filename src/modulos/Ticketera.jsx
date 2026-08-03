@@ -1,4 +1,5 @@
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
+import { useSearchParams } from "react-router-dom";
 import { sb } from "../shared/supabase.js";
 import { useAuth } from "../shared/auth.jsx";
 import { esAbierto, motivoLegible } from "../shared/constantes.js";
@@ -168,6 +169,9 @@ function PanelTomar({ caso, onCerrar, onListo, analistaId }) {
 
 export default function Ticketera() {
   const { analista } = useAuth();
+  const [params, setParams] = useSearchParams();
+  const casoParam = params.get("caso");
+  const yaSalte = useRef(false);
   const [casos, setCasos] = useState([]);
   const [nombres, setNombres] = useState({});
   const [consultasLibres, setConsultasLibres] = useState([]);
@@ -200,6 +204,15 @@ export default function Ticketera() {
   }, []);
 
   useEffect(() => { cargar(); }, [cargar]);
+
+  // Enlace profundo desde el chat interno: /?caso=123456 abre ese ticket.
+  // Se hace una sola vez y se limpia el parámetro, para no re-seleccionar
+  // en cada recarga de la cola.
+  useEffect(() => {
+    if (!casoParam || yaSalte.current || !casos.length) return;
+    const c = casos.find((x) => String(x.case_id) === String(casoParam));
+    if (c) { setSeleccionado(c); yaSalte.current = true; setParams({}, { replace: true }); }
+  }, [casoParam, casos, setParams]);
 
   // consultas abiertas y NO anidadas: candidatas a anidarse en una incidencia
   const cargarConsultas = useCallback(async () => {

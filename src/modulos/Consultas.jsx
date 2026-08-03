@@ -6,6 +6,8 @@ import { listarConversaciones, mensajesDeConversacion, crearCasoConsulta, conver
 import { useAlertas } from "../shared/alertas.jsx";
 import { ETIQUETAS_CASO, SERVICE_CENTERS_MX } from "../shared/constantes.js";
 import Burbuja from "../componentes/Burbuja.jsx";
+import BotonCompartirChat from "../componentes/BotonCompartirChat.jsx";
+import { useSearchParams } from "react-router-dom";
 
 // ═══════════════════════════════════════════════════════════════════════════
 // CONSULTAS EN RUTA v2 · tres columnas
@@ -316,6 +318,9 @@ export default function Consultas() {
   }, []);
   const { analista } = useAuth();
   const { marcarVistos } = useAlertas();
+  const [params, setParams] = useSearchParams();
+  const casoParam = params.get("caso");
+  const saltoHecho = useRef(false);
   const [convs, setConvs] = useState([]);
   const [fechaSel, setFechaSel] = useState(diaMX());
   const [sel, setSel] = useState(null);
@@ -444,6 +449,44 @@ export default function Consultas() {
     } catch (e) { setError(e.message); }
     finally { setCargando(false); }
   }
+
+  // ── Enlace profundo desde el chat interno: /consultas?caso=900000021 ──────
+  // Dos fases, porque el chat solo conoce el case_id y esta pestaña se organiza
+  // por conversación y por día: primero se resuelve a qué conversación y a qué
+  // fecha pertenece el caso, después se abre cuando la lista de ese día cargó.
+  const [convObjetivo, setConvObjetivo] = useState(null);
+
+  useEffect(() => {
+    if (!casoParam || saltoHecho.current) return;
+    let vivo = true;
+    (async () => {
+      const { data } = await sb
+        .from("crm_inc_mensajes")
+        .select("conversacion_id, creado_en")
+        .eq("case_id", casoParam)
+        .not("conversacion_id", "is", null)
+        .order("creado_en", { ascending: true })
+        .limit(1);
+      if (!vivo) return;
+      const fila = data?.[0];
+      if (!fila) { saltoHecho.current = true; setParams({}, { replace: true }); return; }
+      const dia = new Date(fila.creado_en)
+        .toLocaleDateString("en-CA", { timeZone: "America/Mexico_City" });
+      setConvObjetivo(fila.conversacion_id);
+      setFechaSel(dia);
+    })();
+    return () => { vivo = false; };
+  }, [casoParam, setParams]);
+
+  useEffect(() => {
+    if (!convObjetivo || !convs.length) return;
+    const conv = convs.find((c) => c.id === convObjetivo);
+    if (!conv) return;
+    saltoHecho.current = true;
+    setConvObjetivo(null);
+    setParams({}, { replace: true });
+    abrirConv(conv);
+  }, [convObjetivo, convs]); // eslint-disable-line react-hooks/exhaustive-deps
 
   async function tomar() {
     if (!sel || accion) return;
@@ -664,9 +707,12 @@ export default function Consultas() {
               </div>
             </div>
             {ticketAbierto && (
-              <span className="pill" style={{ background: "#e0e7ff", color: "var(--navy)" }}>
-                {ticketAbierto.codigo || "#" + ticketAbierto.case_id}
-              </span>
+              <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                <BotonCompartirChat caso={ticketAbierto} analistaId={analista?.id} compacto />
+                <span className="pill" style={{ background: "#e0e7ff", color: "var(--navy)" }}>
+                  {ticketAbierto.codigo || "#" + ticketAbierto.case_id}
+                </span>
+              </div>
             )}
           </div>
 
