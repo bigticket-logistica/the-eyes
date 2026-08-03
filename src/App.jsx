@@ -9,7 +9,6 @@ import Directorio from "./modulos/Directorio.jsx";
 import Bitacora from "./modulos/Bitacora.jsx";
 import Correos from "./modulos/Correos.jsx";
 import Mensajes from "./modulos/Mensajes.jsx";
-import MELI from "./modulos/MELI.jsx";
 import Topbar from "./componentes/Topbar.jsx";
 import { AlertasProvider, ContenedorToasts } from "./shared/alertas.jsx";
 
@@ -63,7 +62,6 @@ export default function App() {
             <Route path="/historico" element={<Historico />} />
             <Route path="/consultas" element={<Consultas />} />
             <Route path="/mensajes" element={<Mensajes />} />
-            <Route path="/meli" element={<MELI />} />
             <Route path="/login" element={<Navigate to="/" replace />} />
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
