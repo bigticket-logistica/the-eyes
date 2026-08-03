@@ -5,7 +5,8 @@ import { sb } from "./supabase.js";
 export async function mensajesDelCaso(caseId) {
   const { data, error } = await sb
     .from("crm_inc_mensajes")
-    .select("id, direccion, emisor, emisor_id, tipo_contenido, texto, media_url, estado_entrega, creado_en")
+    .select("id, direccion, emisor, emisor_id, tipo_contenido, texto, media_url, estado_entrega, creado_en, "
+            + "media_path, media_mime, media_bytes, media_estado, transcripcion, transcriptor, lat, lng")
     .eq("case_id", caseId)
     .order("creado_en", { ascending: true });
   if (error) throw error;
@@ -86,7 +87,8 @@ export async function listarConversaciones() {
 export async function mensajesDeConversacion(conversacionId) {
   const { data, error } = await sb
     .from("crm_inc_mensajes")
-    .select("id, case_id, direccion, emisor, tipo_contenido, texto, media_url, estado_entrega, creado_en")
+    .select("id, case_id, direccion, emisor, tipo_contenido, texto, media_url, estado_entrega, creado_en, "
+            + "media_path, media_mime, media_bytes, media_estado, transcripcion, transcriptor, lat, lng")
     .eq("conversacion_id", conversacionId)
     .order("creado_en", { ascending: true });
   if (error) throw error;
