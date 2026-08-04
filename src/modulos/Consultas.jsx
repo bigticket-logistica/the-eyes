@@ -7,6 +7,8 @@ import { useAlertas } from "../shared/alertas.jsx";
 import { ETIQUETAS_CASO, SERVICE_CENTERS_MX } from "../shared/constantes.js";
 import Burbuja from "../componentes/Burbuja.jsx";
 import BotonCompartirChat from "../componentes/BotonCompartirChat.jsx";
+import BotonAdjunto from "../componentes/BotonAdjunto.jsx";
+import { hayAdjuntoMadurando } from "../shared/mensajes.js";
 import { useSearchParams } from "react-router-dom";
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -425,6 +427,15 @@ export default function Consultas() {
     return () => { sb.removeChannel(canal); };
   }, [sel, cargarHilo]);
 
+  // Respaldo del Realtime: mientras haya un adjunto sin bajar o sin transcribir,
+  // refrescar cada 5 s. Se apaga solo cuando todo maduró (o a los 3 min, por si
+  // el worker está caído). Así la foto aparece aunque el evento se pierda.
+  useEffect(() => {
+    if (!sel || !hayAdjuntoMadurando(mensajes)) return;
+    const t = setInterval(() => { if (selRef.current) cargarHilo(selRef.current); }, 5000);
+    return () => clearInterval(t);
+  }, [sel, mensajes, cargarHilo]);
+
   useEffect(() => { finRef.current?.scrollIntoView({ behavior: "smooth" }); }, [mensajes.length]);
 
   // al cambiar el ticket abierto: cargar su caracterización + contexto de ruta
@@ -752,6 +763,9 @@ export default function Consultas() {
                   </div>
                 )}
                 <div style={{ padding: "11px 16px", display: "flex", gap: 8, alignItems: "center" }}>
+                  <BotonAdjunto telefono={sel?.telefono} caseId={ticketAbierto?.case_id}
+                    conversacionId={sel?.id} disabled={accion || ticketDeOtro}
+                    onEnviado={() => cargarHilo(sel)} />
                   <input value={texto} onChange={(e) => setTexto(e.target.value)}
                     onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); enviar(); } }}
                     placeholder={ticketDeOtro
