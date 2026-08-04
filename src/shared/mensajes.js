@@ -160,3 +160,86 @@ export async function enviarCorreoCliente({ caseId, casoId, destinatario, asunto
   if (!data || data.ok === false) throw new Error(data?.error || "No se pudo enviar el correo");
   return data;
 }
+
+// ── Adjuntos que todavía no maduraron ──────────────────────────────────────
+// El worker biggy-media completa un adjunto en dos pasos posteriores al INSERT:
+// primero media_path (descarga a Storage, ~15 s) y luego transcripcion (Whisper
+// o Vision). Mientras alguno falte, el hilo debe seguir refrescando.
+const TIPOS_ADJUNTO = ["imagen", "audio", "documento", "video", "sticker"];
+
+export function adjuntoPendiente(m) {
+  if (!TIPOS_ADJUNTO.includes(m?.tipo_contenido)) return false;
+  if (!m.media_path) return true;
+  if (["imagen", "audio"].includes(m.tipo_contenido) && !m.transcripcion) return true;
+  return false;
+}
+
+// true si hay algo pendiente y RECIENTE. El límite de 3 minutos hace que el
+// refresco se apague solo: si el worker está caído, no dejamos al navegador
+// consultando para siempre.
+export function hayAdjuntoMadurando(mensajes) {
+  const limite = Date.now() - 3 * 60 * 1000;
+  return (mensajes || []).some(
+    (m) => adjuntoPendiente(m) && new Date(m.creado_en).getTime() > limite,
+  );
+}
+
+// ── Enviar un adjunto al conductor ──────────────────────────────────────────
+// El archivo se sube al bucket privado crm-media y la Edge Function firma una
+// URL temporal para que Meta lo descargue. Solo funciona dentro de la ventana
+// de 24 h: fuera de ella Meta exige plantilla y no admite media libre.
+const LIMITES = {
+  image:    { max: 5 * 1024 * 1024,   mimes: ["image/jpeg", "image/png"] },
+  audio:    { max: 16 * 1024 * 1024,  mimes: ["audio/aac", "audio/amr", "audio/mpeg", "audio/mp4", "audio/ogg"] },
+  video:    { max: 16 * 1024 * 1024,  mimes: ["video/mp4", "video/3gpp"] },
+  document: { max: 100 * 1024 * 1024, mimes: [] },
+};
+
+export function tipoDeArchivo(file) {
+  const m = (file.type || "").toLowerCase();
+  if (m.startsWith("image/")) return "image";
+  if (m.startsWith("audio/")) return "audio";
+  if (m.startsWith("video/")) return "video";
+  return "document";
+}
+
+// Valida ANTES de subir: no tiene sentido gastar la subida para que Meta lo
+// rechace después. Devuelve null si está bien, o el motivo si no.
+export function validarAdjunto(file) {
+  const tipo = tipoDeArchivo(file);
+  const lim = LIMITES[tipo];
+  if (file.size > lim.max) {
+    return `El archivo pesa ${(file.size / 1024 / 1024).toFixed(1)} MB y WhatsApp acepta hasta ${lim.max / 1024 / 1024} MB para ${tipo === "image" ? "imágenes" : tipo}.`;
+  }
+  if (lim.mimes.length && !lim.mimes.includes((file.type || "").toLowerCase())) {
+    return `WhatsApp no acepta ${file.type || "ese formato"}. Permitidos: ${lim.mimes.join(", ")}.`;
+  }
+  return null;
+}
+
+export async function enviarAdjunto({ file, telefono, caseId, conversacionId, caption }) {
+  const problema = validarAdjunto(file);
+  if (problema) throw new Error(problema);
+
+  const tipo = tipoDeArchivo(file);
+  const ext = (file.name.split(".").pop() || "bin").toLowerCase().slice(0, 5);
+  const f = new Date();
+  const ruta = `wa-out/${f.getFullYear()}/${String(f.getMonth() + 1).padStart(2, "0")}/` +
+               `${crypto.randomUUID()}.${ext}`;
+
+  const { error: errUp } = await sb.storage.from("crm-media")
+    .upload(ruta, file, { contentType: file.type || "application/octet-stream", upsert: false });
+  if (errUp) throw new Error(`No se pudo subir el archivo: ${errUp.message}`);
+
+  const { data, error } = await sb.functions.invoke("whatsapp-media", {
+    body: {
+      telefono, media_path: ruta, tipo,
+      caption: caption || null,
+      case_id: caseId || null,
+      conversacion_id: conversacionId || null,
+    },
+  });
+  if (error) throw error;
+  if (!data || data.ok === false) throw new Error(data?.error || "No se pudo enviar el adjunto");
+  return data;
+}
