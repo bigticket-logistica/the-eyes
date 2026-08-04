@@ -16,9 +16,19 @@ export function AuthProvider({ children }) {
     });
 
     const { data: sub } = sb.auth.onAuthStateChange((_e, ses) => {
-      setSesion(ses);
-      if (ses) cargarAnalista(ses.user.id);
-      else { setAnalista(null); setCargando(false); }
+      // Supabase dispara este evento también en cada refresh de token (por
+      // ejemplo al volver a la pestaña). Si el usuario es el mismo, no hay
+      // nada que recargar: poner cargando=true acá desmontaba TODAS las rutas
+      // (App: if (cargando) return <Cargando/>) y mataba el estado local de
+      // los módulos — la conversación abierta, el scroll, todo.
+      setSesion((prev) => {
+        const mismoUsuario = prev?.user?.id && prev.user.id === ses?.user?.id;
+        if (!mismoUsuario) {
+          if (ses) cargarAnalista(ses.user.id);
+          else { setAnalista(null); setCargando(false); }
+        }
+        return ses;
+      });
     });
     return () => sub.subscription.unsubscribe();
   }, []);
