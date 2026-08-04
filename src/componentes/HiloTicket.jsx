@@ -2,9 +2,10 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import { sb } from "../shared/supabase.js";
 import { detalleEstado, estiloPrioridad, motivoLegible, ESTADOS_ABIERTOS } from "../shared/constantes.js";
 import { hace, fechaHora } from "../shared/fechas.js";
-import { mensajesDelCaso, conversacionPorTelefono, ventanaAbierta, enviarMensaje } from "../shared/mensajes.js";
+import { mensajesDelCaso, conversacionPorTelefono, ventanaAbierta, enviarMensaje, hayAdjuntoMadurando } from "../shared/mensajes.js";
 import Burbuja from "./Burbuja.jsx";
 import BotonCompartirChat from "./BotonCompartirChat.jsx";
+import BotonAdjunto from "./BotonAdjunto.jsx";
 
 export default function HiloTicket({ caso, onTomar, onResolver, onTraspasar, analistaId, nombres }) {
   const [mensajes, setMensajes] = useState([]);
@@ -27,6 +28,13 @@ export default function HiloTicket({ caso, onTomar, onResolver, onTraspasar, ana
   }, [caso?.case_id, caso?.conductor_telefono]);
 
   useEffect(() => { cargarHilo(); }, [cargarHilo]);
+
+  // Respaldo del Realtime mientras un adjunto se descarga o se transcribe.
+  useEffect(() => {
+    if (!hayAdjuntoMadurando(mensajes)) return;
+    const t = setInterval(cargarHilo, 5000);
+    return () => clearInterval(t);
+  }, [mensajes, cargarHilo]);
 
   // Realtime: escuchar mensajes nuevos de este caso y mostrarlos al instante
   useEffect(() => {
@@ -159,6 +167,9 @@ export default function HiloTicket({ caso, onTomar, onResolver, onTraspasar, ana
                 </button>
               ) : esMio ? (
                 <>
+                  <BotonAdjunto telefono={caso.conductor_telefono} caseId={caso.case_id}
+                    conversacionId={conversacion?.id} disabled={enviando || deOtro}
+                    onEnviado={cargarHilo} />
                   <input
                     value={texto}
                     onChange={(e) => setTexto(e.target.value)}
