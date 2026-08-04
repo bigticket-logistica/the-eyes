@@ -724,10 +724,26 @@ export default function Consultas() {
             alignItems: "center", justifyContent: "space-between" }}>
             <div>
               <div style={{ fontSize: 14, fontWeight: 600, display: "flex", alignItems: "center", gap: 8 }}>
-                {sel.conductor_nombre || contexto.nombre || nombresLista[sel.telefono] || sel.telefono}
-                {!(sel.conductor_nombre || contexto.nombre || nombresLista[sel.telefono]) && (
-                  <button onClick={() => setModalGuardar(true)} title="Guardar este número en el Directorio"
+                {contexto.nombre || nombresLista[sel.telefono] || sel.conductor_nombre || sel.telefono}
+                {/* El botón depende de si el número está en NUESTRO Directorio, no de
+                    que exista algún nombre. sel.conductor_nombre es el nombre del
+                    perfil de WhatsApp que manda Meta ("Yanito 💗"): sirve para
+                    mostrar algo, pero no identifica al conductor ni sobrevive a que
+                    la persona lo cambie. Antes ese nombre escondía el botón y no
+                    había forma de guardar el número. */}
+                {!(contexto.nombre || nombresLista[sel.telefono]) ? (
+                  <button onClick={() => setModalGuardar(true)}
+                    title="Este número no está en el Directorio de Bigticket"
                     style={{ fontSize: 11, padding: "3px 10px" }}>💾 Guardar en Directorio</button>
+                ) : (
+                  <button onClick={() => setModalGuardar(true)}
+                    title="Editar los datos de este conductor en el Directorio"
+                    style={{ fontSize: 11, padding: "3px 8px", opacity: 0.55 }}>✏️</button>
+                )}
+                {sel.conductor_nombre && !(contexto.nombre || nombresLista[sel.telefono]) && (
+                  <span style={{ fontSize: 11, fontWeight: 400, color: "var(--texto-tenue)" }}>
+                    (perfil de WhatsApp: {sel.conductor_nombre})
+                  </span>
                 )}
               </div>
               <div style={{ fontSize: 12, color: "var(--texto-suave)" }}>
