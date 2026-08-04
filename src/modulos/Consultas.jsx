@@ -320,6 +320,8 @@ export default function Consultas() {
   const { marcarVistos } = useAlertas();
   const [params, setParams] = useSearchParams();
   const casoParam = params.get("caso");
+  const convParam = params.get("conv");
+  const convRestaurada = useRef(false);
   const saltoHecho = useRef(false);
   const [convs, setConvs] = useState([]);
   const [fechaSel, setFechaSel] = useState(diaMX());
@@ -440,6 +442,9 @@ export default function Consultas() {
 
   async function abrirConv(conv) {
     setSel(conv); setCargando(true); setError(null);
+    // La conversación abierta vive en la URL: si el módulo se remonta (F5,
+    // deploy, remount), se restaura sola en vez de volver a la lista.
+    setParams((prev) => { const np = new URLSearchParams(prev); np.set("conv", conv.id); return np; }, { replace: true });
     setMensajes([]); setCasos({}); setTicketAbierto(null); setHaySinCaso(false);
     try {
       leidosRef.current.add(conv.id);
@@ -449,6 +454,13 @@ export default function Consultas() {
     } catch (e) { setError(e.message); }
     finally { setCargando(false); }
   }
+
+  // ── Restauración tras remount: /consultas?conv=<id> reabre la conversación ─
+  useEffect(() => {
+    if (convRestaurada.current || !convParam || !convs.length || sel) return;
+    const conv = convs.find((c) => c.id === convParam);
+    if (conv) { convRestaurada.current = true; abrirConv(conv); }
+  }, [convParam, convs, sel]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Enlace profundo desde el chat interno: /consultas?caso=900000021 ──────
   // Dos fases, porque el chat solo conoce el case_id y esta pestaña se organiza
