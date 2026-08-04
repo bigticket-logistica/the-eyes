@@ -6,6 +6,7 @@ import { mensajesDelCaso, conversacionPorTelefono, ventanaAbierta, enviarMensaje
 import Burbuja from "./Burbuja.jsx";
 import BotonCompartirChat from "./BotonCompartirChat.jsx";
 import BotonAdjunto from "./BotonAdjunto.jsx";
+import GrabadorAudio from "./GrabadorAudio.jsx";
 
 export default function HiloTicket({ caso, onTomar, onResolver, onTraspasar, analistaId, nombres }) {
   const [mensajes, setMensajes] = useState([]);
@@ -168,6 +169,9 @@ export default function HiloTicket({ caso, onTomar, onResolver, onTraspasar, ana
               ) : esMio ? (
                 <>
                   <BotonAdjunto telefono={caso.conductor_telefono} caseId={caso.case_id}
+                    conversacionId={conversacion?.id} disabled={enviando || deOtro}
+                    onEnviado={cargarHilo} />
+                  <GrabadorAudio telefono={caso.conductor_telefono} caseId={caso.case_id}
                     conversacionId={conversacion?.id} disabled={enviando || deOtro}
                     onEnviado={cargarHilo} />
                   <input
