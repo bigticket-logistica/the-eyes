@@ -2,9 +2,11 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import { sb } from "../shared/supabase.js";
 import { detalleEstado, estiloPrioridad, motivoLegible, ESTADOS_ABIERTOS } from "../shared/constantes.js";
 import { hace, fechaHora } from "../shared/fechas.js";
-import { mensajesDelCaso, conversacionPorTelefono, ventanaAbierta, enviarMensaje } from "../shared/mensajes.js";
+import { mensajesDelCaso, conversacionPorTelefono, ventanaAbierta, enviarMensaje, hayAdjuntoMadurando } from "../shared/mensajes.js";
 import Burbuja from "./Burbuja.jsx";
 import BotonCompartirChat from "./BotonCompartirChat.jsx";
+import BotonAdjunto from "./BotonAdjunto.jsx";
+import GrabadorAudio from "./GrabadorAudio.jsx";
 
 export default function HiloTicket({ caso, onTomar, onResolver, onTraspasar, analistaId, nombres }) {
   const [mensajes, setMensajes] = useState([]);
@@ -28,6 +30,13 @@ export default function HiloTicket({ caso, onTomar, onResolver, onTraspasar, ana
 
   useEffect(() => { cargarHilo(); }, [cargarHilo]);
 
+  // Respaldo del Realtime mientras un adjunto se descarga o se transcribe.
+  useEffect(() => {
+    if (!hayAdjuntoMadurando(mensajes)) return;
+    const t = setInterval(cargarHilo, 5000);
+    return () => clearInterval(t);
+  }, [mensajes, cargarHilo]);
+
   // Realtime: escuchar mensajes nuevos de este caso y mostrarlos al instante
   useEffect(() => {
     if (!caso?.case_id) return;
@@ -35,11 +44,19 @@ export default function HiloTicket({ caso, onTomar, onResolver, onTraspasar, ana
       .channel(`mensajes-caso-${caso.case_id}`)
       .on(
         "postgres_changes",
-        { event: "INSERT", schema: "public", table: "crm_inc_mensajes", filter: `case_id=eq.${caso.case_id}` },
+        // event:"*": los adjuntos maduran por UPDATE (el worker pone media_path
+        // y luego la transcripción). Con solo INSERT, la foto no aparecía hasta
+        // refrescar la página.
+        { event: "*", schema: "public", table: "crm_inc_mensajes", filter: `case_id=eq.${caso.case_id}` },
         (payload) => {
           const nuevo = payload.new;
-          // agregar solo si no lo tenemos ya (evita duplicar con el envío local)
-          setMensajes((prev) => prev.some((m) => m.id === nuevo.id) ? prev : [...prev, nuevo]);
+          if (!nuevo?.id) return;
+          setMensajes((prev) => {
+            const i = prev.findIndex((m) => m.id === nuevo.id);
+            if (i === -1) return [...prev, nuevo];              // INSERT
+            const copia = [...prev]; copia[i] = { ...copia[i], ...nuevo }; // UPDATE
+            return copia;
+          });
         },
       )
       .subscribe();
@@ -151,6 +168,12 @@ export default function HiloTicket({ caso, onTomar, onResolver, onTraspasar, ana
                 </button>
               ) : esMio ? (
                 <>
+                  <BotonAdjunto telefono={caso.conductor_telefono} caseId={caso.case_id}
+                    conversacionId={conversacion?.id} disabled={enviando || deOtro}
+                    onEnviado={cargarHilo} />
+                  <GrabadorAudio telefono={caso.conductor_telefono} caseId={caso.case_id}
+                    conversacionId={conversacion?.id} disabled={enviando || deOtro}
+                    onEnviado={cargarHilo} />
                   <input
                     value={texto}
                     onChange={(e) => setTexto(e.target.value)}

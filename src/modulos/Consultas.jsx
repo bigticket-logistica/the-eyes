@@ -8,6 +8,7 @@ import { ETIQUETAS_CASO, SERVICE_CENTERS_MX } from "../shared/constantes.js";
 import Burbuja from "../componentes/Burbuja.jsx";
 import BotonCompartirChat from "../componentes/BotonCompartirChat.jsx";
 import BotonAdjunto from "../componentes/BotonAdjunto.jsx";
+import GrabadorAudio from "../componentes/GrabadorAudio.jsx";
 import { hayAdjuntoMadurando } from "../shared/mensajes.js";
 import { useSearchParams } from "react-router-dom";
 
@@ -764,6 +765,9 @@ export default function Consultas() {
                 )}
                 <div style={{ padding: "11px 16px", display: "flex", gap: 8, alignItems: "center" }}>
                   <BotonAdjunto telefono={sel?.telefono} caseId={ticketAbierto?.case_id}
+                    conversacionId={sel?.id} disabled={accion || ticketDeOtro}
+                    onEnviado={() => cargarHilo(sel)} />
+                  <GrabadorAudio telefono={sel?.telefono} caseId={ticketAbierto?.case_id}
                     conversacionId={sel?.id} disabled={accion || ticketDeOtro}
                     onEnviado={() => cargarHilo(sel)} />
                   <input value={texto} onChange={(e) => setTexto(e.target.value)}
