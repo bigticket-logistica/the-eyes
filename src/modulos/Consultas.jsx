@@ -415,7 +415,11 @@ export default function Consultas() {
   useEffect(() => {
     if (!sel) return;
     const canal = sb.channel(`consulta-hilo-${sel.id}`)
-      .on("postgres_changes", { event: "INSERT", schema: "public", table: "crm_inc_mensajes", filter: `conversacion_id=eq.${sel.id}` },
+      // event:"*" y no solo INSERT: el worker de adjuntos completa la foto y
+      // la transcripción con UPDATEs posteriores (media_path llega ~15 s
+      // después del mensaje, la descripción de Vision después). Sin escuchar
+      // UPDATE, la imagen quedaba en "en cola de descarga…" hasta refrescar.
+      .on("postgres_changes", { event: "*", schema: "public", table: "crm_inc_mensajes", filter: `conversacion_id=eq.${sel.id}` },
         () => { if (selRef.current) cargarHilo(selRef.current); })
       .subscribe();
     return () => { sb.removeChannel(canal); };
