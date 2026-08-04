@@ -35,11 +35,19 @@ export default function HiloTicket({ caso, onTomar, onResolver, onTraspasar, ana
       .channel(`mensajes-caso-${caso.case_id}`)
       .on(
         "postgres_changes",
-        { event: "INSERT", schema: "public", table: "crm_inc_mensajes", filter: `case_id=eq.${caso.case_id}` },
+        // event:"*": los adjuntos maduran por UPDATE (el worker pone media_path
+        // y luego la transcripción). Con solo INSERT, la foto no aparecía hasta
+        // refrescar la página.
+        { event: "*", schema: "public", table: "crm_inc_mensajes", filter: `case_id=eq.${caso.case_id}` },
         (payload) => {
           const nuevo = payload.new;
-          // agregar solo si no lo tenemos ya (evita duplicar con el envío local)
-          setMensajes((prev) => prev.some((m) => m.id === nuevo.id) ? prev : [...prev, nuevo]);
+          if (!nuevo?.id) return;
+          setMensajes((prev) => {
+            const i = prev.findIndex((m) => m.id === nuevo.id);
+            if (i === -1) return [...prev, nuevo];              // INSERT
+            const copia = [...prev]; copia[i] = { ...copia[i], ...nuevo }; // UPDATE
+            return copia;
+          });
         },
       )
       .subscribe();
