@@ -37,18 +37,30 @@ export default function Topbar() {
       display: "flex", alignItems: "center", justifyContent: "space-between",
       padding: "9px 16px", background: "var(--navy)", flexShrink: 0, gap: 12,
     }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 0 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 12, minWidth: 0 }}>
+        {/* Logo de Bigticket en blanco sobre el navy. Alto fijo y ancho automático
+            para que no se deforme, y flexShrink 0 para que no lo aplaste el nav
+            cuando hay muchas pestañas. */}
+        <img src="/bigticket-blanco.png" alt="Bigticket"
+          style={{ height: 22, width: "auto", flexShrink: 0, display: "block" }} />
+
+        {/* Título y país agrupados en una columna: ocupan menos ancho horizontal
+            que en línea, lo que deja más espacio para las pestañas. */}
         <div style={{
-          width: 28, height: 28, borderRadius: 8, background: "var(--naranja)",
-          display: "flex", alignItems: "center", justifyContent: "center",
-          color: "#fff", fontWeight: 700, fontSize: 15,
-        }}>◉</div>
-        <span style={{ color: "#fff", fontWeight: 600, fontSize: 15, whiteSpace: "nowrap" }}>The Eyes</span>
-        <span style={{ color: "#bcd0ec", fontSize: 11.5, paddingLeft: 10, borderLeft: "1px solid var(--navy-suave)", whiteSpace: "nowrap" }}
-          title={`Torre de soporte · ${analista?.pais || "MX"}`}>
-          {analista?.pais || "MX"}
-        </span>
-        <nav style={{ display: "flex", alignItems: "center", gap: 2, marginLeft: 6, overflowX: "auto" }}>
+          paddingLeft: 12, borderLeft: "1px solid var(--navy-suave)",
+          display: "flex", flexDirection: "column", justifyContent: "center",
+          lineHeight: 1.15, flexShrink: 0,
+        }}>
+          <span style={{ color: "#fff", fontWeight: 600, fontSize: 14, whiteSpace: "nowrap" }}>
+            Torre de Control
+          </span>
+          <span style={{ color: "#bcd0ec", fontSize: 10.5, letterSpacing: 0.4, whiteSpace: "nowrap" }}
+            title={`Operación ${analista?.pais || "MX"}`}>
+            {analista?.pais || "MX"}
+          </span>
+        </div>
+
+        <nav style={{ display: "flex", alignItems: "center", gap: 2, marginLeft: 2, overflowX: "auto" }}>
           <Tab to="/">Incidencias</Tab>
           <Tab to="/detalle-dia">Detalle</Tab>
           <Tab to="/consultas" badge={noLeidos}>Consultas</Tab>
