@@ -724,27 +724,10 @@ export default function Consultas() {
             alignItems: "center", justifyContent: "space-between" }}>
             <div>
               <div style={{ fontSize: 14, fontWeight: 600, display: "flex", alignItems: "center", gap: 8 }}>
+                {/* El Directorio manda sobre el perfil de WhatsApp: ese nombre lo
+                    controla el conductor y puede cambiar cuando quiera. El botón
+                    para guardarlo vive en la ficha, no acá, para no romper la línea. */}
                 {contexto.nombre || nombresLista[sel.telefono] || sel.conductor_nombre || sel.telefono}
-                {/* El botón depende de si el número está en NUESTRO Directorio, no de
-                    que exista algún nombre. sel.conductor_nombre es el nombre del
-                    perfil de WhatsApp que manda Meta ("Yanito 💗"): sirve para
-                    mostrar algo, pero no identifica al conductor ni sobrevive a que
-                    la persona lo cambie. Antes ese nombre escondía el botón y no
-                    había forma de guardar el número. */}
-                {!(contexto.nombre || nombresLista[sel.telefono]) ? (
-                  <button onClick={() => setModalGuardar(true)}
-                    title="Este número no está en el Directorio de Bigticket"
-                    style={{ fontSize: 11, padding: "3px 10px" }}>💾 Guardar en Directorio</button>
-                ) : (
-                  <button onClick={() => setModalGuardar(true)}
-                    title="Editar los datos de este conductor en el Directorio"
-                    style={{ fontSize: 11, padding: "3px 8px", opacity: 0.55 }}>✏️</button>
-                )}
-                {sel.conductor_nombre && !(contexto.nombre || nombresLista[sel.telefono]) && (
-                  <span style={{ fontSize: 11, fontWeight: 400, color: "var(--texto-tenue)" }}>
-                    (perfil de WhatsApp: {sel.conductor_nombre})
-                  </span>
-                )}
               </div>
               <div style={{ fontSize: 12, color: "var(--texto-suave)" }}>
                 {sel.telefono}{ticketAbierto ? ` · ${ticketAbierto.codigo || "#" + ticketAbierto.case_id} abierto` : " · sin ticket abierto"}
@@ -828,7 +811,15 @@ export default function Consultas() {
             {/* identidad */}
             <div style={{ fontSize: 12, color: "var(--texto)", lineHeight: 1.9, marginBottom: 12 }}>
               <div><span style={{ color: "var(--texto-suave)" }}>Ticket:</span> <b>{ticketAbierto ? (ticketAbierto.codigo || "#" + ticketAbierto.case_id) : "sin ticket abierto"}</b></div>
-              <div><span style={{ color: "var(--texto-suave)" }}>Conductor:</span> {sel.conductor_nombre || contexto.nombre || "—"}</div>
+              <div>
+                <span style={{ color: "var(--texto-suave)" }}>Conductor:</span>{" "}
+                {contexto.nombre || nombresLista[sel.telefono] || sel.conductor_nombre || "—"}
+                {!(contexto.nombre || nombresLista[sel.telefono]) && sel.conductor_nombre && (
+                  <span style={{ color: "var(--texto-tenue)", fontSize: 11 }}>
+                    {" "}· perfil de WhatsApp
+                  </span>
+                )}
+              </div>
               <div><span style={{ color: "var(--texto-suave)" }}>Teléfono:</span> {sel.telefono}</div>
               {ticketAbierto && (
                 <div style={{ marginTop: 2, display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
@@ -912,6 +903,28 @@ export default function Consultas() {
                   style={{ width: "100%", padding: "9px", marginTop: 10 }}>
                   {guardando ? "Guardando…" : "Guardar ficha"}
                 </button>
+
+                {/* Directorio: acción distinta de la ficha del ticket (una describe
+                    el caso, la otra da identidad permanente al conductor), así que
+                    va separada por una línea y con jerarquía visual menor. */}
+                <div style={{ borderTop: "1px solid var(--borde)", marginTop: 14, paddingTop: 12 }}>
+                  {!(contexto.nombre || nombresLista[sel.telefono]) ? (
+                    <>
+                      <div style={{ fontSize: 11.5, color: "var(--texto-suave)", marginBottom: 7 }}>
+                        Este número no está en el Directorio de Bigticket.
+                      </div>
+                      <button onClick={() => setModalGuardar(true)}
+                        style={{ width: "100%", padding: "8px", fontSize: 12.5 }}>
+                        💾 Guardar en Directorio
+                      </button>
+                    </>
+                  ) : (
+                    <button onClick={() => setModalGuardar(true)}
+                      style={{ width: "100%", padding: "7px", fontSize: 12, opacity: 0.8 }}>
+                      ✏️ Editar en el Directorio
+                    </button>
+                  )}
+                </div>
               </>
             ) : (
               <div style={{ fontSize: 12, color: "var(--texto-tenue)", background: "var(--fondo)", borderRadius: 8, padding: "10px 12px" }}>
