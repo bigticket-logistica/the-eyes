@@ -353,6 +353,8 @@ export default function Consultas() {
   const [avisoPanel, setAvisoPanel] = useState("");
   const leidosRef = useRef(new Set());
   const finRef = useRef(null);
+  const hiloRef = useRef(null);          // contenedor con scroll del hilo
+  const convVistaRef = useRef(null);     // qué conversación se mostró la última vez
   const selRef = useRef(null);
   selRef.current = sel;
 
@@ -437,7 +439,52 @@ export default function Consultas() {
     return () => clearInterval(t);
   }, [sel, mensajes, cargarHilo]);
 
-  useEffect(() => { finRef.current?.scrollIntoView({ behavior: "smooth" }); }, [mensajes.length]);
+  // Al abrir una conversación hay que quedar SIEMPRE al final del historial.
+  // scrollIntoView con smooth no alcanza: las imágenes y los reproductores de
+  // audio cargan después y empujan el contenido hacia abajo, dejando el hilo a
+  // media altura. Por eso se mueve el contenedor directo, de golpe, y se repite
+  // un par de veces mientras los adjuntos terminan de dibujarse.
+  const irAlFinal = useCallback((suave) => {
+    const c = hiloRef.current;
+    if (c) c.scrollTo({ top: c.scrollHeight, behavior: suave ? "smooth" : "auto" });
+    else finRef.current?.scrollIntoView({ behavior: suave ? "smooth" : "auto" });
+  }, []);
+
+  useEffect(() => {
+    if (!mensajes.length) return;
+    const cambioDeConversacion = convVistaRef.current !== sel?.id;
+    convVistaRef.current = sel?.id;
+
+    if (cambioDeConversacion) {
+      // Recién abierta: al final de inmediato, sin animación, y reintentos
+      // cortos para absorber la carga de imágenes y audios.
+      irAlFinal(false);
+      const t1 = setTimeout(() => irAlFinal(false), 120);
+      const t2 = setTimeout(() => irAlFinal(false), 450);
+      const t3 = setTimeout(() => irAlFinal(false), 1200);
+      return () => { clearTimeout(t1); clearTimeout(t2); clearTimeout(t3); };
+    }
+    // Mensaje nuevo en la conversación que ya estabas viendo: animado.
+    irAlFinal(true);
+  }, [mensajes, sel?.id, irAlFinal]);
+
+  // Cuando una imagen o un audio termina de cargar, el alto cambia: si estabas
+  // al final, hay que seguir estándolo.
+  useEffect(() => {
+    const c = hiloRef.current;
+    if (!c) return;
+    const alCargar = (e) => {
+      if (!["IMG", "AUDIO", "VIDEO", "IFRAME"].includes(e.target?.tagName)) return;
+      const cerca = c.scrollHeight - c.scrollTop - c.clientHeight < 220;
+      if (cerca) irAlFinal(false);
+    };
+    c.addEventListener("load", alCargar, true);
+    c.addEventListener("loadedmetadata", alCargar, true);
+    return () => {
+      c.removeEventListener("load", alCargar, true);
+      c.removeEventListener("loadedmetadata", alCargar, true);
+    };
+  }, [sel?.id, irAlFinal]);
 
   // al cambiar el ticket abierto: cargar su caracterización + contexto de ruta
   useEffect(() => {
@@ -743,7 +790,7 @@ export default function Consultas() {
             )}
           </div>
 
-          <div style={{ flex: 1, minHeight: 0, overflowY: "auto", padding: 16, background: "var(--fondo)",
+          <div ref={hiloRef} style={{ flex: 1, minHeight: 0, overflowY: "auto", padding: 16, background: "var(--fondo)",
             display: "flex", flexDirection: "column", gap: 8 }}>
             {cargando ? (
               <div style={{ margin: "auto", fontSize: 12, color: "var(--texto-tenue)" }}>Cargando…</div>
