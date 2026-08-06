@@ -34,6 +34,7 @@ const DESENLACES = {
   cerro_tarde_con_entregas: { etiqueta: "Cerró con entregas",  bg: "#ecfdf5", borde: "#a7f3d0", color: "#15803d" },
   cerro_tarde_sin_entregas: { etiqueta: "Cerró sin cambios",   bg: "#f1f5f9", borde: "var(--borde)", color: "var(--texto-suave)" },
   cerro_con_fallidos:       { etiqueta: "Cerró con fallidos",  bg: "#fef2f2", borde: "#fca5a5", color: "#b91c1c" },
+  abierta_con_fallidos:     { etiqueta: "Abierta · fallidos", bg: "#fef2f2", borde: "#fca5a5", color: "#b91c1c" },
   sigue_abierta:            { etiqueta: "Sigue abierta",       bg: "#fffbeb", borde: "#fde68a", color: "#92400e" },
   no_encontrada:            { etiqueta: "No encontrada",       bg: "#f8fafc", borde: "var(--borde)", color: "var(--texto-tenue)" },
   pendiente_reconciliar:    { etiqueta: "Por reconciliar",     bg: "#f8fafc", borde: "var(--borde)", color: "var(--texto-tenue)" },
@@ -75,6 +76,16 @@ function Tarjeta({ titulo, valor, detalle, tono, onClick, activa }) {
 
 const pctTxt = (v) => (v == null ? "—" : `${Number(v).toFixed(1)}%`);
 
+const thTop = {
+  padding: "7px 8px", textAlign: "left", fontWeight: 600,
+  fontSize: 10.5, whiteSpace: "nowrap", verticalAlign: "bottom",
+};
+const td = { padding: "7px 8px" };
+const thSub = {
+  padding: "4px 8px", fontWeight: 500, fontSize: 9.5,
+  whiteSpace: "nowrap", borderTop: "1px solid rgba(255,255,255,.18)",
+};
+
 export default function Anomalias() {
   const [fecha, setFecha] = useState(ayerMX());
   const [filtro, setFiltro] = useState(null);
@@ -107,7 +118,9 @@ export default function Anomalias() {
   const cuenta = (d) => lista.filter((r) => r.desenlace === d).length;
   const total = lista.length;
   const conEntregas = cuenta("cerro_tarde_con_entregas");
-  const conFallidos = cuenta("cerro_con_fallidos");
+  // Los dos casos graves son el mismo problema: pendientes convertidos en
+  // fallidos. Que la ruta haya cerrado o no es secundario.
+  const conFallidos = cuenta("cerro_con_fallidos") + cuenta("abierta_con_fallidos");
   const abiertas = cuenta("sigue_abierta");
   const porReconciliar = cuenta("pendiente_reconciliar");
   const sinCambios = cuenta("cerro_tarde_sin_entregas");
@@ -123,7 +136,10 @@ export default function Anomalias() {
     ? (100 * sum(ns, "entregados_final") / sum(ns, "cargados")) : null;
   const delta = (nsCierre != null && nsReal != null) ? +(nsReal - nsCierre).toFixed(1) : null;
 
-  const visibles = filtro ? lista.filter((r) => r.desenlace === filtro) : lista;
+  const visibles = !filtro ? lista
+    : filtro === "graves"
+      ? lista.filter((r) => ["cerro_con_fallidos", "abierta_con_fallidos"].includes(r.desenlace))
+      : lista.filter((r) => r.desenlace === filtro);
 
   return (
     <div style={{ height: "100%", overflowY: "auto", padding: 18, background: "var(--fondo)" }}>
@@ -180,8 +196,8 @@ export default function Anomalias() {
               <Tarjeta titulo="Cerró con fallidos" valor={conFallidos}
                 detalle={nuevosFallidos > 0 ? `+${nuevosFallidos} fallidos` : "—"}
                 tono={conFallidos > 0 ? "grave" : "neutro"}
-                onClick={() => setFiltro(filtro === "cerro_con_fallidos" ? null : "cerro_con_fallidos")}
-                activa={filtro === "cerro_con_fallidos"} />
+                onClick={() => setFiltro(filtro === "graves" ? null : "graves")}
+                activa={filtro === "graves"} />
               <Tarjeta titulo="Sigue abierta" valor={abiertas}
                 detalle={porReconciliar > 0 ? `${porReconciliar} sin reconciliar` : "requiere gestión"}
                 tono={abiertas > 0 ? "alerta" : "neutro"}
@@ -211,20 +227,40 @@ export default function Anomalias() {
             <div style={{ overflowX: "auto" }}>
               <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
                 <thead>
+                  {/* Dos niveles: antes "31 · 13 fall" y "31 · 47 fall" metían dos
+                      números en una celda y había que calcular la diferencia de
+                      cabeza. Cada cifra tiene su columna. */}
                   <tr style={{ background: "var(--navy)", color: "#fff" }}>
-                    {["Ruta", "SC", "Conductor", "Cargados", "Al cierre", "NS cierre",
-                      "Final", "NS real", "Δ NS", "Desenlace", "Arrancó", "Cerró"].map((h) => (
-                      <th key={h} style={{
-                        padding: "8px 9px", textAlign: "left", fontWeight: 600,
-                        fontSize: 10.5, whiteSpace: "nowrap",
-                      }}>{h}</th>
+                    {[["Ruta",1],["SC",1],["Conductor",1],["Carg.",1]].map(([h,c]) => (
+                      <th key={h} rowSpan={2} style={thTop}>{h}</th>
                     ))}
+                    <th colSpan={3} style={{ ...thTop, textAlign: "center", background: "#24487d" }}>
+                      Al cierre del día
+                    </th>
+                    <th colSpan={3} style={{ ...thTop, textAlign: "center", background: "#2d5490" }}>
+                      Resultado final
+                    </th>
+                    <th colSpan={3} style={{ ...thTop, textAlign: "center", background: "#24487d" }}>
+                      NS
+                    </th>
+                    <th rowSpan={2} style={thTop}>Desenlace</th>
+                    <th colSpan={2} style={{ ...thTop, textAlign: "center", background: "#24487d" }}>
+                      Horas
+                    </th>
+                  </tr>
+                  <tr style={{ background: "var(--navy)", color: "#cfe0f5" }}>
+                    {["Entreg.","Fallid.","Pend.","Entreg.","Fallid.","Pend.","Cierre","Real","Δ","Arrancó","Cerró"]
+                      .map((h, i) => (
+                        <th key={i} style={{ ...thSub, textAlign: i < 9 ? "center" : "left" }}>{h}</th>
+                      ))}
                   </tr>
                 </thead>
                 <tbody>
                   {visibles.map((r) => {
                     const d = DESENLACES[r.desenlace] || DESENLACES.pendiente_reconciliar;
                     const dNs = r.delta_ns == null ? null : Number(r.delta_ns);
+                    const masEnt = Math.max(0, n0(r.entregados_final) - n0(r.entregados_cierre));
+                    const masFall = Math.max(0, n0(r.fallidos_final) - n0(r.fallidos_cierre));
                     return (
                       <tr key={r.id_ruta} style={{ borderBottom: "1px solid var(--borde)" }}>
                         <td style={{ padding: "8px 9px", fontFamily: "monospace", fontSize: 11 }}>{r.id_ruta}</td>
@@ -235,25 +271,36 @@ export default function Anomalias() {
                             <span style={{ color: "var(--texto-tenue)", fontSize: 10 }}> · {r.vehicle_license}</span>
                           )}
                         </td>
-                        <td style={{ padding: "8px 9px", textAlign: "center" }}>{r.cargados}</td>
-                        <td style={{ padding: "8px 9px", textAlign: "center" }}>
-                          {r.entregados_cierre}
-                          {n0(r.fallidos_cierre) > 0 && (
-                            <span style={{ color: "#b45309", fontSize: 10 }}> · {r.fallidos_cierre} fall.</span>
-                          )}
+                        <td style={{ ...td, textAlign: "center" }}>{r.cargados}</td>
+
+                        {/* Al cierre del día */}
+                        <td style={{ ...td, textAlign: "center" }}>{r.entregados_cierre ?? "—"}</td>
+                        <td style={{ ...td, textAlign: "center", color: n0(r.fallidos_cierre) > 0 ? "#b45309" : "var(--texto-tenue)" }}>
+                          {r.fallidos_cierre ?? "—"}
                         </td>
-                        <td style={{ padding: "8px 9px", textAlign: "center", color: "var(--texto-suave)" }}>
+                        <td style={{ ...td, textAlign: "center", color: n0(r.pendientes_cierre) > 0 ? "#b45309" : "var(--texto-tenue)" }}>
+                          {r.pendientes_cierre ?? "—"}
+                        </td>
+
+                        {/* Resultado final, con el cambio explícito */}
+                        <td style={{ ...td, textAlign: "center", fontWeight: 600 }}>
+                          {r.entregados_final ?? "—"}
+                          {masEnt > 0 && <span style={{ color: "#15803d", fontSize: 9.5, fontWeight: 500 }}> +{masEnt}</span>}
+                        </td>
+                        <td style={{ ...td, textAlign: "center", fontWeight: masFall > 0 ? 700 : 400,
+                          color: masFall > 0 ? "#b91c1c" : "var(--texto-tenue)" }}>
+                          {r.fallidos_final ?? "—"}
+                          {masFall > 0 && <span style={{ fontSize: 9.5, fontWeight: 500 }}> +{masFall}</span>}
+                        </td>
+                        <td style={{ ...td, textAlign: "center", color: "var(--texto-tenue)" }}>
+                          {r.pendientes_final ?? "—"}
+                        </td>
+
+                        {/* NS */}
+                        <td style={{ ...td, textAlign: "center", color: "var(--texto-suave)" }}>
                           {pctTxt(r.ns_cierre)}
                         </td>
-                        <td style={{ padding: "8px 9px", textAlign: "center", fontWeight: 600 }}>
-                          {r.entregados_final ?? "—"}
-                          {n0(r.fallidos_final) > n0(r.fallidos_cierre) && (
-                            <span style={{ color: "#b91c1c", fontSize: 10 }}>
-                              {" "}· {r.fallidos_final} fall.
-                            </span>
-                          )}
-                        </td>
-                        <td style={{ padding: "8px 9px", textAlign: "center", fontWeight: 600 }}>
+                        <td style={{ ...td, textAlign: "center", fontWeight: 600 }}>
                           {pctTxt(r.ns_final)}
                         </td>
                         <td style={{
@@ -267,6 +314,11 @@ export default function Anomalias() {
                             fontSize: 10.5, padding: "3px 8px", borderRadius: 20, whiteSpace: "nowrap",
                             background: d.bg, border: `1px solid ${d.borde}`, color: d.color,
                           }}>{d.etiqueta}</span>
+                          {r.status_final && r.status_final !== "close" && (
+                            <div style={{ fontSize: 9.5, color: "var(--texto-tenue)", marginTop: 2 }}>
+                              MELI: {r.status_final}
+                            </div>
+                          )}
                         </td>
                         <td style={{ padding: "8px 9px", fontSize: 10.5, color: "var(--texto-suave)", whiteSpace: "nowrap" }}>
                           {r.hora_arranque || "—"}
