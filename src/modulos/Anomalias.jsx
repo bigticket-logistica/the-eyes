@@ -29,18 +29,29 @@ function ayerMX() {
 
 const n0 = (v) => (v == null ? 0 : Number(v));
 
-function Tarjeta({ titulo, valor, detalle, tono }) {
+// Las tarjetas de conteo FILTRAN la tabla al hacer clic. Las de NS no: son
+// cifras del día completo, no subconjuntos de la lista.
+function Tarjeta({ titulo, valor, detalle, tono, onClick, activa }) {
   const colores = {
     alerta: { bg: "#fffbeb", borde: "#fde68a", txt: "#92400e" },
     bueno:  { bg: "#ecfdf5", borde: "#a7f3d0", txt: "#15803d" },
     neutro: { bg: "#fff",    borde: "var(--borde)", txt: "var(--navy)" },
   }[tono || "neutro"];
+  const clickeable = typeof onClick === "function";
   return (
-    <div style={{
-      background: colores.bg, border: `1px solid ${colores.borde}`, borderRadius: 10,
-      padding: "12px 15px", minWidth: 145, flex: "1 1 145px",
-    }}>
-      <div style={{ fontSize: 11, color: "var(--texto-suave)", marginBottom: 4 }}>{titulo}</div>
+    <div onClick={onClick}
+      title={clickeable ? (activa ? "Clic para quitar el filtro" : "Clic para filtrar la tabla") : undefined}
+      style={{
+        background: colores.bg,
+        border: `${activa ? 2 : 1}px solid ${activa ? "var(--navy)" : colores.borde}`,
+        borderRadius: 10, padding: activa ? "11px 14px" : "12px 15px",
+        minWidth: 145, flex: "1 1 145px",
+        cursor: clickeable ? "pointer" : "default",
+        boxShadow: activa ? "0 2px 8px rgba(26,58,107,.15)" : "none",
+      }}>
+      <div style={{ fontSize: 11, color: "var(--texto-suave)", marginBottom: 4 }}>
+        {titulo}{clickeable && !activa ? " ⌄" : ""}{activa ? " ✕" : ""}
+      </div>
       <div style={{ fontSize: 23, fontWeight: 700, color: colores.txt, lineHeight: 1.1 }}>{valor}</div>
       {detalle && <div style={{ fontSize: 10.5, color: "var(--texto-tenue)", marginTop: 3 }}>{detalle}</div>}
     </div>
@@ -74,6 +85,7 @@ const pct = (ent, tot) => (n0(tot) > 0 ? (100 * n0(ent) / n0(tot)).toFixed(1) : 
 
 export default function Anomalias() {
   const [fecha, setFecha] = useState(ayerMX());
+  const [filtro, setFiltro] = useState(null);   // desenlace por el que se filtra la tabla
   const [rutas, setRutas] = useState(null);
   const [nsCierre, setNsCierre] = useState([]);
   const [nsDef, setNsDef] = useState([]);
@@ -102,6 +114,7 @@ export default function Anomalias() {
   }, [fecha]);
 
   useEffect(() => { cargar(); }, [cargar]);
+  useEffect(() => { setFiltro(null); }, [fecha]);
 
   // ── Resumen ───────────────────────────────────────────────────────────────
   const total = rutas?.length || 0;
@@ -139,7 +152,7 @@ export default function Anomalias() {
   }).filter((x) => x.rutasTardias > 0 || (x.dif != null && x.dif !== 0));
 
   return (
-    <div style={{ padding: 18, overflowY: "auto", background: "var(--fondo)", minHeight: 0 }}>
+    <div style={{ height: "100%", overflowY: "auto", padding: 18, background: "var(--fondo)" }}>
       {/* Cabecera */}
       <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap", marginBottom: 16 }}>
         <div style={{ flex: 1, minWidth: 220 }}>
@@ -157,11 +170,13 @@ export default function Anomalias() {
 
       {/* ══ SECCIÓN 1 · CIERRE TARDÍO ══ */}
       <div style={{ background: "#fff", border: "1px solid var(--borde)", borderRadius: 12, padding: 16 }}>
-        <div style={{ display: "flex", alignItems: "baseline", gap: 10, marginBottom: 4 }}>
-          <span style={{ fontSize: 14, fontWeight: 600 }}>1 · Rutas de cierre tardío</span>
-          <span style={{ fontSize: 11.5, color: "var(--texto-tenue)" }}>
-            no cerraron el {fecha} y se les dio la mañana siguiente
-          </span>
+        <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 5 }}>
+          1 · Rutas de cierre tardío
+        </div>
+        <div style={{ fontSize: 12, color: "var(--texto-suave)", lineHeight: 1.55, maxWidth: 820, marginBottom: 4 }}>
+          Rutas que <b>no cerraron el {fecha}</b> y siguieron al día siguiente. Importan porque el
+          NS del día se calcula con lo que se sabía al cerrar, y esas entregas de la mañana
+          siguiente no estaban contadas. Las tarjetas de conteo <b>filtran la tabla</b> al hacer clic.
         </div>
 
         {error && (
@@ -183,23 +198,31 @@ export default function Anomalias() {
         ) : (
           <>
             <div style={{ display: "flex", gap: 10, flexWrap: "wrap", margin: "14px 0" }}>
-              <Tarjeta titulo="Quedaron abiertas" valor={total} detalle={`al cerrar el ${fecha}`} />
-              <Tarjeta titulo="Resueltas" valor={resueltas}
-                detalle={`${cuenta("cerro_con_entregas")} con entregas nuevas`}
-                tono={resueltas > 0 ? "bueno" : "neutro"} />
+              <Tarjeta titulo="Quedaron abiertas" valor={total} detalle="ver todas"
+                onClick={() => setFiltro(null)} activa={filtro === null} />
+              <Tarjeta titulo="Cerraron con entregas" valor={cuenta("cerro_con_entregas")}
+                detalle="mejoraron el NS del día" tono="bueno"
+                onClick={() => setFiltro(filtro === "cerro_con_entregas" ? null : "cerro_con_entregas")}
+                activa={filtro === "cerro_con_entregas"} />
+              <Tarjeta titulo="Cerraron sin cambios" valor={cuenta("cerro_sin_cambios")}
+                detalle="no movieron cifras"
+                onClick={() => setFiltro(filtro === "cerro_sin_cambios" ? null : "cerro_sin_cambios")}
+                activa={filtro === "cerro_sin_cambios"} />
               <Tarjeta titulo="Siguen abiertas" valor={abiertas}
                 detalle={pendientesVivos > 0 ? `${pendientesVivos} paquetes sin entregar` : "requieren gestión"}
-                tono={abiertas > 0 ? "alerta" : "bueno"} />
+                tono={abiertas > 0 ? "alerta" : "bueno"}
+                onClick={() => setFiltro(filtro === "sigue_abierta" ? null : "sigue_abierta")}
+                activa={filtro === "sigue_abierta"} />
               <Tarjeta titulo="Sin seguimiento" valor={sinSeguimiento}
                 detalle={sinSeguimiento > 0 ? "el monitor no las vio cerrar" : "—"}
-                tono={sinSeguimiento > 0 ? "alerta" : "neutro"} />
-              <Tarjeta titulo="Entregas tardías" valor={tardias}
-                detalle="no contadas en el NS de cierre" tono={tardias > 0 ? "bueno" : "neutro"} />
+                tono={sinSeguimiento > 0 ? "alerta" : "neutro"}
+                onClick={() => setFiltro(filtro === "sin_seguimiento" ? null : "sin_seguimiento")}
+                activa={filtro === "sin_seguimiento"} />
               <Tarjeta titulo="NS de cierre" valor={`${nsCierreGlobal}%`}
                 detalle="congelado, lo que se reportó" />
               <Tarjeta titulo="NS definitivo" valor={`${nsDefGlobal}%`}
                 detalle={delta != null && Number(delta) !== 0
-                  ? `${Number(delta) > 0 ? "+" : ""}${delta} pts vs cierre`
+                  ? `${Number(delta) > 0 ? "+" : ""}${delta} pts · incluye rutas que el cierre no vio`
                   : "sin diferencia"}
                 tono={delta != null && Number(delta) > 0 ? "bueno" : "neutro"} />
             </div>
@@ -233,7 +256,7 @@ export default function Anomalias() {
                   </tr>
                 </thead>
                 <tbody>
-                  {rutas.map((r) => {
+                  {rutas.filter((r) => !filtro || r.desenlace === filtro).map((r) => {
                     const d = desenlace(r);
                     const nsAntes = pct(r.entregados_cierre, r.cargados);
                     const nsDespues = pct(r.entregados_final, r.cargados);
