@@ -3,22 +3,20 @@ import { sb } from "../shared/supabase.js";
 import { diaMX } from "../shared/fechas.js";
 
 // ═══════════════════════════════════════════════════════════════════════════
-// ANOMALÍAS · cosas que distorsionan las cifras del día y hay que revisar
+// ANOMALÍAS · lo que distorsiona las cifras del día
 //
 // SECCIÓN 1 · CIERRE TARDÍO
-//   Hay rutas que no alcanzan a cerrar y se les da la mañana siguiente para
-//   terminar. Eso mueve el NS en dos direcciones a la vez:
-//     · el día original queda subestimado (cerró con entregas que faltaban)
-//     · el día siguiente se contamina (el monitor crea filas con la fecha nueva,
-//       así que la ruta se cuenta otra vez con cargados y entregados ajenos)
+//   Hay rutas que no alcanzan a cerrar y terminan la mañana siguiente. Antes
+//   eso no se podía medir: el monitor se apagaba y esas rutas desaparecían de
+//   la lista de MELI, así que su resultado quedaba en el aire.
 //
-//   Esta sección muestra, para un día dado: qué rutas quedaron abiertas, con
-//   cuánto pendiente, y qué pasó después — cerró aportando entregas, cerró sin
-//   cambios, o sigue abierta.
+//   Ahora el ciclo es:
+//     00:10 · se congela la FOTO del día (crm_cierre_dia_rutas, no se toca más)
+//     08:00 · la RECONCILIACIÓN consulta a MELI el detalle de cada ruta abierta
+//   Esta pantalla compara las dos cosas: lo que se reportó contra lo que pasó.
 //
-//   El NS de cierre y el definitivo se muestran juntos a propósito: el primero
-//   es lo que se reportó, el segundo el resultado real. Tener los dos evita la
-//   discusión de "cuál era el número bueno".
+//   Se lee de la tabla, no se recalcula. Antes se derivaba del historial de
+//   capturas y cada cambio en el monitor movía los números del pasado.
 // ═══════════════════════════════════════════════════════════════════════════
 
 function ayerMX() {
@@ -29,130 +27,108 @@ function ayerMX() {
 
 const n0 = (v) => (v == null ? 0 : Number(v));
 
-// Las tarjetas de conteo FILTRAN la tabla al hacer clic. Las de NS no: son
-// cifras del día completo, no subconjuntos de la lista.
+// El desenlace lo decide y lo guarda la base (fn_reconciliar_ruta).
+// cerro_con_fallidos es el caso grave: la ruta cerró convirtiendo pendientes en
+// no entregados. Ese es el que la torre nunca veía.
+const DESENLACES = {
+  cerro_tarde_con_entregas: { etiqueta: "Cerró con entregas",  bg: "#ecfdf5", borde: "#a7f3d0", color: "#15803d" },
+  cerro_tarde_sin_entregas: { etiqueta: "Cerró sin cambios",   bg: "#f1f5f9", borde: "var(--borde)", color: "var(--texto-suave)" },
+  cerro_con_fallidos:       { etiqueta: "Cerró con fallidos",  bg: "#fef2f2", borde: "#fca5a5", color: "#b91c1c" },
+  sigue_abierta:            { etiqueta: "Sigue abierta",       bg: "#fffbeb", borde: "#fde68a", color: "#92400e" },
+  no_encontrada:            { etiqueta: "No encontrada",       bg: "#f8fafc", borde: "var(--borde)", color: "var(--texto-tenue)" },
+  pendiente_reconciliar:    { etiqueta: "Por reconciliar",     bg: "#f8fafc", borde: "var(--borde)", color: "var(--texto-tenue)" },
+};
+
 function Tarjeta({ titulo, valor, detalle, tono, onClick, activa }) {
-  const colores = {
+  const c = {
     alerta: { bg: "#fffbeb", borde: "#fde68a", txt: "#92400e" },
+    grave:  { bg: "#fef2f2", borde: "#fca5a5", txt: "#b91c1c" },
     bueno:  { bg: "#ecfdf5", borde: "#a7f3d0", txt: "#15803d" },
     neutro: { bg: "#fff",    borde: "var(--borde)", txt: "var(--navy)" },
   }[tono || "neutro"];
-  const clickeable = typeof onClick === "function";
+  const clic = typeof onClick === "function";
   return (
     <div onClick={onClick}
-      title={clickeable ? (activa ? "Clic para quitar el filtro" : "Clic para filtrar la tabla") : undefined}
+      title={clic ? (activa ? "Quitar filtro" : "Filtrar la tabla") : undefined}
       style={{
-        background: colores.bg,
-        border: `${activa ? 2 : 1}px solid ${activa ? "var(--navy)" : colores.borde}`,
-        borderRadius: 10, padding: activa ? "11px 14px" : "12px 15px",
-        minWidth: 145, flex: "1 1 145px",
-        cursor: clickeable ? "pointer" : "default",
+        background: c.bg,
+        border: `${activa ? 2 : 1}px solid ${activa ? "var(--navy)" : c.borde}`,
+        borderRadius: 10, padding: activa ? "10px 12px" : "11px 13px",
+        cursor: clic ? "pointer" : "default", minWidth: 0,
         boxShadow: activa ? "0 2px 8px rgba(26,58,107,.15)" : "none",
       }}>
-      <div style={{ fontSize: 11, color: "var(--texto-suave)", marginBottom: 4 }}>
-        {titulo}{clickeable && !activa ? " ⌄" : ""}{activa ? " ✕" : ""}
+      <div style={{
+        fontSize: 10.5, color: "var(--texto-suave)", marginBottom: 3,
+        whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
+      }}>
+        {titulo}{activa ? " ✕" : ""}
       </div>
-      <div style={{ fontSize: 23, fontWeight: 700, color: colores.txt, lineHeight: 1.1 }}>{valor}</div>
-      {detalle && <div style={{ fontSize: 10.5, color: "var(--texto-tenue)", marginTop: 3 }}>{detalle}</div>}
+      <div style={{ fontSize: 22, fontWeight: 700, color: c.txt, lineHeight: 1.05 }}>{valor}</div>
+      {detalle && (
+        <div style={{ fontSize: 10, color: "var(--texto-tenue)", marginTop: 2, lineHeight: 1.3 }}>
+          {detalle}
+        </div>
+      )}
     </div>
   );
 }
 
-// El desenlace viene calculado en la base (fn_rutas_abiertas), no se deduce acá.
-// Son cuatro casos y la diferencia entre los dos últimos es la que importa:
-//   sigue_abierta   → la vemos en MELI y no ha cerrado: PROBLEMA OPERATIVO
-//   sin_seguimiento → desapareció de la lista cuando el monitor se apagó:
-//                     no sabemos qué pasó. Es un punto ciego, no un problema.
-// Mostrarlos iguales haría que la torre persiga rutas que probablemente
-// cerraron bien, y que desconfíe de la pestaña.
-const DESENLACES = {
-  cerro_con_entregas: { etiqueta: "Cerró con entregas", bg: "#ecfdf5", borde: "#a7f3d0", color: "#15803d" },
-  cerro_sin_cambios:  { etiqueta: "Cerró sin cambios",  bg: "#f1f5f9", borde: "var(--borde)", color: "var(--texto-suave)" },
-  sigue_abierta:      { etiqueta: "Sigue abierta",      bg: "#fef2f2", borde: "#fca5a5", color: "#b91c1c" },
-  sin_seguimiento:    { etiqueta: "Sin seguimiento",    bg: "#fffbeb", borde: "#fde68a", color: "#92400e" },
-};
-
-function desenlace(r) {
-  const base = DESENLACES[r.desenlace] || DESENLACES.sin_seguimiento;
-  const tardias = n0(r.entregas_tardias);
-  if (r.desenlace === "cerro_con_entregas") {
-    return { ...base, etiqueta: `Cerró · +${tardias} entrega${tardias === 1 ? "" : "s"}` };
-  }
-  return base;
-}
-
-const pct = (ent, tot) => (n0(tot) > 0 ? (100 * n0(ent) / n0(tot)).toFixed(1) : "—");
+const pctTxt = (v) => (v == null ? "—" : `${Number(v).toFixed(1)}%`);
 
 export default function Anomalias() {
   const [fecha, setFecha] = useState(ayerMX());
-  const [filtro, setFiltro] = useState(null);   // desenlace por el que se filtra la tabla
+  const [filtro, setFiltro] = useState(null);
   const [rutas, setRutas] = useState(null);
-  const [nsCierre, setNsCierre] = useState([]);
-  const [nsDef, setNsDef] = useState([]);
+  const [ns, setNs] = useState([]);
   const [error, setError] = useState(null);
 
   const cargar = useCallback(async () => {
     setRutas(null); setError(null);
-    const [a, c, d] = await Promise.all([
-      sb.rpc("fn_rutas_abiertas", { p_fecha: fecha }),
-      sb.rpc("fn_ns_por_sc", { p_fecha: fecha }),
-      sb.rpc("fn_ns_por_sc_definitivo", { p_fecha: fecha }),
+    const [a, b] = await Promise.all([
+      sb.rpc("fn_anomalias_cierre", { p_fecha: fecha }),
+      sb.rpc("fn_ns_dia_congelado", { p_fecha: fecha }),
     ]);
-    const err = a.error || c.error || d.error;
+    const err = a.error || b.error;
     if (err) {
-      setError(
-        /does not exist|no existe/i.test(err.message)
-          ? "Faltan las funciones de cierre tardío en la base. Corre ns_cierre_tardio.sql."
-          : err.message,
-      );
+      setError(/does not exist|no existe/i.test(err.message)
+        ? "Faltan las funciones de cierre en la base. Corre cierre_dia_rutas.sql."
+        : err.message);
       setRutas([]);
       return;
     }
     setRutas(a.data || []);
-    setNsCierre(c.data || []);
-    setNsDef(d.data || []);
+    setNs(b.data || []);
   }, [fecha]);
 
   useEffect(() => { cargar(); }, [cargar]);
   useEffect(() => { setFiltro(null); }, [fecha]);
 
-  // ── Resumen ───────────────────────────────────────────────────────────────
-  const total = rutas?.length || 0;
-  const cuenta = (d) => (rutas || []).filter((r) => r.desenlace === d).length;
-  const resueltas = cuenta("cerro_con_entregas") + cuenta("cerro_sin_cambios");
+  const lista = rutas || [];
+  const cuenta = (d) => lista.filter((r) => r.desenlace === d).length;
+  const total = lista.length;
+  const conEntregas = cuenta("cerro_tarde_con_entregas");
+  const conFallidos = cuenta("cerro_con_fallidos");
   const abiertas = cuenta("sigue_abierta");
-  const sinSeguimiento = cuenta("sin_seguimiento");
-  const tardias = (rutas || []).reduce((s, r) => s + n0(r.entregas_tardias), 0);
-  // paquetes que quedaron sin entregar en rutas que siguen abiertas de verdad
-  const pendientesVivos = (rutas || [])
-    .filter((r) => r.desenlace === "sigue_abierta")
-    .reduce((s, r) => s + n0(r.pendientes_cierre), 0);
+  const porReconciliar = cuenta("pendiente_reconciliar");
+  const sinCambios = cuenta("cerro_tarde_sin_entregas");
+  const recuperadas = lista.reduce((s, r) => s + Math.max(0, n0(r.delta_entregas)), 0);
+  const nuevosFallidos = lista.reduce(
+    (s, r) => s + Math.max(0, n0(r.fallidos_final) - n0(r.fallidos_cierre)), 0);
 
-  // NS global del día, con y sin las entregas tardías
-  const tot = (arr, k) => arr.reduce((s, x) => s + n0(x[k]), 0);
-  const nsCierreGlobal = pct(tot(nsCierre, "entregados"), tot(nsCierre, "total"));
-  const nsDefGlobal = pct(tot(nsDef, "entregados"), tot(nsDef, "total"));
-  const delta = (nsCierreGlobal !== "—" && nsDefGlobal !== "—")
-    ? (Number(nsDefGlobal) - Number(nsCierreGlobal)).toFixed(1) : null;
+  // NS del día completo, de la foto y del resultado real
+  const sum = (arr, k) => arr.reduce((s, x) => s + n0(x[k]), 0);
+  const nsCierre = sum(ns, "cargados") > 0
+    ? (100 * sum(ns, "entregados") / sum(ns, "cargados")) : null;
+  const nsReal = sum(ns, "cargados") > 0
+    ? (100 * sum(ns, "entregados_final") / sum(ns, "cargados")) : null;
+  const delta = (nsCierre != null && nsReal != null) ? +(nsReal - nsCierre).toFixed(1) : null;
 
-  // Comparativo por SC, solo donde hay diferencia
-  const porSc = nsDef.map((d) => {
-    const c = nsCierre.find((x) => x.sc === d.sc);
-    const nsC = c ? Number(c.ns) : null;
-    const nsD = d.ns != null ? Number(d.ns) : null;
-    return {
-      sc: d.sc, nsC, nsD,
-      dif: (nsC != null && nsD != null) ? +(nsD - nsC).toFixed(1) : null,
-      rutas: n0(d.rutas), tardias: n0(d.entregas_tardias),
-      rutasTardias: n0(d.rutas_cierre_tardio),
-    };
-  }).filter((x) => x.rutasTardias > 0 || (x.dif != null && x.dif !== 0));
+  const visibles = filtro ? lista.filter((r) => r.desenlace === filtro) : lista;
 
   return (
     <div style={{ height: "100%", overflowY: "auto", padding: 18, background: "var(--fondo)" }}>
-      {/* Cabecera */}
       <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap", marginBottom: 16 }}>
-        <div style={{ flex: 1, minWidth: 220 }}>
+        <div style={{ flex: 1, minWidth: 200 }}>
           <div style={{ fontSize: 16, fontWeight: 600 }}>Anomalías</div>
           <div style={{ fontSize: 12, color: "var(--texto-suave)", marginTop: 2 }}>
             Situaciones que distorsionan las cifras del día
@@ -165,21 +141,17 @@ export default function Anomalias() {
         <button onClick={cargar} style={{ fontSize: 12, padding: "7px 12px" }}>↻</button>
       </div>
 
-      {/* ══ SECCIÓN 1 · CIERRE TARDÍO ══ */}
       <div style={{ background: "#fff", border: "1px solid var(--borde)", borderRadius: 12, padding: 16 }}>
-        <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 5 }}>
-          1 · Rutas de cierre tardío
-        </div>
-        <div style={{ fontSize: 12, color: "var(--texto-suave)", lineHeight: 1.55, maxWidth: 820, marginBottom: 4 }}>
-          Rutas que <b>no cerraron el {fecha}</b> y siguieron al día siguiente. Importan porque el
-          NS del día se calcula con lo que se sabía al cerrar, y esas entregas de la mañana
-          siguiente no estaban contadas. Las tarjetas de conteo <b>filtran la tabla</b> al hacer clic.
+        <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 5 }}>1 · Rutas de cierre tardío</div>
+        <div style={{ fontSize: 12, color: "var(--texto-suave)", lineHeight: 1.55, maxWidth: 860 }}>
+          Rutas que <b>no cerraron el {fecha}</b> y terminaron después. La foto del cierre se congela
+          a las 00:10 y a las 08:00 se consulta a MELI qué pasó con cada una. Las tarjetas filtran la tabla.
         </div>
 
         {error && (
           <div style={{
             fontSize: 12.5, color: "#b91c1c", background: "#fef2f2", border: "1px solid #fca5a5",
-            borderRadius: 8, padding: "10px 12px", margin: "10px 0",
+            borderRadius: 8, padding: "10px 12px", margin: "12px 0",
           }}>{error}</div>
         )}
 
@@ -188,112 +160,122 @@ export default function Anomalias() {
         ) : total === 0 && !error ? (
           <div style={{
             fontSize: 12.5, color: "#15803d", background: "#ecfdf5", border: "1px solid #a7f3d0",
-            borderRadius: 8, padding: "12px 14px", marginTop: 10,
+            borderRadius: 8, padding: "12px 14px", marginTop: 12,
           }}>
-            ✓ Todas las rutas del {fecha} cerraron dentro de su propio día. No hay distorsión de NS por este motivo.
+            ✓ Todas las rutas del {fecha} cerraron dentro de su propio día.
           </div>
         ) : (
           <>
-            <div style={{ display: "flex", gap: 10, flexWrap: "wrap", margin: "14px 0" }}>
+            {/* Seis tarjetas en UNA sola línea: grid de columnas iguales, sin wrap */}
+            <div style={{
+              display: "grid", gridTemplateColumns: "repeat(6, minmax(0, 1fr))",
+              gap: 9, margin: "14px 0",
+            }}>
               <Tarjeta titulo="Quedaron abiertas" valor={total} detalle="ver todas"
                 onClick={() => setFiltro(null)} activa={filtro === null} />
-              <Tarjeta titulo="Cerraron con entregas" valor={cuenta("cerro_con_entregas")}
-                detalle="mejoraron el NS del día" tono="bueno"
-                onClick={() => setFiltro(filtro === "cerro_con_entregas" ? null : "cerro_con_entregas")}
-                activa={filtro === "cerro_con_entregas"} />
-              <Tarjeta titulo="Cerraron sin cambios" valor={cuenta("cerro_sin_cambios")}
-                detalle="no movieron cifras"
-                onClick={() => setFiltro(filtro === "cerro_sin_cambios" ? null : "cerro_sin_cambios")}
-                activa={filtro === "cerro_sin_cambios"} />
-              <Tarjeta titulo="Siguen abiertas" valor={abiertas}
-                detalle={pendientesVivos > 0 ? `${pendientesVivos} paquetes sin entregar` : "requieren gestión"}
-                tono={abiertas > 0 ? "alerta" : "bueno"}
+              <Tarjeta titulo="Cerró con entregas" valor={conEntregas}
+                detalle={recuperadas > 0 ? `+${recuperadas} entregas` : "—"} tono="bueno"
+                onClick={() => setFiltro(filtro === "cerro_tarde_con_entregas" ? null : "cerro_tarde_con_entregas")}
+                activa={filtro === "cerro_tarde_con_entregas"} />
+              <Tarjeta titulo="Cerró con fallidos" valor={conFallidos}
+                detalle={nuevosFallidos > 0 ? `+${nuevosFallidos} fallidos` : "—"}
+                tono={conFallidos > 0 ? "grave" : "neutro"}
+                onClick={() => setFiltro(filtro === "cerro_con_fallidos" ? null : "cerro_con_fallidos")}
+                activa={filtro === "cerro_con_fallidos"} />
+              <Tarjeta titulo="Sigue abierta" valor={abiertas}
+                detalle={porReconciliar > 0 ? `${porReconciliar} sin reconciliar` : "requiere gestión"}
+                tono={abiertas > 0 ? "alerta" : "neutro"}
                 onClick={() => setFiltro(filtro === "sigue_abierta" ? null : "sigue_abierta")}
                 activa={filtro === "sigue_abierta"} />
-              <Tarjeta titulo="Sin seguimiento" valor={sinSeguimiento}
-                detalle={sinSeguimiento > 0 ? "el monitor no las vio cerrar" : "—"}
-                tono={sinSeguimiento > 0 ? "alerta" : "neutro"}
-                onClick={() => setFiltro(filtro === "sin_seguimiento" ? null : "sin_seguimiento")}
-                activa={filtro === "sin_seguimiento"} />
-              <Tarjeta titulo="NS de cierre" valor={`${nsCierreGlobal}%`}
-                detalle="congelado, lo que se reportó" />
-              <Tarjeta titulo="NS definitivo" valor={`${nsDefGlobal}%`}
-                detalle={delta != null && Number(delta) !== 0
-                  ? `${Number(delta) > 0 ? "+" : ""}${delta} pts · incluye rutas que el cierre no vio`
-                  : "sin diferencia"}
-                tono={delta != null && Number(delta) > 0 ? "bueno" : "neutro"} />
+              <Tarjeta titulo="NS de cierre" valor={pctTxt(nsCierre)} detalle="lo que se reportó" />
+              <Tarjeta titulo="NS real" valor={pctTxt(nsReal)}
+                detalle={delta ? `${delta > 0 ? "+" : ""}${delta} pts` : "sin diferencia"}
+                tono={delta > 0 ? "bueno" : "neutro"} />
             </div>
 
-            {/* Detalle por ruta */}
+            {/* Filtros secundarios, para no sumar más tarjetas a la línea */}
+            <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 12, flexWrap: "wrap" }}>
+              {[["cerro_tarde_sin_entregas", `Sin cambios (${sinCambios})`],
+                ["pendiente_reconciliar", `Por reconciliar (${porReconciliar})`]]
+                .filter(([k]) => (k === "cerro_tarde_sin_entregas" ? sinCambios : porReconciliar) > 0)
+                .map(([k, txt]) => (
+                  <button key={k} onClick={() => setFiltro(filtro === k ? null : k)}
+                    style={{
+                      fontSize: 11, padding: "4px 10px", borderRadius: 20,
+                      border: `1px solid ${filtro === k ? "var(--navy)" : "var(--borde)"}`,
+                      background: filtro === k ? "#eef2f7" : "#fff",
+                    }}>{txt}{filtro === k ? " ✕" : ""}</button>
+                ))}
+            </div>
+
             <div style={{ overflowX: "auto" }}>
               <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
                 <thead>
                   <tr style={{ background: "var(--navy)", color: "#fff" }}>
-                    {["Ruta", "SC", "Conductor", "Cargados", "Al cierre del día",
-                      "Pendientes", "Desenlace", "Final", "NS ruta", "Arrancó", "Cerró"].map((h) => (
+                    {["Ruta", "SC", "Conductor", "Cargados", "Al cierre", "NS cierre",
+                      "Final", "NS real", "Δ NS", "Desenlace", "Arrancó", "Cerró"].map((h) => (
                       <th key={h} style={{
                         padding: "8px 9px", textAlign: "left", fontWeight: 600,
-                        whiteSpace: "nowrap", fontSize: 11,
+                        fontSize: 10.5, whiteSpace: "nowrap",
                       }}>{h}</th>
                     ))}
                   </tr>
                 </thead>
                 <tbody>
-                  {rutas.filter((r) => !filtro || r.desenlace === filtro).map((r) => {
-                    const d = desenlace(r);
-                    const nsAntes = pct(r.entregados_cierre, r.cargados);
-                    const nsDespues = pct(r.entregados_final, r.cargados);
-                    const mejoro = nsAntes !== "—" && nsDespues !== "—" && Number(nsDespues) > Number(nsAntes);
+                  {visibles.map((r) => {
+                    const d = DESENLACES[r.desenlace] || DESENLACES.pendiente_reconciliar;
+                    const dNs = r.delta_ns == null ? null : Number(r.delta_ns);
                     return (
                       <tr key={r.id_ruta} style={{ borderBottom: "1px solid var(--borde)" }}>
-                        <td style={{ padding: "8px 9px", fontFamily: "monospace", fontSize: 11.5 }}>{r.id_ruta}</td>
+                        <td style={{ padding: "8px 9px", fontFamily: "monospace", fontSize: 11 }}>{r.id_ruta}</td>
                         <td style={{ padding: "8px 9px", fontWeight: 600 }}>{r.sc}</td>
                         <td style={{ padding: "8px 9px" }}>
                           {r.driver_name || "—"}
                           {r.vehicle_license && (
-                            <span style={{ color: "var(--texto-tenue)", fontSize: 10.5 }}> · {r.vehicle_license}</span>
+                            <span style={{ color: "var(--texto-tenue)", fontSize: 10 }}> · {r.vehicle_license}</span>
                           )}
                         </td>
                         <td style={{ padding: "8px 9px", textAlign: "center" }}>{r.cargados}</td>
                         <td style={{ padding: "8px 9px", textAlign: "center" }}>
                           {r.entregados_cierre}
-                          {r.substatus_cierre && (
-                            <span style={{ color: "var(--texto-tenue)", fontSize: 10 }}> · {r.substatus_cierre}</span>
+                          {n0(r.fallidos_cierre) > 0 && (
+                            <span style={{ color: "#b45309", fontSize: 10 }}> · {r.fallidos_cierre} fall.</span>
                           )}
                         </td>
-                        <td style={{ padding: "8px 9px", textAlign: "center",
-                          color: n0(r.pendientes_cierre) > 0 ? "#b45309" : "inherit" }}>
-                          {r.pendientes_cierre}
+                        <td style={{ padding: "8px 9px", textAlign: "center", color: "var(--texto-suave)" }}>
+                          {pctTxt(r.ns_cierre)}
                         </td>
-                        <td style={{ padding: "8px 9px" }}>
-                          <span title={r.desenlace === "sin_seguimiento"
-                              ? "Desapareció de la lista de MELI al apagarse el monitor: no sabemos si cerró"
-                              : undefined}
-                            style={{
-                              fontSize: 11, padding: "3px 8px", borderRadius: 20,
-                              background: d.bg, border: `1px solid ${d.borde}`, color: d.color,
-                              whiteSpace: "nowrap",
-                              borderStyle: r.desenlace === "sin_seguimiento" ? "dashed" : "solid",
-                            }}>{d.etiqueta}</span>
-                          {n0(r.dias_arrastre) > 1 && (
-                            <span style={{ fontSize: 10, color: "#b91c1c", marginLeft: 5 }}>
-                              {r.dias_arrastre} días
+                        <td style={{ padding: "8px 9px", textAlign: "center", fontWeight: 600 }}>
+                          {r.entregados_final ?? "—"}
+                          {n0(r.fallidos_final) > n0(r.fallidos_cierre) && (
+                            <span style={{ color: "#b91c1c", fontSize: 10 }}>
+                              {" "}· {r.fallidos_final} fall.
                             </span>
                           )}
                         </td>
                         <td style={{ padding: "8px 9px", textAlign: "center", fontWeight: 600 }}>
-                          {r.entregados_final}
+                          {pctTxt(r.ns_final)}
                         </td>
-                        <td style={{ padding: "8px 9px", whiteSpace: "nowrap" }}>
-                          <span style={{ color: "var(--texto-tenue)" }}>{nsAntes}%</span>
-                          {mejoro && <span style={{ color: "#15803d", fontWeight: 600 }}> → {nsDespues}%</span>}
+                        <td style={{
+                          padding: "8px 9px", textAlign: "center", fontWeight: 600,
+                          color: dNs > 0 ? "#15803d" : dNs < 0 ? "#b91c1c" : "var(--texto-tenue)",
+                        }}>
+                          {dNs == null ? "—" : dNs === 0 ? "0" : `${dNs > 0 ? "+" : ""}${dNs.toFixed(1)}`}
                         </td>
-                        <td style={{ padding: "8px 9px", fontSize: 11, color: "var(--texto-suave)", whiteSpace: "nowrap" }}>
+                        <td style={{ padding: "8px 9px" }}>
+                          <span style={{
+                            fontSize: 10.5, padding: "3px 8px", borderRadius: 20, whiteSpace: "nowrap",
+                            background: d.bg, border: `1px solid ${d.borde}`, color: d.color,
+                          }}>{d.etiqueta}</span>
+                        </td>
+                        <td style={{ padding: "8px 9px", fontSize: 10.5, color: "var(--texto-suave)", whiteSpace: "nowrap" }}>
                           {r.hora_arranque || "—"}
                         </td>
-                        <td style={{ padding: "8px 9px", fontSize: 11, whiteSpace: "nowrap",
-                          color: r.hora_cierre ? "#15803d" : "var(--texto-tenue)" }}>
-                          {r.hora_cierre || (r.ya_cerro ? `visto ${r.hora_ultima_captura}` : "—")}
+                        <td style={{
+                          padding: "8px 9px", fontSize: 10.5, whiteSpace: "nowrap",
+                          color: r.hora_cierre_real ? "#15803d" : "var(--texto-tenue)",
+                        }}>
+                          {r.hora_cierre_real || "—"}
                         </td>
                       </tr>
                     );
@@ -302,48 +284,45 @@ export default function Anomalias() {
               </table>
             </div>
 
-            {/* Comparativo por SC */}
-            {porSc.length > 0 && (
+            {ns.length > 0 && (
               <div style={{ marginTop: 18 }}>
                 <div style={{ fontSize: 12.5, fontWeight: 600, marginBottom: 8 }}>
-                  Efecto en el NS por Service Center
+                  NS del día por Service Center
                 </div>
                 <div style={{ overflowX: "auto" }}>
                   <table style={{ borderCollapse: "collapse", fontSize: 12 }}>
                     <thead>
                       <tr style={{ background: "#f1f5f9" }}>
-                        {["SC", "NS de cierre", "NS definitivo", "Diferencia",
-                          "Rutas del día", "Con cierre tardío", "Entregas tardías"].map((h) => (
+                        {["SC", "Rutas", "Cargados", "NS de cierre", "NS real", "Diferencia"].map((h) => (
                           <th key={h} style={{
-                            padding: "7px 12px", textAlign: "left", fontWeight: 600, fontSize: 11,
+                            padding: "7px 13px", textAlign: "left", fontWeight: 600, fontSize: 10.5,
                             whiteSpace: "nowrap", borderBottom: "1px solid var(--borde)",
                           }}>{h}</th>
                         ))}
                       </tr>
                     </thead>
                     <tbody>
-                      {porSc.map((x) => (
-                        <tr key={x.sc} style={{ borderBottom: "1px solid var(--borde)" }}>
-                          <td style={{ padding: "7px 12px", fontWeight: 600 }}>{x.sc}</td>
-                          <td style={{ padding: "7px 12px" }}>{x.nsC != null ? `${x.nsC}%` : "—"}</td>
-                          <td style={{ padding: "7px 12px", fontWeight: 600 }}>{x.nsD != null ? `${x.nsD}%` : "—"}</td>
-                          <td style={{ padding: "7px 12px", fontWeight: 600,
-                            color: x.dif > 0 ? "#15803d" : x.dif < 0 ? "#b91c1c" : "var(--texto-tenue)" }}>
-                            {x.dif != null ? `${x.dif > 0 ? "+" : ""}${x.dif}` : "—"}
-                          </td>
-                          <td style={{ padding: "7px 12px", textAlign: "center" }}>{x.rutas}</td>
-                          <td style={{ padding: "7px 12px", textAlign: "center" }}>{x.rutasTardias}</td>
-                          <td style={{ padding: "7px 12px", textAlign: "center" }}>{x.tardias}</td>
-                        </tr>
-                      ))}
+                      {ns.map((x) => {
+                        const dif = (x.ns != null && x.ns_final != null)
+                          ? +(Number(x.ns_final) - Number(x.ns)).toFixed(1) : null;
+                        return (
+                          <tr key={x.sc} style={{ borderBottom: "1px solid var(--borde)" }}>
+                            <td style={{ padding: "7px 13px", fontWeight: 600 }}>{x.sc}</td>
+                            <td style={{ padding: "7px 13px", textAlign: "center" }}>{x.rutas}</td>
+                            <td style={{ padding: "7px 13px", textAlign: "center" }}>{x.cargados}</td>
+                            <td style={{ padding: "7px 13px" }}>{pctTxt(x.ns)}</td>
+                            <td style={{ padding: "7px 13px", fontWeight: 600 }}>{pctTxt(x.ns_final)}</td>
+                            <td style={{
+                              padding: "7px 13px", fontWeight: 600,
+                              color: dif > 0 ? "#15803d" : dif < 0 ? "#b91c1c" : "var(--texto-tenue)",
+                            }}>
+                              {dif == null ? "—" : dif === 0 ? "0" : `${dif > 0 ? "+" : ""}${dif}`}
+                            </td>
+                          </tr>
+                        );
+                      })}
                     </tbody>
                   </table>
-                </div>
-                <div style={{ fontSize: 11, color: "var(--texto-tenue)", marginTop: 8, maxWidth: 720, lineHeight: 1.5 }}>
-                  El <b>NS de cierre</b> es lo que se sabía con las capturas de ese día. El{" "}
-                  <b>NS definitivo</b> atribuye cada ruta a su primer día operativo y cuenta su resultado
-                  final, incluidas las entregas hechas la mañana siguiente. Ambos se conservan a propósito:
-                  el primero es lo que se reportó y no cambia.
                 </div>
               </div>
             )}
@@ -351,7 +330,6 @@ export default function Anomalias() {
         )}
       </div>
 
-      {/* ══ SECCIÓN 2 · pendiente de definir ══ */}
       <div style={{
         background: "#fff", border: "1px dashed var(--borde)", borderRadius: 12,
         padding: 16, marginTop: 16, color: "var(--texto-tenue)", fontSize: 12.5,
