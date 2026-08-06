@@ -8,6 +8,7 @@ import { ETIQUETAS_CASO, SERVICE_CENTERS_MX } from "../shared/constantes.js";
 import Burbuja from "../componentes/Burbuja.jsx";
 import BotonCompartirChat from "../componentes/BotonCompartirChat.jsx";
 import BotonAdjunto from "../componentes/BotonAdjunto.jsx";
+import NuevoMensaje from "../componentes/NuevoMensaje.jsx";
 import GrabadorAudio from "../componentes/GrabadorAudio.jsx";
 import { hayAdjuntoMadurando } from "../shared/mensajes.js";
 import { useSearchParams } from "react-router-dom";
@@ -326,6 +327,7 @@ export default function Consultas() {
   const convParam = params.get("conv");
   const convRestaurada = useRef(false);
   const saltoHecho = useRef(false);
+  const [nuevoMsj, setNuevoMsj] = useState(false);
   const [convs, setConvs] = useState([]);
   const [fechaSel, setFechaSel] = useState(diaMX());
   const [sel, setSel] = useState(null);
@@ -723,7 +725,14 @@ export default function Consultas() {
       <div style={{ borderRight: "1px solid var(--borde)", overflowY: "auto", background: "#fff" }}>
         <div style={{ padding: "10px 14px", borderBottom: "1px solid var(--borde)",
           position: "sticky", top: 0, background: "#fff", zIndex: 2 }}>
-          <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 8 }}>Consultas en ruta</div>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8, gap: 8 }}>
+            <div style={{ fontSize: 13, fontWeight: 600 }}>Consultas en ruta</div>
+            <button className="btn-naranja" onClick={() => setNuevoMsj(true)}
+              title="Escribirle a un conductor que no ha iniciado conversación"
+              style={{ fontSize: 11.5, padding: "5px 10px", whiteSpace: "nowrap" }}>
+              ✏️ Nuevo
+            </button>
+          </div>
           <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
             <input type="date" value={fechaSel} max={diaMX()}
               onChange={(e) => setFechaSel(e.target.value || diaMX())}
@@ -847,6 +856,20 @@ export default function Consultas() {
       )}
 
       {/* ── COLUMNA 3 · caracterización del ticket ── */}
+      {nuevoMsj && (
+        <NuevoMensaje
+          analistaId={analista?.id}
+          onCerrar={() => setNuevoMsj(false)}
+          onAbrirConversacion={async (convId) => {
+            await cargarConvs();
+            if (convId) {
+              const c = (convs || []).find((x) => x.id === convId);
+              if (c) abrirConv(c); else setParams({ conv: convId }, { replace: true });
+            }
+          }}
+        />
+      )}
+
       <div style={{ borderLeft: "1px solid var(--borde)", overflowY: "auto", background: "#fff" }}>
         {!sel ? (
           <div style={{ padding: 20, fontSize: 12, color: "var(--texto-tenue)", textAlign: "center" }}>—</div>
