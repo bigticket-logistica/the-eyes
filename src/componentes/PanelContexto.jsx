@@ -225,16 +225,44 @@ export default function PanelContexto({ caso, analistaId }) {
     let activo = true;
     setError(null);
 
+    // El caché NUNCA debe borrar un comprador que ya está en pantalla.
+    //
+    // Secuencia que producía el bug de "aparecen y desaparecen":
+    //   1. /detalle-caso trae el comprador fresco de MELI → se muestra
+    //   2. ese endpoint ESCRIBE los datos en crm_inc_casos
+    //   3. el UPDATE dispara fn_inc_purga_comprador, que los borra en casos
+    //      cerrados, y actualiza detalle_actualizado_en
+    //   4. cambia el prop caso → este efecto corre de nuevo → cacheFresco()
+    //      ahora da true → se lee la fila YA PURGADA y el comprador se va
+    //
+    // Como el caché de la base está purgado por diseño, se conserva el
+    // comprador que ya teníamos en memoria en vez de reemplazarlo por nada.
+    const conservarComprador = (anterior) => {
+      const delCache = detalleDesdeCache(caso);
+      const cacheTiene = !!(delCache?.comprador?.nombre || delCache?.comprador?.telefono || delCache?.comprador?.mail);
+      const memoriaTiene = !!(anterior?.comprador?.nombre || anterior?.comprador?.telefono || anterior?.comprador?.mail);
+      if (!cacheTiene && memoriaTiene) return { ...delCache, comprador: anterior.comprador };
+      return delCache;
+    };
+
     if (cacheFresco(caso)) {
-      setDetalle(detalleDesdeCache(caso));
+      setDetalle(conservarComprador);
       setCargando(false);
       return;
     }
-    if (caso.detalle_actualizado_en) setDetalle(detalleDesdeCache(caso));
+    if (caso.detalle_actualizado_en) setDetalle(conservarComprador);
     else setDetalle(null);
     setCargando(true);
     traerDetalleCaso(caso.case_id)
-      .then((d) => { if (activo) setDetalle(d); })
+      .then((d) => {
+        if (!activo) return;
+        setDetalle((anterior) => {
+          const traeComprador = !!(d?.comprador?.nombre || d?.comprador?.telefono || d?.comprador?.mail);
+          const habiaComprador = !!(anterior?.comprador?.nombre || anterior?.comprador?.telefono || anterior?.comprador?.mail);
+          if (!traeComprador && habiaComprador) return { ...d, comprador: anterior.comprador };
+          return d;
+        });
+      })
       .catch((e) => { if (activo) setError(e.message || "No se pudo cargar el detalle"); })
       .finally(() => { if (activo) setCargando(false); });
     return () => { activo = false; };
@@ -261,7 +289,6 @@ export default function PanelContexto({ caso, analistaId }) {
   // ya purgados, y el dato está ACTUALIZADO — el guardado era del día en que se
   // creó el caso y podía estar viejo.
   useEffect(() => {
-    setCompVivo(null);
     const guia = caso?.shipment_id;
     const purgado = caso?.comprador_purgado === true;
     const sinDatos = !caso?.comprador_nombre && !caso?.comprador_telefono && !caso?.comprador_mail;
