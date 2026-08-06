@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { traerDetalleCaso, cacheFresco, detalleDesdeCache } from "../shared/detalle.js";
 import { sb } from "../shared/supabase.js";
-import { conversacionPorTelefono, ventanaAbierta, enviarMensaje, enviarCorreoCliente } from "../shared/mensajes.js";
+import { conversacionPorTelefono, ventanaAbierta, enviarMensaje, enviarCorreoCliente, consultarPaquete } from "../shared/mensajes.js";
 
 const PLANTILLA_WA = { nombre: "contacto_ruta_torre", idioma: "es_MX" };
 
@@ -216,6 +216,9 @@ export default function PanelContexto({ caso, analistaId }) {
   const [detalle, setDetalle] = useState(null);
   const [cargando, setCargando] = useState(false);
   const [error, setError] = useState(null);
+  // Comprador recuperado en vivo desde MELI cuando el caso ya fue purgado.
+  const [compVivo, setCompVivo] = useState(null);
+  const [compCargando, setCompCargando] = useState(false);
 
   useEffect(() => {
     if (!caso?.case_id) { setDetalle(null); return; }
@@ -237,14 +240,6 @@ export default function PanelContexto({ caso, analistaId }) {
     return () => { activo = false; };
   }, [caso?.case_id, caso?.detalle_actualizado_en]);
 
-  if (!caso) return <div style={{ background: "#fff" }} />;
-
-  const cond = detalle?.conductor || {};
-  const comp = detalle?.comprador || {};
-  const met = detalle?.metricas || {};
-  const dir = detalle?.direccion || {};
-  const qr = detalle?.quien_recibio || {};
-
   useEffect(() => {
     if (!caso?.case_id) { setCorreosEnviados(0); return; }
     let vivo = true;
@@ -253,6 +248,55 @@ export default function PanelContexto({ caso, analistaId }) {
       .then(({ count }) => { if (vivo) setCorreosEnviados(count || 0); });
     return () => { vivo = false; };
   }, [caso?.case_id, modalCorreo]);
+
+  // ── Comprador purgado → traerlo en vivo de MELI ───────────────────────────
+  // Al cerrar un caso, el trigger fn_inc_purga_comprador borra nombre, teléfono
+  // y correo del comprador (política de retención). Pero "Cerrado con reintento"
+  // NO es un caso terminado: ese paquete se reparte de nuevo y el conductor va a
+  // necesitar el teléfono. Antes el panel mostraba "Sin datos de comprador" y la
+  // analista no tenía de dónde sacarlos.
+  //
+  // Se consultan a MELI con el shipment_id, sin volver a guardarlos: así la
+  // política de retención queda intacta, funciona también con los casos viejos
+  // ya purgados, y el dato está ACTUALIZADO — el guardado era del día en que se
+  // creó el caso y podía estar viejo.
+  useEffect(() => {
+    setCompVivo(null);
+    const guia = caso?.shipment_id;
+    const purgado = caso?.comprador_purgado === true;
+    const sinDatos = !caso?.comprador_nombre && !caso?.comprador_telefono && !caso?.comprador_mail;
+    if (!guia || !(purgado || sinDatos)) return;
+
+    let vivo = true;
+    setCompCargando(true);
+    consultarPaquete(guia)
+      .then((r) => {
+        if (!vivo) return;
+        const c = r?.paquete?.comprador;
+        if (c && (c.nombre || c.telefono || c.mail)) {
+          setCompVivo({
+            nombre: c.nombre || null,
+            telefono: c.telefono || null,
+            mail: c.mail || c.email || null,
+            telefonos: null,
+            recuperado: true,
+          });
+        }
+      })
+      .catch(() => { /* si MELI no responde, el panel queda como estaba */ })
+      .finally(() => { if (vivo) setCompCargando(false); });
+    return () => { vivo = false; };
+  }, [caso?.shipment_id, caso?.comprador_purgado, caso?.case_id]);
+
+  if (!caso) return <div style={{ background: "#fff" }} />;
+
+  const cond = detalle?.conductor || {};
+  // Lo recuperado en vivo pisa lo guardado: es el dato actual.
+  const compBase = detalle?.comprador || {};
+  const comp = compVivo ? { ...compBase, ...compVivo } : compBase;
+  const met = detalle?.metricas || {};
+  const dir = detalle?.direccion || {};
+  const qr = detalle?.quien_recibio || {};
 
   // contactos del comprador: array de {numero, etiqueta}, o el telefono unico
   const contactos = Array.isArray(comp.telefonos) ? comp.telefonos
@@ -315,7 +359,11 @@ export default function PanelContexto({ caso, analistaId }) {
       {/* ─── COMPRADOR ─── */}
       <div style={SEP}>
         <Titulo>
-          Comprador {compradorVivo && <span style={{ color: "#bb8200", fontWeight: 400 }}>· efímero</span>}
+          Comprador {compradorVivo && (
+            comp.recuperado
+              ? <span style={{ color: "#0e7490", fontWeight: 400 }}>· consultado a MELI ahora</span>
+              : <span style={{ color: "#bb8200", fontWeight: 400 }}>· efímero</span>
+          )}
         </Titulo>
         {compradorVivo ? (
           <>
@@ -336,7 +384,7 @@ export default function PanelContexto({ caso, analistaId }) {
           </>
         ) : (
           <div style={{ fontSize: 12, color: "var(--texto-tenue)" }}>
-            {cargando ? "Cargando…" : "Sin datos de comprador"}
+            {cargando || compCargando ? "Consultando a MELI…" : "Sin datos de comprador"}
           </div>
         )}
       </div>
