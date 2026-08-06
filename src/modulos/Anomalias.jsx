@@ -127,9 +127,6 @@ export default function Anomalias() {
   const pendientesVivos = (rutas || [])
     .filter((r) => r.desenlace === "sigue_abierta")
     .reduce((s, r) => s + n0(r.pendientes_cierre), 0);
-  const pendientesCiegos = (rutas || [])
-    .filter((r) => r.desenlace === "sin_seguimiento")
-    .reduce((s, r) => s + n0(r.pendientes_cierre), 0);
 
   // NS global del día, con y sin las entregas tardías
   const tot = (arr, k) => arr.reduce((s, x) => s + n0(x[k]), 0);
@@ -226,20 +223,6 @@ export default function Anomalias() {
                   : "sin diferencia"}
                 tono={delta != null && Number(delta) > 0 ? "bueno" : "neutro"} />
             </div>
-
-            {sinSeguimiento > 0 && (
-              <div style={{
-                fontSize: 11.5, background: "#fffbeb", border: "1px solid #fde68a",
-                color: "#92400e", borderRadius: 8, padding: "9px 12px", marginBottom: 12,
-                lineHeight: 1.5, maxWidth: 780,
-              }}>
-                <b>Sin seguimiento</b> no significa que sigan abiertas: son rutas que
-                desaparecieron de la lista de MELI cuando el monitor se apagó, así que no
-                sabemos si cerraron.{pendientesCiegos > 0 ? ` Involucran ${pendientesCiegos} paquetes que figuraban pendientes.` : ""}{" "}
-                Probablemente la mayoría cerró de madrugada. Desde hoy el monitor captura hasta
-                las 23:59, así que este grupo debería reducirse.
-              </div>
-            )}
 
             {/* Detalle por ruta */}
             <div style={{ overflowX: "auto" }}>
