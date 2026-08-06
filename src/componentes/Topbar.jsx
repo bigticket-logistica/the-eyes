@@ -68,6 +68,7 @@ export default function Topbar() {
           <Tab to="/mensajes" badge={chatNoLeidos}>Mensajes</Tab>
           <Tab to="/bitacora">Bitácora</Tab>
           <Tab to="/directorio">Directorio</Tab>
+          <Tab to="/anomalias">Anomalías</Tab>
           <Tab to="/historico">Histórico</Tab>
         </nav>
       </div>
