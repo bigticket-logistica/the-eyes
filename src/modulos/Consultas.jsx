@@ -707,10 +707,18 @@ export default function Consultas() {
       const cambiaTicket = !sig || sig.case_id !== cid;
       if (cid && cambiaTicket && casos[cid]) {
         const c = casos[cid];
-        if (c.origen === "meli") {
+        // El cartel de "anidado" solo se muestra si hay un mensaje ENTRANTE con
+        // ese case_id. Escribirle al conductor desde una incidencia deja el
+        // saliente ligado a ese ticket —correcto, pertenece a su historial— pero
+        // NO anida la conversación: eso lo decide el analista con el botón.
+        // Antes bastaba el saliente y el cartel aparecía solo, contradiciendo a
+        // dónde iban realmente los mensajes nuevos.
+        const anidadoDeVerdad = mensajes.some(
+          (x) => x.case_id === cid && x.direccion === "entrante");
+        if (c.origen === "meli" && anidadoDeVerdad) {
           // tramo anidado: la conversación se gestiona desde Incidencias
           out.push(<LineaCierre key={`anid-${cid}`} codigo={"Conversación"} anidadoEn={cid} />);
-        } else if (!ABIERTOS.includes(c.estado_id)) {
+        } else if (c.origen !== "meli" && !ABIERTOS.includes(c.estado_id)) {
           out.push(<LineaCierre key={`cierre-${cid}`} codigo={c.codigo || "#" + cid}
             anidadoEn={c.anidado_en_case_id || null} />);
         }
