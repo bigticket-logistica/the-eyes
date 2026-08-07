@@ -200,6 +200,29 @@ function PanelChat({ chat, onCerrar, onEnviado, analistaId }) {
   //                   get-routes-list; la opción aparece solo si hay dato.
   //   · A mano      → para cuando el padrón está incompleto y la analista tiene
   //                   el número por otra vía.
+  // Las plantillas se leen de crm_plantillas_wa: solo las que Meta aprobó.
+  // Antes había una sola en duro en el código, así que agregar otra obligaba a
+  // desplegar y no había forma de saber cuáles estaban aprobadas.
+  const [plantillas, setPlantillas] = useState([]);
+  const [plantillaSel, setPlantillaSel] = useState(null);
+
+  useEffect(() => {
+    sb.from("crm_plantillas_wa")
+      .select("nombre, idioma, etiqueta, descripcion, cuerpo, variables, botones")
+      .eq("activa", true).order("orden")
+      .then(({ data }) => {
+        const l = data || [];
+        setPlantillas(l);
+        // La de demora es la que corresponde cuando la ruta viene con atraso.
+        const demora = l.find((x) => x.nombre === "consulta_demora_ruta");
+        const hayDemora = chat.ruta.alerta_ruta_demorada === true
+          || chat.ruta.atraso_inicial === true
+          || chat.ruta.alerta_despacho_demorado === true
+          || chat.ruta.alerta_stemout_demorado === true;
+        setPlantillaSel((hayDemora && demora) ? demora : (l[0] || null));
+      });
+  }, [chat.ruta]);
+
   const telMeli = (chat.ruta.driver_phone || "").replace(/\D/g, "") || null;
   const telDir  = (chat.telefono || "").replace(/\D/g, "") || null;
   const [fuenteTel, setFuenteTel] = useState(telDir ? "directorio" : (telMeli ? "meli" : "manual"));
@@ -220,7 +243,13 @@ function PanelChat({ chat, onCerrar, onEnviado, analistaId }) {
   }, [telefono, telValido]);
 
   const modoPlantilla = ventana === false;
-  const vistaPrevia = `Hola ${primerNombre}, te contactamos de la torre de soporte Bigticket por tu ruta ${chat.ruta.id_ruta}. ${motivo.trim()} Por favor respóndenos por aquí para poder ayudarte.`;
+
+  // Las variables en orden. Las dos plantillas activas comparten la forma
+  // (nombre, ruta, texto libre), así que el tercer campo es siempre el editable.
+  const variables = [primerNombre, String(chat.ruta.id_ruta), motivo.trim()];
+  const vistaPrevia = plantillaSel
+    ? plantillaSel.cuerpo.replace(/\{\{(\d+)\}\}/g, (_, n) => variables[Number(n) - 1] ?? "")
+    : `Hola ${primerNombre}, te contactamos de la torre de soporte Bigticket por tu ruta ${chat.ruta.id_ruta}. ${motivo.trim()} Por favor respóndenos por aquí para poder ayudarte.`;
 
   async function enviar() {
     if (enviando || ventana === null || !telValido) return;
@@ -235,7 +264,9 @@ function PanelChat({ chat, onCerrar, onEnviado, analistaId }) {
         caseId: null,
         emisorId: analistaId,
         plantilla: modoPlantilla
-          ? { ...PLANTILLA_CONTACTO, variables: [primerNombre, String(chat.ruta.id_ruta), motivo.trim()] }
+          ? (plantillaSel
+              ? { nombre: plantillaSel.nombre, idioma: plantillaSel.idioma, variables }
+              : { ...PLANTILLA_CONTACTO, variables })
           : null,
       });
       // ticket propio en Consultas en ruta
@@ -332,8 +363,29 @@ function PanelChat({ chat, onCerrar, onEnviado, analistaId }) {
         {telValido && modoPlantilla && (
           <div>
             <div style={{ background: "#e0f2fe", color: "#075985", borderRadius: 8, padding: "8px 12px", fontSize: 12, marginBottom: 10 }}>
-              El conductor no ha escrito en las últimas 24h → se envía la <b>plantilla aprobada</b>. Edita el motivo si quieres:
+              El conductor no ha escrito en las últimas 24h → se envía una <b>plantilla aprobada</b>.
             </div>
+
+            {plantillas.length > 1 && (
+              <div style={{ marginBottom: 9 }}>
+                <div style={{ fontSize: 11, color: "var(--texto-suave)", marginBottom: 4 }}>Plantilla</div>
+                <div style={{ display: "flex", flexWrap: "wrap", gap: 5 }}>
+                  {plantillas.map((pl) => (
+                    <button key={pl.nombre} onClick={() => setPlantillaSel(pl)}
+                      title={pl.descripcion || pl.nombre}
+                      style={{
+                        fontSize: 11, padding: "4px 10px", borderRadius: 20, whiteSpace: "nowrap",
+                        border: `1px solid ${plantillaSel?.nombre === pl.nombre ? "var(--navy)" : "var(--borde)"}`,
+                        background: plantillaSel?.nombre === pl.nombre ? "#eef2f7" : "#fff",
+                        fontWeight: plantillaSel?.nombre === pl.nombre ? 600 : 400,
+                      }}>
+                      {pl.etiqueta}
+                      {pl.botones?.length ? " · con botones" : ""}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
             {/* Motivos listos para no redactar lo mismo veinte veces al día.
                 El sugerido viene de la alerta que tiene la ruta. */}
             <div style={{ display: "flex", flexWrap: "wrap", gap: 5, marginBottom: 8 }}>
@@ -356,8 +408,20 @@ function PanelChat({ chat, onCerrar, onEnviado, analistaId }) {
               rows={2}
               style={{ width: "100%", boxSizing: "border-box", fontSize: 13, padding: "8px 10px", border: "1px solid var(--borde)", borderRadius: 8, marginBottom: 10, fontFamily: "inherit", resize: "vertical" }}
             />
-            <div style={{ background: "#fafbfc", border: "1px dashed var(--borde)", borderRadius: 8, padding: "10px 12px", fontSize: 12.5, color: "var(--texto)", lineHeight: 1.5 }}>
+            <div style={{ background: "#fafbfc", border: "1px dashed var(--borde)", borderRadius: 8, padding: "10px 12px", fontSize: 12.5, color: "var(--texto)", lineHeight: 1.5, whiteSpace: "pre-wrap" }}>
               {vistaPrevia}
+              {/* Los botones de respuesta rápida: el conductor contesta de un
+                  toque mientras maneja, y con eso se abre la ventana de 24 h. */}
+              {plantillaSel?.botones?.length > 0 && (
+                <div style={{ display: "flex", gap: 6, marginTop: 10, flexWrap: "wrap" }}>
+                  {plantillaSel.botones.map((b) => (
+                    <span key={b} style={{
+                      fontSize: 11.5, padding: "5px 12px", borderRadius: 7,
+                      border: "1px solid #a7c4e8", color: "#1a5fb4", background: "#fff",
+                    }}>{b}</span>
+                  ))}
+                </div>
+              )}
             </div>
           </div>
         )}
@@ -386,6 +450,12 @@ export default function DetalleDia() {
   const [error, setError] = useState("");
   const [abiertos, setAbiertos] = useState({});   // { SC: true }
   const [chat, setChat] = useState(null);          // { ruta, telefono }
+  // Las line-haul no se ocultan porque sobren: 29 con despacho demorado es una
+  // señal real. Se separan porque la ACCIÓN es distinta — a una transferencia
+  // atascada no se le escribe a un conductor, se escala al centro de
+  // distribución. La torre trabaja el reparto minuto a minuto, así que ese es
+  // el estado inicial.
+  const [verLineHaul, setVerLineHaul] = useState(false);
   const [enviadoOk, setEnviadoOk] = useState("");
 
   const cargar = useCallback(async () => {
@@ -430,8 +500,23 @@ export default function DetalleDia() {
   const vigentes   = rutas.filter((r) => r.vigente !== false);
   const activas    = vigentes.filter((r) => r.status === "active").length;
   const cerradas   = rutas.filter((r) => r.status === "close").length;
-  const detenidas  = vigentes.filter((r) => r.alerta_inactividad_vehiculo === true && r.status !== "close").length;
-  const demoradas  = vigentes.filter((r) => (r.alerta_ruta_demorada === true || r.atraso_inicial === true) && r.status !== "close").length;
+
+  // Las tarjetas de alerta se calculan sobre el MISMO universo que la tabla de
+  // abajo: rutas de reparto vigentes y no cerradas. Antes no cuadraban entre sí:
+  // las tarjetas contaban solo dos alertas (inactividad y ruta demorada, ambas
+  // en cero hoy), la tabla contaba CUALQUIER alerta, y una consulta directa a la
+  // base contaba también las line-haul. Tres números para tres universos.
+  const repartoVivo = vigentes.filter((r) =>
+    (verLineHaul || r.is_line_haul !== true) && r.status !== "close");
+  const lineHaulConAlerta = vigentes.filter((r) =>
+    r.is_line_haul === true && r.status !== "close" && (r.alertas_activas || 0) > 0).length;
+  const detenidas  = repartoVivo.filter((r) => r.alerta_inactividad_vehiculo === true).length;
+  // "Demorada" agrupa todas las formas de atraso que reporta MELI: la ruta en sí,
+  // el despacho que no sale del centro, el stem-out y el atraso inicial.
+  const demoradas  = repartoVivo.filter((r) =>
+    r.alerta_ruta_demorada === true || r.atraso_inicial === true ||
+    r.alerta_despacho_demorado === true || r.alerta_stemout_demorado === true).length;
+  const conAlerta  = repartoVivo.filter((r) => (r.alertas_activas || 0) > 0).length;
   const capturaMax = rutas.reduce((m, r) => (r.capturado_at > m ? r.capturado_at : m), "");
 
   const porSC = {};
@@ -439,8 +524,8 @@ export default function DetalleDia() {
     const sc = r.service_center_id || "—";
     if (!porSC[sc]) porSC[sc] = { sc, filas: [], activas: 0, cerradas: 0, entregados: 0, total: 0, conAlerta: 0 };
     const g = porSC[sc];
-    // el desplegable muestra solo lo vivo en el feed, y sin line-haul
-    if (r.vigente !== false && r.is_line_haul !== true) g.filas.push(r);
+    // el desplegable muestra lo vivo en el feed; las line-haul según el interruptor
+    if (r.vigente !== false && (verLineHaul || r.is_line_haul !== true)) g.filas.push(r);
     if (r.status === "active" && r.vigente !== false) g.activas++;
     if (r.status === "close") g.cerradas++;      // cierres del día completos
     if (r.is_line_haul === false) { g.entregados += r.pkg_delivered || 0; g.total += r.pkg_total || 0; }
@@ -457,9 +542,8 @@ export default function DetalleDia() {
   // MELI no les asigna conductor (driver_name viene "-" y driver_id null), así
   // que ocupaban la tabla con filas sin nombre, sin patente y sin nadie a quien
   // escribir. Siguen contando en los KPI de rutas del feed.
-  const problema = vigentes
-    .filter((r) => (r.alertas_activas || 0) > 0 && r.status !== "close"
-                   && r.is_line_haul !== true)
+  const problema = repartoVivo
+    .filter((r) => (r.alertas_activas || 0) > 0)
     .sort((a, b) => (b.alertas_activas || 0) - (a.alertas_activas || 0));
 
   const sinDatos = rutas.length === 0;
@@ -497,15 +581,38 @@ export default function DetalleDia() {
           <div style={{ display: "flex", gap: 12, flexWrap: "wrap", marginBottom: 18 }}>
             <Kpi titulo="Avance de reparto" valor={`${pct(entregados, cargados)}%`} sub={`${entregados.toLocaleString("es-MX")} / ${cargados.toLocaleString("es-MX")} paquetes`} color="var(--navy)" />
             <Kpi titulo="Rutas en feed" valor={vigentes.length} sub={`${activas} en ruta · ${cerradas} cerradas hoy`} />
-            <Kpi titulo="Detenidas" valor={detenidas} sub="sin actividad del vehículo" color={detenidas ? "#b91c1c" : "#16a34a"} />
-            <Kpi titulo="Demoradas" valor={demoradas} sub="demora o atraso inicial" color={demoradas ? "#b45309" : "#16a34a"} />
+            <Kpi titulo="Detenidas" valor={detenidas} sub="vehículo sin actividad" color={detenidas ? "#b91c1c" : "#16a34a"} />
+            <Kpi titulo="Demoradas" valor={demoradas} sub="ruta, despacho o stem-out" color={demoradas ? "#b45309" : "#16a34a"} />
             <Kpi titulo="No entregados" valor={fallidos.toLocaleString("es-MX")} sub="reparto de hoy" color={fallidos ? "#b45309" : undefined} />
           </div>
 
           {/* Rutas en problema */}
           <div style={{ background: "#fff", border: "1px solid var(--borde)", borderRadius: 10, overflow: "hidden", marginBottom: 18 }}>
             <div style={{ padding: "10px 14px", fontWeight: 600, fontSize: 13, borderBottom: "1px solid var(--borde)" }}>
-              Rutas detenidas o con demora <span style={{ fontWeight: 400, color: "var(--texto-suave)", fontSize: 12 }}>({problema.length})</span>
+              <span style={{ display: "flex", alignItems: "baseline", gap: 10, flexWrap: "wrap" }}>
+                <span>
+                  Rutas con alerta
+                  <span style={{ fontWeight: 400, color: "var(--texto-suave)", fontSize: 12 }}> ({problema.length})</span>
+                </span>
+                <button onClick={() => setVerLineHaul(!verLineHaul)}
+                  title="Las transferencias entre bodegas no tienen conductor: se escalan al centro de distribución"
+                  style={{
+                    fontSize: 11, fontWeight: 400, padding: "3px 10px", borderRadius: 20,
+                    border: `1px solid ${verLineHaul ? "var(--navy)" : "var(--borde)"}`,
+                    background: verLineHaul ? "#eef2f7" : "#fff", whiteSpace: "nowrap",
+                  }}>
+                  {verLineHaul
+                    ? "Solo reparto"
+                    : `Incluir line-haul${lineHaulConAlerta ? ` (${lineHaulConAlerta})` : ""}`}
+                </button>
+              </span>
+              <div style={{ fontWeight: 400, fontSize: 11, color: "var(--texto-tenue)", marginTop: 3 }}>
+                {detenidas > 0 && `${detenidas} detenidas · `}
+                {demoradas > 0 && `${demoradas} con demora · `}
+                cualquier alerta de MELI
+                {!verLineHaul && lineHaulConAlerta > 0 &&
+                  ` · ${lineHaulConAlerta} line-haul con alerta no listadas`}
+              </div>
             </div>
             {problema.length === 0 ? (
               <div style={{ padding: 22, textAlign: "center", color: "var(--texto-suave)", fontSize: 13 }}>
