@@ -219,6 +219,10 @@ export default function PanelContexto({ caso, analistaId }) {
   // Comprador recuperado en vivo desde MELI cuando el caso ya fue purgado.
   const [compVivo, setCompVivo] = useState(null);
   const [compCargando, setCompCargando] = useState(false);
+  // Qué caso está realmente en pantalla. Sin esto, la conservación del comprador
+  // arrastraba el de la incidencia ANTERIOR al cambiar de caso: el dato se veía
+  // pegado. La conservación solo tiene sentido dentro del mismo caso.
+  const casoEnPantalla = useRef(null);
 
   useEffect(() => {
     if (!caso?.case_id) { setDetalle(null); return; }
@@ -237,8 +241,17 @@ export default function PanelContexto({ caso, analistaId }) {
     //
     // Como el caché de la base está purgado por diseño, se conserva el
     // comprador que ya teníamos en memoria en vez de reemplazarlo por nada.
+    // Al cambiar de caso se empieza de cero: nada del caso anterior sobrevive.
+    const mismoCaso = casoEnPantalla.current === caso.case_id;
+    if (!mismoCaso) {
+      casoEnPantalla.current = caso.case_id;
+      setCompVivo(null);
+      setDetalle(null);
+    }
+
     const conservarComprador = (anterior) => {
       const delCache = detalleDesdeCache(caso);
+      if (!mismoCaso) return delCache;   // caso nuevo: sin herencia
       const cacheTiene = !!(delCache?.comprador?.nombre || delCache?.comprador?.telefono || delCache?.comprador?.mail);
       const memoriaTiene = !!(anterior?.comprador?.nombre || anterior?.comprador?.telefono || anterior?.comprador?.mail);
       if (!cacheTiene && memoriaTiene) return { ...delCache, comprador: anterior.comprador };
@@ -257,13 +270,21 @@ export default function PanelContexto({ caso, analistaId }) {
       .then((d) => {
         if (!activo) return;
         setDetalle((anterior) => {
+          if (!mismoCaso) return d;
           const traeComprador = !!(d?.comprador?.nombre || d?.comprador?.telefono || d?.comprador?.mail);
           const habiaComprador = !!(anterior?.comprador?.nombre || anterior?.comprador?.telefono || anterior?.comprador?.mail);
           if (!traeComprador && habiaComprador) return { ...d, comprador: anterior.comprador };
           return d;
         });
       })
-      .catch((e) => { if (activo) setError(e.message || "No se pudo cargar el detalle"); })
+      .catch((e) => {
+        if (!activo) return;
+        setError(e.message || "No se pudo cargar el detalle");
+        // Si MELI no responde (caso de prueba, sesión caída, red), al menos se
+        // muestran las métricas y datos que ya tiene la fila del caso. Antes el
+        // panel quedaba completamente vacío.
+        setDetalle((anterior) => anterior || detalleDesdeCache(caso));
+      })
       .finally(() => { if (activo) setCargando(false); });
     return () => { activo = false; };
   }, [caso?.case_id, caso?.detalle_actualizado_en]);
@@ -289,6 +310,7 @@ export default function PanelContexto({ caso, analistaId }) {
   // ya purgados, y el dato está ACTUALIZADO — el guardado era del día en que se
   // creó el caso y podía estar viejo.
   useEffect(() => {
+    setCompVivo(null);   // el comprador recuperado no se hereda entre casos
     const guia = caso?.shipment_id;
     const purgado = caso?.comprador_purgado === true;
     const sinDatos = !caso?.comprador_nombre && !caso?.comprador_telefono && !caso?.comprador_mail;
