@@ -288,9 +288,17 @@ export default function Ticketera() {
     cargar();
   }
 
-  async function resolver(caso) {
-    const { error } = await sb.rpc("fn_resolver_ticket", { p_caso_id: caso.id, p_estado: "CLOSED" });
-    if (error) { alert("No se pudo resolver: " + error.message); return; }
+  // El cierre lleva un motivo del catálogo de MELI. Se guarda como decisión de
+  // la torre (cierre_local) además de reflejarse en el estado: si MELI cierra
+  // después con otro motivo, el monitor sobrescribe el estado pero la decisión
+  // de la torre queda registrada y la divergencia se puede ver.
+  async function resolver(caso, cierre, nota) {
+    const { error } = await sb.rpc("fn_cerrar_ticket", {
+      p_caso_id: caso.id,
+      p_cierre: cierre || "CLOSED/FINISHED",
+      p_nota: nota || null,
+    });
+    if (error) { alert("No se pudo cerrar: " + error.message); return; }
     cargar();
   }
 
