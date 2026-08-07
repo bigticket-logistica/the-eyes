@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { sb } from "../shared/supabase.js";
 import { diaMX } from "../shared/fechas.js";
+import SeccionIntentos from "../componentes/SeccionIntentos.jsx";
 
 // ═══════════════════════════════════════════════════════════════════════════
 // ANOMALÍAS · SECCIÓN 1 · RUTAS QUE NO CERRARON EN EL DÍA
@@ -279,10 +280,7 @@ export default function Anomalias() {
         )}
       </div>
 
-      <div style={{ background: "#fff", border: "1px dashed var(--borde)", borderRadius: 12,
-        padding: 16, marginTop: 16, color: "var(--texto-tenue)", fontSize: 12.5 }}>
-        2 · (pendiente de definir)
-      </div>
+      <SeccionIntentos fecha={fecha} />
     </div>
   );
 }
