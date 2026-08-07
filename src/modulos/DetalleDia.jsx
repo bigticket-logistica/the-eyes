@@ -219,7 +219,7 @@ function PanelChat({ chat, onCerrar, onEnviado, analistaId }) {
 
   useEffect(() => {
     sb.from("crm_plantillas_wa")
-      .select("nombre, idioma, etiqueta, descripcion, cuerpo, variables, botones")
+      .select("nombre, idioma, etiqueta, descripcion, cuerpo, variables, botones, sugerencias, ayuda_variable")
       .eq("activa", true).order("orden")
       .then(({ data }) => {
         const l = data || [];
@@ -233,6 +233,18 @@ function PanelChat({ chat, onCerrar, onEnviado, analistaId }) {
         setPlantillaSel((hayDemora && demora) ? demora : (l[0] || null));
       });
   }, [chat.ruta]);
+
+  // Cada plantilla usa su variable de forma distinta: en la general lleva el
+  // motivo completo, en la de demora solo un detalle. Al cambiar de plantilla el
+  // texto se reemplaza por la primera sugerencia de la nueva, si no se duplicaba
+  // el mensaje (el cuerpo decía "con demora" y la variable lo repetía).
+  useEffect(() => {
+    if (!plantillaSel) return;
+    const sug = plantillaSel.sugerencias || [];
+    if (!sug.length) return;
+    const yaEsDeEsta = sug.some((x) => x.texto === motivo);
+    if (!yaEsDeEsta) setMotivo(sug[0].texto ?? "");
+  }, [plantillaSel]);  // eslint-disable-line react-hooks/exhaustive-deps
 
   const telMeli = (chat.ruta.driver_phone || "").replace(/\D/g, "") || null;
   const telDir  = (chat.telefono || "").replace(/\D/g, "") || null;
@@ -421,8 +433,10 @@ function PanelChat({ chat, onCerrar, onEnviado, analistaId }) {
             </div>
 
             {plantillas.length > 1 && (
-              <div style={{ marginBottom: 9 }}>
-                <div style={{ fontSize: 11, color: "var(--texto-suave)", marginBottom: 4 }}>Plantilla</div>
+              <div style={{ marginBottom: 11, textAlign: "left" }}>
+                <div style={{ fontSize: 11, color: "var(--texto-suave)", marginBottom: 5 }}>
+                  <b style={{ color: "var(--navy)" }}>1 · Plantilla</b> — el texto fijo aprobado por Meta
+                </div>
                 <div style={{ display: "flex", flexWrap: "wrap", gap: 5 }}>
                   {plantillas.map((pl) => (
                     <button key={pl.nombre} onClick={() => setPlantillaSel(pl)}
@@ -440,19 +454,24 @@ function PanelChat({ chat, onCerrar, onEnviado, analistaId }) {
                 </div>
               </div>
             )}
-            {/* Motivos listos para no redactar lo mismo veinte veces al día.
-                El sugerido viene de la alerta que tiene la ruta. */}
-            <div style={{ display: "flex", flexWrap: "wrap", gap: 5, marginBottom: 8 }}>
-              {MOTIVOS.map((m) => (
-                <button key={m.clave} onClick={() => setMotivo(m.texto)}
-                  title={m.texto}
+            {/* Sugerencias de la plantilla elegida, no una lista fija: cada
+                plantilla usa su variable de forma distinta y una lista común
+                producía mensajes duplicados. */}
+            <div style={{ fontSize: 11, color: "var(--texto-suave)", marginBottom: 5, textAlign: "left" }}>
+              <b style={{ color: "var(--navy)" }}>2 · {plantillaSel?.ayuda_variable || "Texto editable"}</b>
+            </div>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 5, marginBottom: 7 }}>
+              {(plantillaSel?.sugerencias || MOTIVOS.map((m) => ({ etiqueta: m.etiqueta, texto: m.texto })))
+                .map((sg, i) => (
+                <button key={i} onClick={() => setMotivo(sg.texto ?? "")}
+                  title={sg.texto || "Sin texto adicional"}
                   style={{
                     fontSize: 11, padding: "4px 9px", borderRadius: 20, whiteSpace: "nowrap",
-                    border: `1px solid ${motivo === m.texto ? "var(--navy)" : "var(--borde)"}`,
-                    background: motivo === m.texto ? "#eef2f7" : "#fff",
-                    fontWeight: motivo === m.texto ? 600 : 400,
+                    border: `1px solid ${motivo === (sg.texto ?? "") ? "var(--navy)" : "var(--borde)"}`,
+                    background: motivo === (sg.texto ?? "") ? "#eef2f7" : "#fff",
+                    fontWeight: motivo === (sg.texto ?? "") ? 600 : 400,
                   }}>
-                  {m.etiqueta}
+                  {sg.etiqueta}
                 </button>
               ))}
             </div>
@@ -462,8 +481,19 @@ function PanelChat({ chat, onCerrar, onEnviado, analistaId }) {
               rows={2}
               style={{ width: "100%", boxSizing: "border-box", fontSize: 13, padding: "8px 10px", border: "1px solid var(--borde)", borderRadius: 8, marginBottom: 10, fontFamily: "inherit", resize: "vertical" }}
             />
-            <div style={{ background: "#fafbfc", border: "1px dashed var(--borde)", borderRadius: 8, padding: "10px 12px", fontSize: 12.5, color: "var(--texto)", lineHeight: 1.5, whiteSpace: "pre-wrap" }}>
-              {vistaPrevia}
+            <div style={{ fontSize: 11, color: "var(--texto-suave)", margin: "10px 0 4px", textAlign: "left" }}>
+              <b style={{ color: "var(--navy)" }}>3 · Así lo recibe el conductor</b>
+              {motivo.trim() && <span> — lo <span style={{ background: "#fef9c3", padding: "0 3px" }}>resaltado</span> es lo que escribiste</span>}
+            </div>
+            <div style={{ background: "#fafbfc", border: "1px dashed var(--borde)", borderRadius: 8, padding: "10px 12px", fontSize: 12.5, color: "var(--texto)", lineHeight: 1.5, whiteSpace: "pre-wrap", textAlign: "left" }}>
+              {/* La parte variable se resalta para que se vea de un golpe qué es
+                  fijo de la plantilla y qué escribió la analista. */}
+              {motivo.trim()
+                ? vistaPrevia.split(motivo.trim()).flatMap((trozo, i, arr) =>
+                    i < arr.length - 1
+                      ? [trozo, <mark key={i} style={{ background: "#fef9c3", padding: "0 2px" }}>{motivo.trim()}</mark>]
+                      : [trozo])
+                : vistaPrevia}
               {/* Los botones de respuesta rápida: el conductor contesta de un
                   toque mientras maneja, y con eso se abre la ventana de 24 h. */}
               {plantillaSel?.botones?.length > 0 && (
