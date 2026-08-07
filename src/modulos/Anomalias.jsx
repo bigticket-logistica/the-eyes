@@ -123,6 +123,7 @@ export default function Anomalias() {
             Situaciones que distorsionan las cifras del día
           </div>
         </div>
+        <span style={{ fontSize: 11.5, color: "var(--texto-tenue)" }}>Sección 1</span>
         <input type="date" value={fecha} max={diaMX()}
           onChange={(e) => setFecha(e.target.value || ayerMX())}
           style={{ fontSize: 12.5, padding: "7px 10px", border: "1px solid var(--borde)", borderRadius: 8 }} />
@@ -280,7 +281,7 @@ export default function Anomalias() {
         )}
       </div>
 
-      <SeccionIntentos fecha={fecha} />
+      <SeccionIntentos />
     </div>
   );
 }
