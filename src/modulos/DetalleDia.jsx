@@ -183,6 +183,17 @@ function motivoSugerido(ruta) {
   return MOTIVOS[5].texto;
 }
 
+// Estilos del selector de teléfono. En objetos aparte para que las tres
+// variantes del campo se vean idénticas y no se desalineen entre sí.
+const opcionTel = {
+  fontSize: 12.5, display: "flex", alignItems: "center", gap: 8,
+  cursor: "pointer", width: "100%", justifyContent: "flex-start",
+};
+const campoTel = {
+  fontSize: 12.5, padding: "8px 11px", border: "1px solid var(--borde)",
+  borderRadius: 7, fontVariantNumeric: "tabular-nums",
+};
+
 function PanelChat({ chat, onCerrar, onEnviado, analistaId }) {
   const primerNombre = chat.ruta.driver_name?.split(" ")[0] || "conductor";
   const [texto, setTexto] = useState(
@@ -297,52 +308,72 @@ function PanelChat({ chat, onCerrar, onEnviado, analistaId }) {
           Ruta {chat.ruta.id_ruta} · {chat.ruta.service_center_id}
         </div>
 
-        {/* ── A qué número se manda ── */}
-        <div style={{ border: "1px solid var(--borde)", borderRadius: 9, padding: "10px 12px", marginBottom: 12 }}>
-          <div style={{ fontSize: 11, color: "var(--texto-suave)", marginBottom: 7 }}>Enviar a</div>
-          <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
-            {telDir && (
-              <label style={{ fontSize: 12.5, display: "flex", alignItems: "center", gap: 7, cursor: "pointer" }}>
-                <input type="radio" checked={fuenteTel === "directorio"}
-                  onChange={() => setFuenteTel("directorio")} />
-                <span style={{ fontWeight: 600 }}>{telDir}</span>
-                <span style={{ fontSize: 10.5, color: "var(--texto-tenue)" }}>del Directorio</span>
-              </label>
-            )}
-            {telMeli && telMeli !== telDir && (
-              <label style={{ fontSize: 12.5, display: "flex", alignItems: "center", gap: 7, cursor: "pointer" }}>
-                <input type="radio" checked={fuenteTel === "meli"}
-                  onChange={() => setFuenteTel("meli")} />
-                <span style={{ fontWeight: 600 }}>{telMeli}</span>
-                <span style={{ fontSize: 10.5, color: "var(--texto-tenue)" }}>de MELI</span>
-              </label>
-            )}
-            <label style={{ fontSize: 12.5, display: "flex", alignItems: "center", gap: 7, cursor: "pointer" }}>
-              <input type="radio" checked={fuenteTel === "manual"}
-                onChange={() => setFuenteTel("manual")} />
-              <span>Otro número</span>
-            </label>
-            {fuenteTel === "manual" && (
-              <input value={telManual} onChange={(e) => setTelManual(e.target.value)}
-                placeholder="521XXXXXXXXXX · solo dígitos, con código de país"
-                autoFocus
-                style={{
-                  fontSize: 12.5, padding: "7px 10px", marginLeft: 22,
-                  border: `1px solid ${telManual && !telValido ? "#fca5a5" : "var(--borde)"}`,
-                  borderRadius: 7,
-                }} />
-            )}
-          </div>
-          {!telDir && !telMeli && (
-            <div style={{ fontSize: 10.5, color: "#92400e", marginTop: 6 }}>
-              Este conductor no tiene teléfono en el padrón. Escribe uno para poder contactarlo.
+        {/* ── A qué número se manda ──
+            Con opciones reales se muestran radios. SIN opciones no se muestra
+            ninguno: un botón de opción con una sola alternativa no significa
+            nada y descuadraba el recuadro. En ese caso va directo el campo. */}
+        {(telDir || telMeli) ? (
+          <div style={{
+            border: "1px solid var(--borde)", borderRadius: 9,
+            padding: "10px 12px", marginBottom: 12, textAlign: "left",
+          }}>
+            <div style={{ fontSize: 11, color: "var(--texto-suave)", marginBottom: 8 }}>
+              Enviar a
             </div>
-          )}
-        </div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 7 }}>
+              {telDir && (
+                <label style={opcionTel}>
+                  <input type="radio" name="fuenteTel" checked={fuenteTel === "directorio"}
+                    onChange={() => setFuenteTel("directorio")} style={{ margin: 0, flexShrink: 0 }} />
+                  <span style={{ fontWeight: 600, fontVariantNumeric: "tabular-nums" }}>{telDir}</span>
+                  <span style={{ fontSize: 10.5, color: "var(--texto-tenue)" }}>del Directorio</span>
+                </label>
+              )}
+              {telMeli && telMeli !== telDir && (
+                <label style={opcionTel}>
+                  <input type="radio" name="fuenteTel" checked={fuenteTel === "meli"}
+                    onChange={() => setFuenteTel("meli")} style={{ margin: 0, flexShrink: 0 }} />
+                  <span style={{ fontWeight: 600, fontVariantNumeric: "tabular-nums" }}>{telMeli}</span>
+                  <span style={{ fontSize: 10.5, color: "var(--texto-tenue)" }}>de MELI</span>
+                </label>
+              )}
+              <label style={opcionTel}>
+                <input type="radio" name="fuenteTel" checked={fuenteTel === "manual"}
+                  onChange={() => setFuenteTel("manual")} style={{ margin: 0, flexShrink: 0 }} />
+                <span>Otro número</span>
+              </label>
+              {fuenteTel === "manual" && (
+                <input value={telManual} onChange={(e) => setTelManual(e.target.value)}
+                  placeholder="Ej. 5215512345678" autoFocus
+                  style={{ ...campoTel, marginLeft: 23,
+                    borderColor: telManual && !telValido ? "#fca5a5" : "var(--borde)" }} />
+              )}
+            </div>
+          </div>
+        ) : (
+          <div style={{
+            border: "1px solid #fde68a", background: "#fffbeb", borderRadius: 9,
+            padding: "11px 13px", marginBottom: 12, textAlign: "left",
+          }}>
+            <div style={{ fontSize: 12, fontWeight: 600, color: "#92400e", marginBottom: 3 }}>
+              Sin teléfono en el padrón
+            </div>
+            <div style={{ fontSize: 11.5, color: "#92400e", marginBottom: 8, lineHeight: 1.45 }}>
+              Escribe el número para contactar a {chat.ruta.driver_name || "este conductor"}.
+            </div>
+            <input value={telManual} onChange={(e) => setTelManual(e.target.value)}
+              placeholder="Ej. 5215512345678" autoFocus
+              style={{ ...campoTel, width: "100%", boxSizing: "border-box",
+                borderColor: telManual && !telValido ? "#fca5a5" : "var(--borde)" }} />
+            <div style={{ fontSize: 10.5, color: "#92400e", marginTop: 5 }}>
+              Solo dígitos, con código de país. México 52 · Chile 56
+            </div>
+          </div>
+        )}
 
-        {!telValido && (
-          <div style={{ padding: "14px 0", textAlign: "center", color: "var(--texto-suave)", fontSize: 13 }}>
-            Elige o escribe un número para continuar.
+        {!telValido && (telDir || telMeli) && (
+          <div style={{ padding: "12px 0", textAlign: "center", color: "var(--texto-suave)", fontSize: 12.5 }}>
+            Escribe el número para continuar.
           </div>
         )}
 
