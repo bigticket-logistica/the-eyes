@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { sb } from "../shared/supabase.js";
+import { diaMX } from "../shared/fechas.js";
 
 // ═══════════════════════════════════════════════════════════════════════════
 // ANOMALÍAS · SECCIÓN 2 · INTENTOS EN PAQUETES FALLIDOS
@@ -53,11 +54,24 @@ function Tarjeta({ titulo, valor, detalle, tono, onClick, activa }) {
   );
 }
 
-export default function SeccionIntentos({ fecha }) {
+function ayerMX() {
+  const d = new Date();
+  d.setDate(d.getDate() - 1);
+  return diaMX(d);
+}
+
+// Selector propio, independiente del de la sección 1: son dos preguntas
+// distintas. La 1 se mira al día siguiente del cierre; la 2 puede consultarse
+// de cualquier día pasado, y compartir una sola fecha obligaba a mover una para
+// ver la otra.
+export default function SeccionIntentos() {
+  const [fecha, setFecha] = useState(ayerMX());
   const [filas, setFilas] = useState(null);
   const [tarea, setTarea] = useState(null);
   const [error, setError] = useState(null);
   const [filtro, setFiltro] = useState(null);
+  const [abierto, setAbierto] = useState(null);     // paquete con la historia desplegada
+  const [historia, setHistoria] = useState(null);
   const canalRef = useRef(null);
 
   const cargar = useCallback(async () => {
@@ -147,6 +161,16 @@ export default function SeccionIntentos({ fecha }) {
 
   const f = (k) => setFiltro(filtro === k ? null : k);
 
+  // La historia completa se pide solo al desplegar: son ~25 eventos por paquete
+  // y traerlos todos de entrada sería mucho para una tabla de 136 filas.
+  async function verHistoria(id) {
+    if (abierto === id) { setAbierto(null); setHistoria(null); return; }
+    setAbierto(id); setHistoria(null);
+    const { data, error: e } = await sb.rpc("fn_historia_paquete", { p_shipment_id: id });
+    if (e) { setHistoria([{ error: e.message }]); return; }
+    setHistoria(data || []);
+  }
+
   return (
     <div style={{ background: "#fff", border: "1px solid var(--borde)", borderRadius: 12,
       padding: 16, marginTop: 16 }}>
@@ -156,20 +180,35 @@ export default function SeccionIntentos({ fecha }) {
             2 · Intentos en paquetes fallidos
           </div>
           <div style={{ fontSize: 12, color: "var(--texto-suave)", lineHeight: 1.55, maxWidth: 820 }}>
-            Cada paquete que falló el {fecha}, con todos sus intentos: hora exacta, motivo y quién
-            lo intentó. Leído del historial del paquete en MELI. Las tarjetas filtran la tabla.
+            Cada paquete que falló, con todos sus intentos: hora exacta, motivo y quién lo
+            intentó. Leído del historial del paquete en MELI. Las tarjetas filtran la tabla.
           </div>
         </div>
-        <button className="btn-navy" onClick={lanzar} disabled={corriendo}
-          style={{ padding: "9px 16px", fontSize: 12.5, whiteSpace: "nowrap" }}>
-          {corriendo ? "Analizando…" : "▶ Analizar el día"}
-        </button>
+        <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+          <input type="date" value={fecha} max={diaMX()}
+            onChange={(e) => setFecha(e.target.value || ayerMX())}
+            style={{ fontSize: 12.5, padding: "7px 10px",
+              border: "1px solid var(--borde)", borderRadius: 8 }} />
+          <button onClick={() => setFecha(ayerMX())}
+            style={{ fontSize: 12, padding: "7px 12px" }}>Ayer</button>
+          {/* El botón dice SIEMPRE qué día va a procesar: con el selector al lado
+              es fácil apretar creyendo que es ayer cuando quedó en otra fecha. */}
+          <button className="btn-navy" onClick={lanzar} disabled={corriendo}
+            style={{ padding: "9px 16px", fontSize: 12.5, whiteSpace: "nowrap" }}>
+            {corriendo
+              ? `Analizando ${tarea?.params?.fecha || ""}…`
+              : `▶ Analizar ${fecha}`}
+          </button>
+        </div>
       </div>
 
       {corriendo && (
         <div style={{ fontSize: 12, background: "#eff6ff", border: "1px solid #bfdbfe",
           color: "#1e40af", borderRadius: 8, padding: "10px 12px", marginTop: 12 }}>
-          Consultando el historial de cada paquete en MELI. Avanza aunque cierres esta pantalla.
+          Consultando el historial de cada paquete en MELI
+          {tarea?.params?.fecha && tarea.params.fecha !== fecha
+            ? ` del ${tarea.params.fecha} (otro día del que estás viendo)`
+            : ""}. Avanza aunque cierres esta pantalla, y solo puede correr una a la vez.
         </div>
       )}
       {tarea?.estado === "error" && (
@@ -232,7 +271,7 @@ export default function SeccionIntentos({ fecha }) {
                 </tr>
               </thead>
               <tbody>
-                {visibles.map((p) => (
+                {visibles.map((p) => [(
                   <tr key={p.shipment_id} style={{
                     borderBottom: "1px solid var(--borde)",
                     background: p.devuelto ? "#fffafa" : p.total > 1 ? "#fbfdfb" : "transparent",
@@ -300,9 +339,83 @@ export default function SeccionIntentos({ fecha }) {
                           whiteSpace: "nowrap",
                         }}>devuelto</span>
                       )}
+                      <button onClick={() => verHistoria(p.shipment_id)}
+                        title="Ver la historia completa del paquete"
+                        style={{ fontSize: 10.5, padding: "3px 9px", marginTop: p.devuelto ? 4 : 0,
+                          display: "block", marginLeft: "auto", marginRight: "auto" }}>
+                        {abierto === p.shipment_id ? "Ocultar" : "Historia"}
+                      </button>
                     </td>
                   </tr>
-                ))}
+                ),
+                  abierto === p.shipment_id && (
+                    <tr key={`${p.shipment_id}-hist`}>
+                      <td colSpan={8} style={{ padding: 0, background: "#f8fafc",
+                        borderBottom: "2px solid var(--borde)" }}>
+                        <div style={{ padding: "12px 16px" }}>
+                          <div style={{ fontSize: 11.5, fontWeight: 600, marginBottom: 8 }}>
+                            Historia completa del paquete {p.shipment_id}
+                          </div>
+                          {historia === null ? (
+                            <div style={{ fontSize: 11.5, color: "var(--texto-tenue)" }}>Cargando…</div>
+                          ) : historia[0]?.error ? (
+                            <div style={{ fontSize: 11.5, color: "#b91c1c" }}>{historia[0].error}</div>
+                          ) : historia.length === 0 ? (
+                            <div style={{ fontSize: 11.5, color: "var(--texto-tenue)" }}>
+                              Sin historia guardada. Vuelve a correr el análisis: las corridas
+                              anteriores solo guardaban los fallos, no el tránsito.
+                            </div>
+                          ) : (
+                            <div style={{ borderLeft: "2px solid var(--borde)", marginLeft: 4 }}>
+                              {historia.map((h, k) => (
+                                <div key={k} style={{
+                                  display: "flex", alignItems: "baseline", gap: 9,
+                                  padding: "4px 0 4px 14px", position: "relative",
+                                  fontSize: 11.5,
+                                  background: h.cambio_de_ruta ? "#fffbeb" : "transparent",
+                                }}>
+                                  {/* el punto de la línea de tiempo */}
+                                  <span style={{
+                                    position: "absolute", left: -5, top: 9,
+                                    width: 8, height: 8, borderRadius: "50%",
+                                    background: h.es_hito ? "#b91c1c"
+                                              : h.cambio_de_ruta ? "#b45309" : "#cbd5e1",
+                                  }} />
+                                  <span style={{ fontVariantNumeric: "tabular-nums",
+                                    color: "var(--texto-suave)", flexShrink: 0, width: 82 }}>
+                                    {h.fecha_hora}
+                                  </span>
+                                  <span style={{ fontWeight: h.es_hito ? 600 : 400,
+                                    color: h.es_hito ? "#b91c1c" : "var(--texto)" }}>
+                                    {h.etiqueta}
+                                  </span>
+                                  {h.detalle && h.detalle !== h.etiqueta && (
+                                    <span style={{ color: "var(--texto-suave)" }}>· {h.detalle}</span>
+                                  )}
+                                  {h.id_ruta && (
+                                    <span style={{ fontSize: 10.5, color: "var(--texto-tenue)" }}>
+                                      · ruta {h.id_ruta}{h.driver_name ? ` · ${h.driver_name}` : ""}
+                                    </span>
+                                  )}
+                                  {h.cambio_de_ruta && (
+                                    <span style={{ fontSize: 10, fontWeight: 600, color: "#b45309" }}>
+                                      ↔ cambió de ruta
+                                    </span>
+                                  )}
+                                  {h.minutos_desde_anterior > 0 && (
+                                    <span style={{ fontSize: 10, color: "var(--texto-tenue)" }}>
+                                      +{h.minutos_desde_anterior} min
+                                    </span>
+                                  )}
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                  ),
+                ])}
               </tbody>
             </table>
           </div>
