@@ -10,6 +10,8 @@ import BotonCompartirChat from "../componentes/BotonCompartirChat.jsx";
 import BotonAdjunto from "../componentes/BotonAdjunto.jsx";
 import NuevoMensaje from "../componentes/NuevoMensaje.jsx";
 import GrabadorAudio from "../componentes/GrabadorAudio.jsx";
+import SelectorEmoji from "../componentes/SelectorEmoji.jsx";
+import BotonLlamar from "../componentes/BotonLlamar.jsx";
 import { hayAdjuntoMadurando } from "../shared/mensajes.js";
 import { useSearchParams } from "react-router-dom";
 
@@ -826,19 +828,32 @@ export default function Consultas() {
                     Ventana de 24h cerrada. El conductor debe escribir primero para responder texto libre.
                   </div>
                 )}
-                <div style={{ padding: "11px 16px", display: "flex", gap: 8, alignItems: "center" }}>
+                <div style={{ padding: "11px 16px", display: "flex", gap: 8, alignItems: "flex-end", flexWrap: "wrap" }}>
                   <BotonAdjunto telefono={sel?.telefono} caseId={ticketAbierto?.case_id}
                     conversacionId={sel?.id} disabled={accion || ticketDeOtro}
                     onEnviado={() => cargarHilo(sel)} />
                   <GrabadorAudio telefono={sel?.telefono} caseId={ticketAbierto?.case_id}
                     conversacionId={sel?.id} disabled={accion || ticketDeOtro}
                     onEnviado={() => cargarHilo(sel)} />
-                  <input value={texto} onChange={(e) => setTexto(e.target.value)}
+                  <SelectorEmoji disabled={accion || ticketDeOtro}
+                    onElegir={(e) => setTexto((t) => t + e)} />
+                  <BotonLlamar telefono={sel?.telefono}
+                    nombre={contexto.nombre || nombresLista[sel?.telefono] || sel?.conductor_nombre}
+                    disabled={ticketDeOtro} />
+                  {/* textarea en vez de input: los mensajes al conductor llevan
+                      dirección, referencia y varias líneas, y en un campo de una
+                      sola línea no se alcanza a revisar lo escrito */}
+                  <textarea value={texto} rows={2} onChange={(e) => setTexto(e.target.value)}
                     onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); enviar(); } }}
                     placeholder={ticketDeOtro
                       ? `Ticket de ${nombresAnalistas[ticketAbierto.analista_actual] || "otro analista"} — traspásatelo para escribir`
-                      : "Escribe al conductor…"}
-                    disabled={accion || ticketDeOtro} style={{ flex: 1 }} />
+                      : "Escribe al conductor…  (Enter envía · Shift+Enter salta línea)"}
+                    disabled={accion || ticketDeOtro}
+                    style={{
+                      flex: 1, minWidth: 200, fontFamily: "inherit", fontSize: 13,
+                      padding: "9px 12px", border: "1px solid var(--borde)",
+                      borderRadius: 9, resize: "vertical", lineHeight: 1.45,
+                    }} />
                   <button className="btn-navy" onClick={enviar} disabled={accion || !texto.trim() || ticketDeOtro || (ticketAbierto && ticketAbierto.analista_actual && ticketAbierto.analista_actual !== analista?.id)}
                     style={{ padding: "9px 16px", whiteSpace: "nowrap" }}>{accion ? "…" : "Enviar"}</button>
                   <button className="btn-naranja" onClick={cerrar} disabled={accion || ticketDeOtro}
