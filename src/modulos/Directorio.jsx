@@ -62,12 +62,7 @@ function FormConductor({ inicial, onGuardar, onCerrar, guardando, error }) {
         <Campo etiqueta="Patente" value={f.patente} onChange={set("patente")} placeholder="SDD-XXXXXX" />
         <Campo etiqueta="Notas" value={f.notas} onChange={set("notas")} placeholder="Ej: número de prueba de la torre" />
 
-        <div style={{ fontSize: 11.5, color: "var(--texto-tenue)", marginBottom: 8 }}>
-        {cargando ? "Cargando…" : `${filas.length} conductor${filas.length === 1 ? "" : "es"}`}
-        {!verTodos && !cargando && " con teléfono"}
-      </div>
-
-      {error && <div style={{ color: "#791F1F", fontSize: 12, marginBottom: 8 }}>{error}</div>}
+{error && <div style={{ color: "#791F1F", fontSize: 12, marginBottom: 8 }}>{error}</div>}
 
         <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
           <button onClick={onCerrar} style={{ fontSize: 13, padding: "7px 14px" }}>Cancelar</button>
@@ -181,12 +176,14 @@ export default function Directorio() {
         </div>
       </div>
 
+      {error && <div style={{ background: "#FCEBEB", color: "#791F1F", borderRadius: 8, padding: "10px 14px", marginBottom: 14, fontSize: 13 }}>{error}</div>}
+
+      {/* Conteo de lo que se está viendo: sin esto no se distingue "no hay datos"
+          de "el filtro los está escondiendo". */}
       <div style={{ fontSize: 11.5, color: "var(--texto-tenue)", marginBottom: 8 }}>
         {cargando ? "Cargando…" : `${filas.length} conductor${filas.length === 1 ? "" : "es"}`}
         {!verTodos && !cargando && " con teléfono"}
       </div>
-
-      {error && <div style={{ background: "#FCEBEB", color: "#791F1F", borderRadius: 8, padding: "10px 14px", marginBottom: 14, fontSize: 13 }}>{error}</div>}
 
       <div style={{ background: "#fff", border: "1px solid var(--borde)", borderRadius: 10, overflow: "hidden" }}>
         {cargando ? (
