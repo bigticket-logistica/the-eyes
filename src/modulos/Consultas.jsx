@@ -25,13 +25,28 @@ import { useSearchParams } from "react-router-dom";
 
 const ABIERTOS = ["NEW", "OPEN", "ON_HOLD", "CHECKING"];
 
-function LineaCierre({ codigo, anidadoEn }) {
+function LineaCierre({ codigo, anidadoEn, caso, analistaId, onReabrir }) {
   const color = anidadoEn ? "#1a3a6b" : "#16a34a";
   const texto = anidadoEn ? `↩ ${codigo} anidado en la incidencia #${anidadoEn}` : `✓ ${codigo} resuelto`;
   return (
     <div style={{ display: "flex", alignItems: "center", gap: 8, margin: "14px 0 6px" }}>
       <div style={{ flex: 1, height: 2, background: color, opacity: 0.45 }} />
       <span style={{ fontSize: 11, fontWeight: 600, color: anidadoEn ? "#1a3a6b" : "#15803d", whiteSpace: "nowrap" }}>{texto}</span>
+      {/* Un ticket cerrado seguía siendo un callejón sin salida: no se podía
+          reabrir ni compartir su historial. Reabrir evita partir un mismo
+          problema en dos tickets; compartir le da el contexto a quien retoma. */}
+      {caso && !anidadoEn && (
+        <span style={{ display: "inline-flex", gap: 5, alignItems: "center", flexShrink: 0 }}>
+          <BotonCompartirChat caso={caso} analistaId={analistaId} compacto />
+          {onReabrir && (
+            <button onClick={() => onReabrir(caso)}
+              title="Reabrir este ticket: el cronómetro vuelve a correr"
+              style={{ fontSize: 10.5, padding: "2px 8px", whiteSpace: "nowrap" }}>
+              ↺ Reabrir
+            </button>
+          )}
+        </span>
+      )}
       <div style={{ flex: 1, height: 2, background: color, opacity: 0.45 }} />
     </div>
   );
@@ -699,6 +714,24 @@ export default function Consultas() {
   const convsDelDia = convs.filter((c) => c.ultimo_mensaje_en && diaMX(c.ultimo_mensaje_en) === fechaSel);
   const hayGrave = ETIQUETAS_CASO.some((e) => e.grave && caract.etiquetas.includes(e.id));
 
+  async function reabrir(caso) {
+    if (!caso?.id) return;
+    const motivo = window.prompt(
+      `¿Por qué se reabre ${caso.codigo || "#" + caso.case_id}?\n` +
+      "El cronómetro vuelve a correr desde ahora.", "");
+    if (motivo === null) return;   // canceló
+    setAccion(true);
+    const { data, error } = await sb.rpc("fn_reabrir_ticket", {
+      p_caso_id: caso.id, p_motivo: motivo || null,
+    });
+    setAccion(false);
+    if (error) { alert("No se pudo reabrir: " + error.message); return; }
+    if (data === "solo_consultas") { alert("Las incidencias de MELI se reabren en MELI."); return; }
+    if (data === "ya_abierto") { alert("Ese ticket ya está abierto."); return; }
+    await cargarConvs();
+    if (sel) await cargarHilo(sel);
+  }
+
   function renderHilo() {
     const out = [];
     for (let i = 0; i < mensajes.length; i++) {
@@ -722,7 +755,8 @@ export default function Consultas() {
           out.push(<LineaCierre key={`anid-${cid}`} codigo={"Conversación"} anidadoEn={cid} />);
         } else if (c.origen !== "meli" && !ABIERTOS.includes(c.estado_id)) {
           out.push(<LineaCierre key={`cierre-${cid}`} codigo={c.codigo || "#" + cid}
-            anidadoEn={c.anidado_en_case_id || null} />);
+            anidadoEn={c.anidado_en_case_id || null}
+            caso={c} analistaId={analista?.id} onReabrir={reabrir} />);
         }
       }
     }
