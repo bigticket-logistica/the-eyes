@@ -34,7 +34,12 @@ button:hover { filter: brightness(0.97); }
 button:active { transform: scale(0.985); }
 button:disabled { opacity: 0.5; cursor: not-allowed; }
 
-input, select, textarea {
+/* Controles de TEXTO: ancho completo, borde y padding.
+   Se excluyen radio y checkbox a propósito. Con width:100% el círculo de un
+   radio se estiraba a lo ancho de toda la fila y empujaba su etiqueta al borde
+   derecho, deformando cada selector de la aplicación. */
+input:not([type="radio"]):not([type="checkbox"]),
+select, textarea {
   font-family: inherit;
   font-size: 14px;
   border: 1px solid var(--borde);
@@ -43,7 +48,19 @@ input, select, textarea {
   outline: none;
   width: 100%;
 }
-input:focus, select:focus, textarea:focus {
+
+/* Radio y checkbox conservan su tamaño nativo y se alinean con su etiqueta. */
+input[type="radio"], input[type="checkbox"] {
+  width: auto;
+  margin: 0;
+  padding: 0;
+  border: none;
+  flex: none;
+  accent-color: var(--navy);
+  cursor: pointer;
+}
+input:not([type="radio"]):not([type="checkbox"]):focus,
+select:focus, textarea:focus {
   border-color: var(--navy);
   box-shadow: 0 0 0 3px rgba(26, 58, 107, 0.1);
 }
