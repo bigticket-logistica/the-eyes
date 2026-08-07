@@ -8,6 +8,7 @@ import BotonCompartirChat from "./BotonCompartirChat.jsx";
 import BotonAdjunto from "./BotonAdjunto.jsx";
 import SelectorEmoji from "./SelectorEmoji.jsx";
 import BotonLlamar from "./BotonLlamar.jsx";
+import CerrarConMotivo from "./CerrarConMotivo.jsx";
 import GrabadorAudio from "./GrabadorAudio.jsx";
 
 export default function HiloTicket({ caso, onTomar, onResolver, onTraspasar, analistaId, nombres }) {
@@ -200,9 +201,7 @@ export default function HiloTicket({ caso, onTomar, onResolver, onTraspasar, ana
                     style={{ padding: "9px 16px", whiteSpace: "nowrap" }}>
                     {enviando ? "Enviando…" : "Enviar"}
                   </button>
-                  <button className="btn-naranja" onClick={() => onResolver(caso)} style={{ padding: "9px 16px", whiteSpace: "nowrap" }}>
-                    Cerrar ticket
-                  </button>
+                  <CerrarConMotivo caso={caso} onCerrar={onResolver} />
                   {onTraspasar && (
                     <select defaultValue="" onChange={(e) => { const d = e.target.value; e.target.value = ""; if (d) onTraspasar(caso, d); }}
                       title="Traspasar este ticket a otro analista"
