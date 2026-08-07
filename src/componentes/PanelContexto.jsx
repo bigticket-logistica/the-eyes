@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import { traerDetalleCaso, cacheFresco, detalleDesdeCache } from "../shared/detalle.js";
 import { sb } from "../shared/supabase.js";
 import { conversacionPorTelefono, ventanaAbierta, enviarMensaje, enviarCorreoCliente, consultarPaquete } from "../shared/mensajes.js";
