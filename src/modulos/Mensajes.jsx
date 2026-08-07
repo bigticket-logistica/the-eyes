@@ -47,8 +47,20 @@ export function useChatNoLeidos() {
         { event: "INSERT", schema: "public", table: "crm_chat_analistas" },
         refrescar)
       .subscribe();
-    const t = setInterval(refrescar, 60000);   // respaldo si Realtime se cae
-    return () => { sb.removeChannel(canal); clearInterval(t); };
+
+    // Marcar como leído escribe en crm_chat_lecturas, no en crm_chat_analistas,
+    // así que la suscripción de arriba no se enteraba: el contador seguía en 1
+    // aunque el analista estuviera leyendo el hilo, y solo se limpiaba con el
+    // respaldo por tiempo. Este aviso lo actualiza al instante.
+    const alLeer = () => refrescar();
+    window.addEventListener("chat-leido", alLeer);
+
+    const t = setInterval(refrescar, 30000);   // respaldo si Realtime se cae
+    return () => {
+      sb.removeChannel(canal);
+      window.removeEventListener("chat-leido", alLeer);
+      clearInterval(t);
+    };
   }, [refrescar]);
 
   return n;
@@ -170,9 +182,12 @@ export default function Mensajes() {
     return () => { sb.removeChannel(canal); };
   }, [analista?.id, analista?.nombre]);
 
-  // Marcar leído al abrir y cada vez que llegan mensajes nuevos.
+  // Marcar leído al abrir y cada vez que llegan mensajes nuevos, y avisar al
+  // contador de la barra para que se apague de inmediato.
   useEffect(() => {
-    if (esHoy && msgs) sb.rpc("fn_chat_marcar_leido");
+    if (!esHoy || !msgs) return;
+    sb.rpc("fn_chat_marcar_leido")
+      .then(() => window.dispatchEvent(new Event("chat-leido")));
   }, [esHoy, msgs]);
 
   useEffect(() => { finRef.current?.scrollIntoView({ behavior: "smooth" }); }, [msgs?.length]);
