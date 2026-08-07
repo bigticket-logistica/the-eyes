@@ -32,19 +32,26 @@ const ALERTAS = [
 const alertasDe = (r) => ALERTAS.filter((a) => r[a.campo] === true);
 const pct = (parte, total) => (total > 0 ? Math.round((100 * parte) / total) : 0);
 const avanceRuta = (r) => pct(r.pkg_delivered || 0, r.pkg_total || 0);
-const chunk = (a, n) => { const o = []; for (let i = 0; i < a.length; i += n) o.push(a.slice(i, i + n)); return o; };
 
 // ── Teléfonos desde el padrón: driver_id → phone (último snapshot gana) ─────
-async function resolverTelefonos(driverIds) {
-  const ids = [...new Set(driverIds.filter(Boolean))];
+// El teléfono se resuelve en la base (fn_telefonos_de_rutas), no acá.
+//
+// Antes se cruzaba el Directorio por driver_id, pero las 499 personas cargadas
+// desde el Excel entraron con driver_id NEGATIVO —no teníamos sus identificadores
+// reales de MELI— y los de MELI son positivos: el cruce no encontraba a nadie y
+// el botón de mensaje quedaba deshabilitado en todas las rutas.
+//
+// La función resuelve por driver_id cuando existe y por nombre normalizado
+// cuando no, y devuelve null si el nombre es ambiguo: mandarle el mensaje a la
+// persona equivocada es peor que no mandarlo.
+async function resolverTelefonos() {
+  const { data, error } = await sb.rpc("fn_telefonos_de_rutas", { p_fecha: null });
+  if (error) throw error;
   const mapa = {};
-  for (const lote of chunk(ids, 100)) {
-    const { data, error } = await sb
-      .from("vw_directorio_conductores")
-      .select("driver_id, telefono")
-      .in("driver_id", lote);
-    if (error) throw error;
-    for (const d of data || []) mapa[d.driver_id] = d.telefono || null;
+  for (const f of data || []) {
+    if (f.driver_id) mapa[f.driver_id] = f.telefono || null;
+    // también por id de ruta, para las rutas sin driver_id en el monitor
+    if (f.id_ruta) mapa[`r${f.id_ruta}`] = f.telefono || null;
   }
   return mapa;
 }
@@ -107,12 +114,22 @@ function FilaRuta({ r, telefono, onChat, conSC }) {
       </td>
       <td style={{ padding: "8px 10px" }}><BadgesAlertas ruta={r} /></td>
       <td style={{ padding: "8px 14px", textAlign: "right" }}>
+        {/* Antes era un 💬 solo, y con el teléfono ausente quedaba gris sin
+            explicar por qué. Ahora dice qué hace, y si no hay teléfono igual se
+            puede abrir para escribir uno a mano. */}
         <button
           onClick={() => onChat(r, telefono)}
-          disabled={sinTel}
-          title={sinTel ? "Sin teléfono en el padrón para este conductor" : `Escribir a ${r.driver_name}`}
-          style={{ fontSize: 12, padding: "4px 10px", opacity: sinTel ? 0.4 : 1, cursor: sinTel ? "not-allowed" : "pointer" }}>
-          💬
+          title={sinTel
+            ? "Sin teléfono en el padrón: se puede escribir uno a mano"
+            : `Escribir a ${r.driver_name} · ${telefono}`}
+          style={{
+            fontSize: 11.5, padding: "5px 11px", whiteSpace: "nowrap",
+            border: `1px solid ${sinTel ? "var(--borde)" : "var(--navy)"}`,
+            background: sinTel ? "#fff" : "#eef2f7",
+            color: sinTel ? "var(--texto-suave)" : "var(--navy)",
+            borderRadius: 7, cursor: "pointer",
+          }}>
+          💬 {sinTel ? "Sin tel." : "Escribir"}
         </button>
       </td>
     </tr>
@@ -141,10 +158,29 @@ function EncabezadoRutas({ conSC }) {
 // motivo (variable {{3}}); nombre y ruta se completan solos.
 const PLANTILLA_CONTACTO = { nombre: "contacto_ruta_torre", idioma: "es_MX" };
 
+// Motivos listos, redactados para el conductor. Cubren las alertas que muestra
+// el panel, así la analista no tiene que redactar lo mismo veinte veces al día.
+const MOTIVOS = [
+  { clave: "demora",   etiqueta: "Demora en la ruta",
+    texto: "Vemos tu ruta con demora y sin avance en el último tramo. ¿Tienes algún problema para continuar?" },
+  { clave: "detenido", etiqueta: "Vehículo detenido",
+    texto: "Vemos el vehículo detenido hace algunos minutos. ¿Todo bien por allá?" },
+  { clave: "despacho", etiqueta: "Despacho demorado",
+    texto: "Vemos que la ruta todavía no sale del centro de distribución. ¿Hay algún problema con el despacho?" },
+  { clave: "saca",     etiqueta: "Saca pendiente",
+    texto: "Vemos una saca pendiente de entrega en tu ruta. ¿Nos confirmas en qué estado va?" },
+  { clave: "avance",   etiqueta: "Consultar avance",
+    texto: "Queremos saber cómo vas con el reparto. ¿Nos cuentas cómo va la ruta?" },
+  { clave: "coordinar", etiqueta: "Coordinar",
+    texto: "Queremos coordinar contigo un tema de tu ruta." },
+];
+
 function motivoSugerido(ruta) {
-  if (ruta.alerta_inactividad_vehiculo === true) return "Vemos el vehículo detenido hace algunos minutos.";
-  if (ruta.alerta_ruta_demorada === true || ruta.atraso_inicial === true) return "Vemos tu ruta con demora.";
-  return "Queremos coordinar contigo un tema de tu ruta.";
+  if (ruta.alerta_inactividad_vehiculo === true) return MOTIVOS[1].texto;
+  if (ruta.alerta_despacho_demorado === true)    return MOTIVOS[2].texto;
+  if (ruta.alerta_saca_pendiente === true)       return MOTIVOS[3].texto;
+  if (ruta.alerta_ruta_demorada === true || ruta.atraso_inicial === true) return MOTIVOS[0].texto;
+  return MOTIVOS[5].texto;
 }
 
 function PanelChat({ chat, onCerrar, onEnviado, analistaId }) {
@@ -157,26 +193,44 @@ function PanelChat({ chat, onCerrar, onEnviado, analistaId }) {
   const [error, setError] = useState("");
   const [ventana, setVentana] = useState(null); // null = averiguando
 
+  // El teléfono se puede elegir. Opciones reales:
+  //   · Directorio  → lo que resolvió fn_telefonos_de_rutas
+  //   · MELI        → driver_phone de la ruta. En la práctica viene VACÍO en
+  //                   todas las filas del monitor porque MELI no lo manda en
+  //                   get-routes-list; la opción aparece solo si hay dato.
+  //   · A mano      → para cuando el padrón está incompleto y la analista tiene
+  //                   el número por otra vía.
+  const telMeli = (chat.ruta.driver_phone || "").replace(/\D/g, "") || null;
+  const telDir  = (chat.telefono || "").replace(/\D/g, "") || null;
+  const [fuenteTel, setFuenteTel] = useState(telDir ? "directorio" : (telMeli ? "meli" : "manual"));
+  const [telManual, setTelManual] = useState("");
+
+  const telefono = fuenteTel === "directorio" ? telDir
+                 : fuenteTel === "meli"       ? telMeli
+                 : telManual.replace(/\D/g, "");
+  const telValido = telefono && telefono.length >= 10;
+
   useEffect(() => {
+    if (!telValido) { setVentana(null); return; }
     let activo = true;
-    conversacionPorTelefono(chat.telefono)
+    conversacionPorTelefono(telefono)
       .then((c) => { if (activo) setVentana(ventanaAbierta(c)); })
       .catch(() => { if (activo) setVentana(false); });
     return () => { activo = false; };
-  }, [chat.telefono]);
+  }, [telefono, telValido]);
 
   const modoPlantilla = ventana === false;
   const vistaPrevia = `Hola ${primerNombre}, te contactamos de la torre de soporte Bigticket por tu ruta ${chat.ruta.id_ruta}. ${motivo.trim()} Por favor respóndenos por aquí para poder ayudarte.`;
 
   async function enviar() {
-    if (enviando || ventana === null) return;
+    if (enviando || ventana === null || !telValido) return;
     const cuerpo = modoPlantilla ? vistaPrevia : texto.trim();
     if (!cuerpo || (modoPlantilla && !motivo.trim())) return;
     setEnviando(true);
     setError("");
     try {
       const resp = await enviarMensaje({
-        telefono: chat.telefono,
+        telefono,
         texto: cuerpo,
         caseId: null,
         emisorId: analistaId,
@@ -209,14 +263,63 @@ function PanelChat({ chat, onCerrar, onEnviado, analistaId }) {
           <button onClick={onCerrar} style={{ fontSize: 12, padding: "2px 10px" }}>✕</button>
         </div>
         <div style={{ fontSize: 12, color: "var(--texto-suave)", marginBottom: 10 }}>
-          Ruta {chat.ruta.id_ruta} · {chat.ruta.service_center_id} · {chat.telefono}
+          Ruta {chat.ruta.id_ruta} · {chat.ruta.service_center_id}
         </div>
 
-        {ventana === null && (
+        {/* ── A qué número se manda ── */}
+        <div style={{ border: "1px solid var(--borde)", borderRadius: 9, padding: "10px 12px", marginBottom: 12 }}>
+          <div style={{ fontSize: 11, color: "var(--texto-suave)", marginBottom: 7 }}>Enviar a</div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
+            {telDir && (
+              <label style={{ fontSize: 12.5, display: "flex", alignItems: "center", gap: 7, cursor: "pointer" }}>
+                <input type="radio" checked={fuenteTel === "directorio"}
+                  onChange={() => setFuenteTel("directorio")} />
+                <span style={{ fontWeight: 600 }}>{telDir}</span>
+                <span style={{ fontSize: 10.5, color: "var(--texto-tenue)" }}>del Directorio</span>
+              </label>
+            )}
+            {telMeli && telMeli !== telDir && (
+              <label style={{ fontSize: 12.5, display: "flex", alignItems: "center", gap: 7, cursor: "pointer" }}>
+                <input type="radio" checked={fuenteTel === "meli"}
+                  onChange={() => setFuenteTel("meli")} />
+                <span style={{ fontWeight: 600 }}>{telMeli}</span>
+                <span style={{ fontSize: 10.5, color: "var(--texto-tenue)" }}>de MELI</span>
+              </label>
+            )}
+            <label style={{ fontSize: 12.5, display: "flex", alignItems: "center", gap: 7, cursor: "pointer" }}>
+              <input type="radio" checked={fuenteTel === "manual"}
+                onChange={() => setFuenteTel("manual")} />
+              <span>Otro número</span>
+            </label>
+            {fuenteTel === "manual" && (
+              <input value={telManual} onChange={(e) => setTelManual(e.target.value)}
+                placeholder="521XXXXXXXXXX · solo dígitos, con código de país"
+                autoFocus
+                style={{
+                  fontSize: 12.5, padding: "7px 10px", marginLeft: 22,
+                  border: `1px solid ${telManual && !telValido ? "#fca5a5" : "var(--borde)"}`,
+                  borderRadius: 7,
+                }} />
+            )}
+          </div>
+          {!telDir && !telMeli && (
+            <div style={{ fontSize: 10.5, color: "#92400e", marginTop: 6 }}>
+              Este conductor no tiene teléfono en el padrón. Escribe uno para poder contactarlo.
+            </div>
+          )}
+        </div>
+
+        {!telValido && (
+          <div style={{ padding: "14px 0", textAlign: "center", color: "var(--texto-suave)", fontSize: 13 }}>
+            Elige o escribe un número para continuar.
+          </div>
+        )}
+
+        {telValido && ventana === null && (
           <div style={{ padding: "14px 0", textAlign: "center", color: "var(--texto-suave)", fontSize: 13 }}>Verificando ventana de contacto…</div>
         )}
 
-        {ventana === true && (
+        {telValido && ventana === true && (
           <textarea
             value={texto}
             onChange={(e) => setTexto(e.target.value)}
@@ -226,16 +329,32 @@ function PanelChat({ chat, onCerrar, onEnviado, analistaId }) {
           />
         )}
 
-        {modoPlantilla && (
+        {telValido && modoPlantilla && (
           <div>
             <div style={{ background: "#e0f2fe", color: "#075985", borderRadius: 8, padding: "8px 12px", fontSize: 12, marginBottom: 10 }}>
               El conductor no ha escrito en las últimas 24h → se envía la <b>plantilla aprobada</b>. Edita el motivo si quieres:
             </div>
-            <input
+            {/* Motivos listos para no redactar lo mismo veinte veces al día.
+                El sugerido viene de la alerta que tiene la ruta. */}
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 5, marginBottom: 8 }}>
+              {MOTIVOS.map((m) => (
+                <button key={m.clave} onClick={() => setMotivo(m.texto)}
+                  title={m.texto}
+                  style={{
+                    fontSize: 11, padding: "4px 9px", borderRadius: 20, whiteSpace: "nowrap",
+                    border: `1px solid ${motivo === m.texto ? "var(--navy)" : "var(--borde)"}`,
+                    background: motivo === m.texto ? "#eef2f7" : "#fff",
+                    fontWeight: motivo === m.texto ? 600 : 400,
+                  }}>
+                  {m.etiqueta}
+                </button>
+              ))}
+            </div>
+            <textarea
               value={motivo}
               onChange={(e) => setMotivo(e.target.value)}
-              autoFocus
-              style={{ width: "100%", boxSizing: "border-box", fontSize: 13, padding: "8px 10px", border: "1px solid var(--borde)", borderRadius: 8, marginBottom: 10 }}
+              rows={2}
+              style={{ width: "100%", boxSizing: "border-box", fontSize: 13, padding: "8px 10px", border: "1px solid var(--borde)", borderRadius: 8, marginBottom: 10, fontFamily: "inherit", resize: "vertical" }}
             />
             <div style={{ background: "#fafbfc", border: "1px dashed var(--borde)", borderRadius: 8, padding: "10px 12px", fontSize: 12.5, color: "var(--texto)", lineHeight: 1.5 }}>
               {vistaPrevia}
@@ -277,7 +396,7 @@ export default function DetalleDia() {
     setRutas(lista);
     setCargando(false);
     try {
-      const mapa = await resolverTelefonos(lista.map((r) => r.driver_id));
+      const mapa = await resolverTelefonos();
       setTelefonos(mapa);
     } catch (e) { /* sin teléfonos los botones quedan deshabilitados; no es fatal */ }
   }, []);
@@ -320,7 +439,8 @@ export default function DetalleDia() {
     const sc = r.service_center_id || "—";
     if (!porSC[sc]) porSC[sc] = { sc, filas: [], activas: 0, cerradas: 0, entregados: 0, total: 0, conAlerta: 0 };
     const g = porSC[sc];
-    if (r.vigente !== false) g.filas.push(r);   // el desplegable muestra solo lo vivo en el feed
+    // el desplegable muestra solo lo vivo en el feed, y sin line-haul
+    if (r.vigente !== false && r.is_line_haul !== true) g.filas.push(r);
     if (r.status === "active" && r.vigente !== false) g.activas++;
     if (r.status === "close") g.cerradas++;      // cierres del día completos
     if (r.is_line_haul === false) { g.entregados += r.pkg_delivered || 0; g.total += r.pkg_total || 0; }
@@ -333,8 +453,13 @@ export default function DetalleDia() {
       avanceRuta(a) - avanceRuta(b));
   }
 
+  // Las line-haul quedan fuera de las listas. Son transferencias entre bodegas:
+  // MELI no les asigna conductor (driver_name viene "-" y driver_id null), así
+  // que ocupaban la tabla con filas sin nombre, sin patente y sin nadie a quien
+  // escribir. Siguen contando en los KPI de rutas del feed.
   const problema = vigentes
-    .filter((r) => (r.alertas_activas || 0) > 0 && r.status !== "close")
+    .filter((r) => (r.alertas_activas || 0) > 0 && r.status !== "close"
+                   && r.is_line_haul !== true)
     .sort((a, b) => (b.alertas_activas || 0) - (a.alertas_activas || 0));
 
   const sinDatos = rutas.length === 0;
@@ -391,7 +516,7 @@ export default function DetalleDia() {
                 <thead><EncabezadoRutas conSC /></thead>
                 <tbody>
                   {problema.map((r) => (
-                    <FilaRuta key={r.id_ruta} r={r} telefono={telefonos[r.driver_id]} onChat={abrirChat} conSC />
+                    <FilaRuta key={r.id_ruta} r={r} telefono={telefonos[r.driver_id] || telefonos[`r${r.id_ruta}`]} onChat={abrirChat} conSC />
                   ))}
                 </tbody>
               </table>
@@ -442,7 +567,7 @@ export default function DetalleDia() {
                             <thead><EncabezadoRutas /></thead>
                             <tbody>
                               {g.filas.map((r) => (
-                                <FilaRuta key={r.id_ruta} r={r} telefono={telefonos[r.driver_id]} onChat={abrirChat} />
+                                <FilaRuta key={r.id_ruta} r={r} telefono={telefonos[r.driver_id] || telefonos[`r${r.id_ruta}`]} onChat={abrirChat} />
                               ))}
                             </tbody>
                           </table>
