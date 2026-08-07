@@ -6,6 +6,8 @@ import { mensajesDelCaso, conversacionPorTelefono, ventanaAbierta, enviarMensaje
 import Burbuja from "./Burbuja.jsx";
 import BotonCompartirChat from "./BotonCompartirChat.jsx";
 import BotonAdjunto from "./BotonAdjunto.jsx";
+import SelectorEmoji from "./SelectorEmoji.jsx";
+import BotonLlamar from "./BotonLlamar.jsx";
 import GrabadorAudio from "./GrabadorAudio.jsx";
 
 export default function HiloTicket({ caso, onTomar, onResolver, onTraspasar, analistaId, nombres }) {
@@ -161,7 +163,7 @@ export default function HiloTicket({ caso, onTomar, onResolver, onTraspasar, ana
                 Ventana de 24h cerrada. El conductor debe escribir primero, o se requiere una plantilla.
               </div>
             )}
-            <div style={{ padding: "11px 16px", display: "flex", gap: 8, alignItems: "center" }}>
+            <div style={{ padding: "11px 16px", display: "flex", gap: 8, alignItems: "flex-end", flexWrap: "wrap" }}>
               {sinDueno ? (
                 <button className="btn-navy" onClick={() => onTomar(caso)} style={{ padding: "9px 18px" }}>
                   Tomar ticket
@@ -174,13 +176,25 @@ export default function HiloTicket({ caso, onTomar, onResolver, onTraspasar, ana
                   <GrabadorAudio telefono={caso.conductor_telefono} caseId={caso.case_id}
                     conversacionId={conversacion?.id} disabled={enviando || deOtro}
                     onEnviado={cargarHilo} />
-                  <input
+                  <SelectorEmoji disabled={enviando || deOtro}
+                    onElegir={(e) => setTexto((t) => t + e)} />
+                  <BotonLlamar telefono={caso.conductor_telefono}
+                    nombre={caso.conductor_nombre} disabled={deOtro} />
+                  {/* textarea en vez de input: los mensajes a un conductor suelen
+                      llevar dirección, referencia y varias líneas, y en un campo
+                      de una sola línea no se alcanza a revisar lo escrito */}
+                  <textarea
                     value={texto}
+                    rows={2}
                     onChange={(e) => setTexto(e.target.value)}
                     onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleEnviar(); } }}
-                    placeholder={deOtro ? `Ticket de ${(nombres && nombres[caso.analista_actual]) || "otro analista"} — tómalo para escribir` : (caso.conductor_telefono ? "Escribe al conductor…" : "Sin teléfono del conductor")}
+                    placeholder={deOtro ? `Ticket de ${(nombres && nombres[caso.analista_actual]) || "otro analista"} — tómalo para escribir` : (caso.conductor_telefono ? "Escribe al conductor…  (Enter envía · Shift+Enter salta línea)" : "Sin teléfono del conductor")}
                     disabled={enviando || !caso.conductor_telefono || deOtro}
-                    style={{ flex: 1 }}
+                    style={{
+                      flex: 1, minWidth: 200, fontFamily: "inherit", fontSize: 13,
+                      padding: "9px 12px", border: "1px solid var(--borde)",
+                      borderRadius: 9, resize: "vertical", lineHeight: 1.45,
+                    }}
                   />
                   <button className="btn-navy" onClick={handleEnviar} disabled={enviando || !texto.trim() || !caso.conductor_telefono || deOtro}
                     style={{ padding: "9px 16px", whiteSpace: "nowrap" }}>
