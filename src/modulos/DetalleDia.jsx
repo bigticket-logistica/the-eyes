@@ -244,13 +244,22 @@ function PanelChat({ chat, onCerrar, onEnviado, analistaId }) {
                  : telManual.replace(/\D/g, "");
   const telValido = telefono && telefono.length >= 10;
 
+  // Se espera medio segundo tras la última tecla antes de consultar.
+  // Sin eso el formulario cambiaba mientras se escribía: a los 10 dígitos ya
+  // consultaba, no encontraba conversación y mostraba el modo plantilla; al
+  // completar el número aparecía la conversación y saltaba a texto libre. Ese
+  // salto se veía como un error cuando era la ventana de 24 h haciendo su
+  // trabajo.
   useEffect(() => {
     if (!telValido) { setVentana(null); return; }
     let activo = true;
-    conversacionPorTelefono(telefono)
-      .then((c) => { if (activo) setVentana(ventanaAbierta(c)); })
-      .catch(() => { if (activo) setVentana(false); });
-    return () => { activo = false; };
+    setVentana(null);
+    const t = setTimeout(() => {
+      conversacionPorTelefono(telefono)
+        .then((c) => { if (activo) setVentana(ventanaAbierta(c)); })
+        .catch(() => { if (activo) setVentana(false); });
+    }, 500);
+    return () => { activo = false; clearTimeout(t); };
   }, [telefono, telValido]);
 
   const modoPlantilla = ventana === false;
@@ -379,6 +388,20 @@ function PanelChat({ chat, onCerrar, onEnviado, analistaId }) {
 
         {telValido && ventana === null && (
           <div style={{ padding: "14px 0", textAlign: "center", color: "var(--texto-suave)", fontSize: 13 }}>Verificando ventana de contacto…</div>
+        )}
+
+        {/* En modo plantilla ya había un aviso explicando el motivo; en texto
+            libre no había ninguno, así que el cambio de formulario parecía
+            arbitrario. Ahora los dos estados se explican. */}
+        {telValido && ventana === true && (
+          <div style={{
+            background: "#ecfdf5", border: "1px solid #a7f3d0", color: "#15803d",
+            borderRadius: 8, padding: "8px 12px", fontSize: 12, marginBottom: 10,
+            textAlign: "left", lineHeight: 1.45,
+          }}>
+            Este conductor escribió en las últimas 24 h → se puede enviar <b>texto libre</b>,
+            sin gastar plantilla.
+          </div>
         )}
 
         {telValido && ventana === true && (
