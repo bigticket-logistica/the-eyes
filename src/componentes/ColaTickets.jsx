@@ -96,12 +96,33 @@ export default function ColaTickets({ casosHoy = [], cerradosHoy = [], seleccion
             const mia = seleccionado && seleccionado.analista_actual && seleccionado.analista_actual === analistaId;
             if (!seleccionado) return <div style={{ fontSize: 11, color: "var(--texto-tenue)" }}>Elige una incidencia primero.</div>;
             if (!mia) return <div style={{ fontSize: 11, color: "var(--texto-tenue)" }}>Toma la incidencia para poder anidar.</div>;
-            if (!consultasLibres.length) return <div style={{ fontSize: 11, color: "var(--texto-tenue)" }}>No hay consultas abiertas sin anidar.</div>;
+
+            // Solo se ofrecen consultas del MISMO teléfono que la incidencia.
+            // Antes se listaban todas, así que era posible anidar la consulta de
+            // un conductor en la incidencia de otro: dos hilos de WhatsApp
+            // distintos mezclados en un ticket, con los mensajes de una persona
+            // apareciendo en el caso de otra.
+            const tel10 = (t) => String(t || "").replace(/\D/g, "").slice(-10);
+            const delMismo = consultasLibres.filter(
+              (c) => tel10(c.conductor_telefono) &&
+                     tel10(c.conductor_telefono) === tel10(seleccionado.conductor_telefono));
+
+            if (!seleccionado.conductor_telefono) {
+              return <div style={{ fontSize: 11, color: "var(--texto-tenue)" }}>
+                Esta incidencia no tiene teléfono del conductor, no se puede anidar.
+              </div>;
+            }
+            if (!delMismo.length) {
+              return <div style={{ fontSize: 11, color: "var(--texto-tenue)" }}>
+                Sin consultas abiertas de este conductor
+                {consultasLibres.length > 0 && ` (hay ${consultasLibres.length} de otros números)`}.
+              </div>;
+            }
             return (
               <select defaultValue="" onChange={(e) => { const v = e.target.value; e.target.value = ""; if (v) onAnidar(seleccionado, v); }}
                 style={{ width: "100%", fontSize: 12, padding: "6px 8px", border: "1px solid var(--borde)", borderRadius: 7 }}>
-                <option value="" disabled>Elegir consulta… ({consultasLibres.length})</option>
-                {consultasLibres.map((c) => (
+                <option value="" disabled>Elegir consulta… ({delMismo.length})</option>
+                {delMismo.map((c) => (
                   <option key={c.case_id} value={c.case_id}>
                     {(c.codigo || "#" + c.case_id) + " · " + (c.conductor_nombre || c.conductor_telefono || "sin nombre")}
                   </option>
