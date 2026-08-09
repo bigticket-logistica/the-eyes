@@ -10,6 +10,7 @@ import Bitacora from "./modulos/Bitacora.jsx";
 import Correos from "./modulos/Correos.jsx";
 import Mensajes from "./modulos/Mensajes.jsx";
 import Anomalias from "./modulos/Anomalias.jsx";
+import Salud from "./modulos/Salud.jsx";
 import Topbar from "./componentes/Topbar.jsx";
 import { AlertasProvider, ContenedorToasts } from "./shared/alertas.jsx";
 
@@ -64,6 +65,7 @@ export default function App() {
             <Route path="/consultas" element={<Consultas />} />
             <Route path="/mensajes" element={<Mensajes />} />
             <Route path="/anomalias" element={<Anomalias />} />
+            <Route path="/salud" element={<Salud />} />
             <Route path="/login" element={<Navigate to="/" replace />} />
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
