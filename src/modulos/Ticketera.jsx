@@ -4,7 +4,7 @@ import { sb } from "../shared/supabase.js";
 import { puedeActuar } from "../shared/permisos.js";
 import { useAuth } from "../shared/auth.jsx";
 import { esAbierto, motivoLegible } from "../shared/constantes.js";
-import { esDeHoyMX } from "../shared/fechas.js";
+import { esDeHoyMX, diaMX } from "../shared/fechas.js";
 import ColaTickets from "../componentes/ColaTickets.jsx";
 import HiloTicket from "../componentes/HiloTicket.jsx";
 import PanelContexto from "../componentes/PanelContexto.jsx";
@@ -184,11 +184,27 @@ export default function Ticketera() {
   const cargar = useCallback(async () => {
     setCargando(true);
     setError("");
+    // Se filtra por fecha EN LA CONSULTA, no trayendo los últimos N y filtrando
+    // después: con 203 incidencias en un día, el corte de 200 dejaba fuera las
+    // 17 más antiguas y la pantalla mostraba 186. Subir el número solo posterga
+    // el problema; acotar por día lo elimina.
+    //
+    // El rango se toma con un margen de un día a cada lado porque fecha_caso es
+    // timestamptz y la comparación en la base es en UTC: sin ese margen se
+    // perderían los casos de la madrugada y los de la noche de México.
+    const hoyMX = diaMX();
+    const desde = new Date(`${hoyMX}T00:00:00-06:00`);
+    desde.setDate(desde.getDate() - 1);
+    const hasta = new Date(`${hoyMX}T23:59:59-06:00`);
+    hasta.setDate(hasta.getDate() + 1);
+
     const { data, error } = await sb
       .from("crm_inc_casos")
       .select("*")
+      .gte("fecha_caso", desde.toISOString())
+      .lte("fecha_caso", hasta.toISOString())
       .order("fecha_caso", { ascending: false })
-      .limit(200);
+      .limit(2000);
     if (error) {
       setError("No pudimos cargar los tickets. Reintenta en unos segundos.");
       setCargando(false);
