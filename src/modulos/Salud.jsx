@@ -63,17 +63,21 @@ export default function Salud() {
   const [horas, setHoras] = useState([]);
   const [fallos, setFallos] = useState([]);
   const [config, setConfig] = useState(null);
+  const [analistas, setAnalistas] = useState([]);
+  const [resumen, setResumen] = useState(null);
   const [fecha, setFecha] = useState(diaMX());
   const [error, setError] = useState(null);
   const [actualizado, setActualizado] = useState(null);
 
   const cargar = useCallback(async () => {
     setError(null);
-    const [a, h, f, c] = await Promise.all([
+    const [a, h, f, c, an, re] = await Promise.all([
       sb.rpc("fn_salud_alertas"),
       sb.rpc("fn_biggy_salud", { p_fecha: fecha }),
       sb.rpc("fn_biggy_fallos", { p_dias: 3 }),
       sb.from("biggy_config").select("*").eq("id", 1).maybeSingle(),
+      sb.rpc("fn_metricas_analistas", { p_desde: fecha, p_hasta: fecha }),
+      sb.rpc("fn_resumen_operacion", { p_fecha: fecha }),
     ]);
     const err = a.error || h.error || f.error;
     if (err) {
@@ -86,6 +90,8 @@ export default function Salud() {
     setHoras(h.data || []);
     setFallos(f.data || []);
     setConfig(c.data || null);
+    setAnalistas(an.data || []);
+    setResumen(Array.isArray(re.data) ? re.data[0] : re.data);
     setActualizado(new Date());
   }, [fecha]);
 
@@ -265,6 +271,116 @@ export default function Salud() {
             Nada roto en los últimos 3 días.
           </div>
         )}
+      </div>
+
+      {/* ══ OPERACIÓN ══
+          A partir de acá se mide la OPERACIÓN y a las personas, no el sistema.
+          Van separadas a propósito: "el sistema está lento" y "esta analista es
+          lenta" son afirmaciones distintas y no deben leerse juntas. */}
+      <div style={{ borderTop: "2px solid var(--borde)", marginTop: 24, paddingTop: 18 }}>
+        <div style={{ fontSize: 15, fontWeight: 600, marginBottom: 3 }}>Operación</div>
+        <div style={{ fontSize: 11.5, color: "var(--texto-suave)", marginBottom: 14 }}>
+          Carga de trabajo y tiempos de atención del {fecha}. Esto mide el trabajo, no la
+          infraestructura.
+        </div>
+
+        {resumen && (
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))",
+            gap: 10, marginBottom: 16 }}>
+            {[
+              ["Tickets creados", resumen.tickets_creados, "consultas del día"],
+              ["Cerrados", resumen.tickets_cerrados, "hoy"],
+              ["Abiertos ahora", resumen.abiertos_ahora, "sin cerrar"],
+              ["Resueltos por Biggy", resumen.resueltos_por_biggy, "sin intervención humana"],
+              ["Conductores distintos", resumen.conductores, `${n0(resumen.conversaciones)} conversaciones`],
+              ["1ª respuesta", resumen.primera_resp_min != null ? `${resumen.primera_resp_min} min` : "—", "mediana"],
+              ["Tiempo de cierre", resumen.cierre_min != null ? `${resumen.cierre_min} min` : "—", "mediana"],
+            ].map(([t, v, d]) => (
+              <div key={t} style={{ background: "#fff", border: "1px solid var(--borde)",
+                borderRadius: 10, padding: "11px 13px", minWidth: 0 }}>
+                <div style={{ fontSize: 10.5, color: "var(--texto-suave)", marginBottom: 3,
+                  whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{t}</div>
+                <div style={{ fontSize: 21, fontWeight: 700, color: "var(--navy)", lineHeight: 1.05 }}>
+                  {v ?? 0}
+                </div>
+                <div style={{ fontSize: 10, color: "var(--texto-tenue)", marginTop: 2 }}>{d}</div>
+              </div>
+            ))}
+          </div>
+        )}
+
+        <div style={{ background: "#fff", border: "1px solid var(--borde)", borderRadius: 12, padding: 16 }}>
+          <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 3 }}>Por analista</div>
+          <div style={{ fontSize: 11.5, color: "var(--texto-suave)", marginBottom: 12,
+            maxWidth: 800, lineHeight: 1.5 }}>
+            <b>Reabiertos</b> es el contrapeso del tiempo de cierre: cerrar rápido sin resolver
+            se paga ahí. <b>Sin gestión</b> son tickets cerrados sin haberle escrito al conductor.
+          </div>
+
+          {analistas.length === 0 ? (
+            <div style={{ fontSize: 12.5, color: "var(--texto-tenue)", padding: "14px 0" }}>
+              Sin actividad ese día.
+            </div>
+          ) : (
+            <div style={{ overflowX: "auto" }}>
+              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+                <thead>
+                  <tr style={{ background: "var(--navy)", color: "#fff" }}>
+                    {["Analista", "Tomados", "Cerrados", "Abiertos", "Mensajes",
+                      "1ª resp.", "Cierre", "Reabiertos", "Sin gestión"].map((h, i) => (
+                      <th key={h} style={{ padding: "7px 9px", fontSize: 10.5, fontWeight: 600,
+                        textAlign: i === 0 ? "left" : "center", whiteSpace: "nowrap" }}>{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {analistas.map((a) => (
+                    <tr key={a.analista_id} style={{
+                      borderBottom: "1px solid var(--borde)",
+                      background: a.es_ia ? "#f7fbff" : "transparent",
+                    }}>
+                      <td style={{ padding: "8px 9px", fontWeight: 600 }}>
+                        {a.nombre}
+                        {a.es_ia && (
+                          <span style={{ fontSize: 10, color: "#1a5fb4", fontWeight: 400 }}> · asistente</span>
+                        )}
+                      </td>
+                      <td style={{ padding: "8px 9px", textAlign: "center", fontWeight: 600 }}>
+                        {a.tickets_tomados || "—"}
+                      </td>
+                      <td style={{ padding: "8px 9px", textAlign: "center" }}>{a.tickets_cerrados || "—"}</td>
+                      <td style={{ padding: "8px 9px", textAlign: "center",
+                        color: n0(a.abiertos_ahora) > 0 ? "#b45309" : "var(--texto-tenue)" }}>
+                        {a.abiertos_ahora || "—"}
+                      </td>
+                      <td style={{ padding: "8px 9px", textAlign: "center" }}>{a.mensajes_enviados || "—"}</td>
+                      <td style={{ padding: "8px 9px", textAlign: "center" }}>
+                        {a.primera_resp_min != null ? `${a.primera_resp_min} min` : "—"}
+                      </td>
+                      <td style={{ padding: "8px 9px", textAlign: "center" }}>
+                        {a.cierre_min != null ? `${a.cierre_min} min` : "—"}
+                      </td>
+                      <td style={{ padding: "8px 9px", textAlign: "center", fontWeight: n0(a.reabiertos) ? 700 : 400,
+                        color: n0(a.reabiertos) > 0 ? "#b91c1c" : "var(--texto-tenue)" }}>
+                        {a.reabiertos || "—"}
+                      </td>
+                      <td style={{ padding: "8px 9px", textAlign: "center", fontWeight: n0(a.sin_gestion) ? 700 : 400,
+                        color: n0(a.sin_gestion) > 0 ? "#b45309" : "var(--texto-tenue)" }}>
+                        {a.sin_gestion || "—"}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+
+          <div style={{ fontSize: 10.5, color: "var(--texto-tenue)", marginTop: 10,
+            maxWidth: 800, lineHeight: 1.5 }}>
+            Los tiempos son medianas, no promedios: un caso largo distorsionaría el promedio del
+            día y no diría nada del trabajo. Con pocos tickets estos números son orientativos.
+          </div>
+        </div>
       </div>
 
       {config && (
