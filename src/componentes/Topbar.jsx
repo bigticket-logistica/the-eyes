@@ -72,13 +72,11 @@ export default function Topbar() {
           {/* Salud es una pantalla de infraestructura, no de operación: se
               muestra solo a quien la mantiene. La lista está acá y no en la base
               porque cambia poco y así no hay una consulta más en cada carga. */}
-          {(["camilo.naranjo@bigticket.cl", "camilo.naranjo@bigticket.mx"]
-              .includes((analista?.email || "").toLowerCase())
-            // Respaldo por nombre: si crm_analistas no guarda el email, la
-            // pestaña quedaría invisible sin ninguna señal de por qué.
-            || /camilo\s+naranjo/i.test(analista?.nombre || "")) && (
-            <Tab to="/salud">Salud</Tab>
-          )}
+          {/* Por rol y no por correo en duro: crm_analistas ya tiene rol='admin'.
+              La pestaña oculta es solo comodidad; el bloqueo real está en la
+              propia página y en fn_metricas_analistas, que rechaza a quien no
+              sea admin aunque llame la API directo. */}
+          {analista?.rol === "admin" && <Tab to="/salud">Salud</Tab>}
           <Tab to="/historico">Histórico</Tab>
         </nav>
       </div>
