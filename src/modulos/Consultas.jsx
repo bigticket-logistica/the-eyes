@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { sb } from "../shared/supabase.js";
+import { puedeActuar, esObservador } from "../shared/permisos.js";
 import { useAuth } from "../shared/auth.jsx";
 import { hace, fechaHora, diaMX } from "../shared/fechas.js";
 import { listarConversaciones, mensajesDeConversacion, crearCasoConsulta, conversacionPorTelefono, ventanaAbierta, enviarMensaje, resumenIA, consultarPaquete } from "../shared/mensajes.js";
@@ -896,9 +897,17 @@ export default function Consultas() {
               </>
             ) : haySinCaso ? (
               <div style={{ padding: "11px 16px" }}>
+                {/* Un observador no ve el botón: la base igual lo rechazaría,
+                     pero mostrarlo sería ofrecerle algo que no puede hacer. */}
+                {puedeActuar(analista) ? (
                 <button className="btn-navy" onClick={tomar} disabled={accion} style={{ width: "100%", padding: "10px" }}>
                   {accion ? "Creando ticket…" : "Tomar consulta y crear ticket"}
                 </button>
+                ) : (
+                  <div style={{ padding: "12px", textAlign: "center", fontSize: 12, color: "var(--texto-tenue)" }}>
+                    Solo lectura — puedes ver la conversación pero no tomarla.
+                  </div>
+                )}
                 <div style={{ fontSize: 11, color: "var(--texto-tenue)", textAlign: "center", marginTop: 6 }}>
                   Hay mensajes nuevos sin ticket. Se crea un BT- y empieza el cronómetro.
                 </div>

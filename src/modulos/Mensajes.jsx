@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { sb } from "../shared/supabase.js";
+import { veObservadores, esObservador } from "../shared/permisos.js";
 import { useAuth } from "../shared/auth.jsx";
 import { diaMX, fechaHora } from "../shared/fechas.js";
 import { Link } from "react-router-dom";
@@ -171,13 +172,20 @@ export default function Mensajes() {
     canal
       .on("presence", { event: "sync" }, () => {
         const estado = canal.presenceState();
+        // Un observador conectado condiciona cómo trabaja la gente: se sabe
+        // mirada. Por eso solo un admin lo ve en la lista de conectados.
         const otros = Object.values(estado).flat()
+          .filter((p) => veObservadores(analista) || p.rol !== "observador")
           .map((p) => p.nombre)
           .filter((n) => n && n !== analista.nombre);
         setEnLinea([...new Set(otros)]);
       })
       .subscribe(async (st) => {
-        if (st === "SUBSCRIBED") await canal.track({ nombre: analista.nombre });
+        if (st === "SUBSCRIBED") {
+          // El rol viaja en la presencia para poder filtrar a los observadores:
+          // sin él, el filtro de arriba nunca los reconocería.
+          await canal.track({ nombre: analista.nombre, rol: analista.rol });
+        }
       });
     return () => { sb.removeChannel(canal); };
   }, [analista?.id, analista?.nombre]);

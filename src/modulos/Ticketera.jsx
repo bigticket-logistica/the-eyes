@@ -1,6 +1,7 @@
 import { useEffect, useState, useCallback, useRef } from "react";
 import { useSearchParams } from "react-router-dom";
 import { sb } from "../shared/supabase.js";
+import { puedeActuar } from "../shared/permisos.js";
 import { useAuth } from "../shared/auth.jsx";
 import { esAbierto, motivoLegible } from "../shared/constantes.js";
 import { esDeHoyMX } from "../shared/fechas.js";
@@ -267,6 +268,8 @@ export default function Ticketera() {
   const abiertos = abiertosHoy;
 
   async function tomar(caso) {
+    // La base lo rechazaría igual; se avisa antes para no mostrar un error crudo.
+    if (!puedeActuar(analista)) { alert("Tu usuario es de solo lectura."); return; }
     // ticket ajeno: traspaso declarado (sin panel de contacto)
     if (caso.analista_actual && caso.analista_actual !== analista?.id) {
       const dueno = nombres[caso.analista_actual] || "otro analista";
@@ -293,6 +296,7 @@ export default function Ticketera() {
   // después con otro motivo, el monitor sobrescribe el estado pero la decisión
   // de la torre queda registrada y la divergencia se puede ver.
   async function resolver(caso, cierre, nota) {
+    if (!puedeActuar(analista)) { alert("Tu usuario es de solo lectura."); return; }
     const { error } = await sb.rpc("fn_cerrar_ticket", {
       p_caso_id: caso.id,
       p_cierre: cierre || "CLOSED/FINISHED",
