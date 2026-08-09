@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { estiloPrioridad, motivoLegible, detalleEstado } from "../shared/constantes.js";
 import { hace } from "../shared/fechas.js";
 
@@ -61,11 +62,35 @@ function Tarjeta({ c, seleccionado, onSeleccionar, analistaId, colorBorde, apaga
 }
 
 export default function ColaTickets({ casosHoy = [], cerradosHoy = [], seleccionado, onSeleccionar, analistaId, nombres, consultasLibres = [], onAnidar, totalHoy }) {
-  const { rejas, presentes } = agruparPorReja(casosHoy);
+  const [busqueda, setBusqueda] = useState("");
+
+  // Se busca por número de incidencia, nombre del conductor, ruta o SC: el
+  // analista a veces tiene el número y a veces solo el nombre de quien llamó.
+  const coincide = (c) => {
+    const q = busqueda.trim().toLowerCase();
+    if (!q) return true;
+    const soloDigitos = q.replace(/\D/g, "");
+    return (
+      (soloDigitos && String(c.case_id || "").includes(soloDigitos)) ||
+      String(c.codigo || "").toLowerCase().includes(q) ||
+      String(c.conductor_nombre || "").toLowerCase().includes(q) ||
+      String(c.route_code || "").toLowerCase().includes(q) ||
+      String(c.estacion_origen || "").toLowerCase().includes(q) ||
+      String(c.motivo_label || c.motivo_id || "").toLowerCase().includes(q) ||
+      String(c.shipment_id || "").includes(soloDigitos)
+    );
+  };
+
+  const filtrados = busqueda.trim() ? casosHoy.filter(coincide) : casosHoy;
+  const cerradosFiltrados = busqueda.trim() ? cerradosHoy.filter(coincide) : cerradosHoy;
+  const hayBusqueda = busqueda.trim().length > 0;
+  const encontrados = filtrados.length + cerradosFiltrados.length;
+
+  const { rejas, presentes } = agruparPorReja(filtrados);
   const total = casosHoy.length + cerradosHoy.length;
 
   // cerrados de hoy: mas reciente primero
-  const cerrados = [...cerradosHoy].sort((a, b) => new Date(b.fecha_caso) - new Date(a.fecha_caso));
+  const cerrados = [...cerradosFiltrados].sort((a, b) => new Date(b.fecha_caso) - new Date(a.fecha_caso));
 
   return (
     <div style={{ borderRight: "1px solid var(--borde)", overflowY: "auto", background: "#fff" }}>
@@ -84,6 +109,36 @@ export default function ColaTickets({ casosHoy = [], cerradosHoy = [], seleccion
           title="Total de incidencias del día">
           {(totalHoy ?? (casosHoy.length + cerradosHoy.length))}
         </span>
+      </div>
+
+      {/* Buscador: con más de doscientas incidencias al día, encontrar una por
+          scroll es inviable. Busca por número, conductor, ruta, SC o motivo. */}
+      <div style={{ padding: "8px 14px", borderBottom: "1px solid var(--borde)",
+        position: "sticky", top: 52, background: "#fff", zIndex: 2 }}>
+        <div style={{ position: "relative" }}>
+          <input
+            value={busqueda}
+            onChange={(e) => setBusqueda(e.target.value)}
+            placeholder="Buscar #, conductor, ruta, SC…"
+            style={{ fontSize: 12, padding: "6px 26px 6px 10px" }} />
+          {hayBusqueda && (
+            <button onClick={() => setBusqueda("")}
+              title="Limpiar"
+              style={{
+                position: "absolute", right: 4, top: "50%", transform: "translateY(-50%)",
+                border: "none", background: "transparent", fontSize: 13,
+                color: "var(--texto-tenue)", padding: "2px 5px", lineHeight: 1,
+              }}>✕</button>
+          )}
+        </div>
+        {hayBusqueda && (
+          <div style={{ fontSize: 10.5, color: encontrados ? "var(--texto-suave)" : "#b45309",
+            marginTop: 5 }}>
+            {encontrados === 0
+              ? "Sin coincidencias en las incidencias de hoy"
+              : `${encontrados} de ${casosHoy.length + cerradosHoy.length}`}
+          </div>
+        )}
       </div>
 
       {/* ANIDAR CONSULTA: une un ticket de Consultas en ruta a esta incidencia */}
