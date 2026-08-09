@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { sb } from "../shared/supabase.js";
 import { diaMX } from "../shared/fechas.js";
+import { useAuth } from "../shared/auth.jsx";
 
 // ═══════════════════════════════════════════════════════════════════════════
 // SALUD · torre de control de The Eyes
@@ -59,6 +60,7 @@ function Barra({ valor, max, color }) {
 }
 
 export default function Salud() {
+  const { analista } = useAuth();
   const [alertas, setAlertas] = useState([]);
   const [horas, setHoras] = useState([]);
   const [fallos, setFallos] = useState([]);
@@ -111,6 +113,18 @@ export default function Salud() {
   const totalEntrantes = horas.reduce((s, h) => s + n0(h.entrantes), 0);
   const totalBiggy = horas.reduce((s, h) => s + n0(h.resp_biggy), 0);
   const conFallos = fallos.filter((f) => n0(f.cuantos) > 0);
+
+  // Ocultar la pestaña no basta: alguien puede escribir /salud en la barra de
+  // direcciones. Acá se bloquea de verdad, y fn_metricas_analistas lo rechaza
+  // también del lado del servidor.
+  if (analista && analista.rol !== "admin") {
+    return (
+      <div style={{ padding: 40, textAlign: "center", color: "var(--texto-suave)" }}>
+        <div style={{ fontSize: 15, fontWeight: 600, marginBottom: 6 }}>Sin acceso</div>
+        <div style={{ fontSize: 13 }}>Esta sección es solo para administradores.</div>
+      </div>
+    );
+  }
 
   return (
     <div style={{ height: "100%", overflowY: "auto", padding: 18, background: "var(--fondo)" }}>
