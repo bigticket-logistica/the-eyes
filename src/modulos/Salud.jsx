@@ -67,19 +67,24 @@ export default function Salud() {
   const [config, setConfig] = useState(null);
   const [analistas, setAnalistas] = useState([]);
   const [resumen, setResumen] = useState(null);
+  const [tickets, setTickets] = useState([]);
+  const [soloAbiertos, setSoloAbiertos] = useState(false);
+  const [kpi, setKpi] = useState(null);
   const [fecha, setFecha] = useState(diaMX());
   const [error, setError] = useState(null);
   const [actualizado, setActualizado] = useState(null);
 
   const cargar = useCallback(async () => {
     setError(null);
-    const [a, h, f, c, an, re] = await Promise.all([
+    const [a, h, f, c, an, re, tk, kp] = await Promise.all([
       sb.rpc("fn_salud_alertas"),
       sb.rpc("fn_biggy_salud", { p_fecha: fecha }),
       sb.rpc("fn_biggy_fallos", { p_dias: 3 }),
       sb.from("biggy_config").select("*").eq("id", 1).maybeSingle(),
       sb.rpc("fn_metricas_analistas", { p_desde: fecha, p_hasta: fecha }),
       sb.rpc("fn_resumen_operacion", { p_fecha: fecha }),
+      sb.rpc("fn_detalle_tickets", { p_fecha: fecha, p_solo_abiertos: soloAbiertos }),
+      sb.rpc("fn_kpi_dia", { p_fecha: fecha }),
     ]);
     const err = a.error || h.error || f.error;
     if (err) {
@@ -94,8 +99,10 @@ export default function Salud() {
     setConfig(c.data || null);
     setAnalistas(an.data || []);
     setResumen(Array.isArray(re.data) ? re.data[0] : re.data);
+    setTickets(tk.data || []);
+    setKpi(Array.isArray(kp.data) ? kp.data[0] : kp.data);
     setActualizado(new Date());
-  }, [fecha]);
+  }, [fecha, soloAbiertos]);
 
   useEffect(() => { cargar(); }, [cargar]);
 
@@ -395,6 +402,131 @@ export default function Salud() {
             día y no diría nada del trabajo. Con pocos tickets estos números son orientativos.
           </div>
         </div>
+      </div>
+
+      {/* ══ DETALLE POR TICKET ══
+          Los promedios esconden los casos que importan. Acá va la fila: cuándo
+          se abrió, cuándo se cerró, cuánto duró. En los abiertos la duración es
+          cuánto llevan ESPERANDO, que es el dato que importa de un ticket sin
+          cerrar. */}
+      <div style={{ background: "#fff", border: "1px solid var(--borde)", borderRadius: 12,
+        padding: 16, marginTop: 16 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap", marginBottom: 10 }}>
+          <div style={{ flex: 1, minWidth: 200 }}>
+            <div style={{ fontSize: 14, fontWeight: 600 }}>Tickets</div>
+            <div style={{ fontSize: 11.5, color: "var(--texto-suave)", marginTop: 2 }}>
+              {soloAbiertos
+                ? "Todos los que siguen abiertos, sin importar el día."
+                : `Abiertos o cerrados el ${fecha}.`}
+              {" "}En los abiertos, la duración es cuánto llevan esperando.
+            </div>
+          </div>
+          <button onClick={() => setSoloAbiertos(!soloAbiertos)}
+            style={{
+              fontSize: 11.5, padding: "6px 12px", borderRadius: 20, whiteSpace: "nowrap",
+              border: `1px solid ${soloAbiertos ? "var(--navy)" : "var(--borde)"}`,
+              background: soloAbiertos ? "#eef2f7" : "#fff",
+              fontWeight: soloAbiertos ? 600 : 400,
+            }}>
+            {soloAbiertos ? "Ver los del día" : "Solo abiertos"}
+          </button>
+        </div>
+
+        {kpi && (
+          <div style={{ display: "flex", gap: 14, flexWrap: "wrap", marginBottom: 12,
+            fontSize: 11.5, color: "var(--texto-suave)" }}>
+            <span><b style={{ color: "var(--navy)" }}>{n0(kpi.tickets)}</b> tickets</span>
+            <span><b style={{ color: "#15803d" }}>{n0(kpi.cerrados)}</b> cerrados</span>
+            <span><b style={{ color: n0(kpi.abiertos) ? "#b45309" : "var(--texto-tenue)" }}>
+              {n0(kpi.abiertos)}</b> abiertos</span>
+            {kpi.duracion_mediana_min != null && (
+              <span>duración mediana <b>{kpi.duracion_mediana_min} min</b></span>
+            )}
+            {kpi.biggy_exito_pct != null && (
+              <span title="Respuestas que no escalaron y no necesitaron que un humano interviniera después">
+                Biggy resolvió solo <b style={{ color: "#1a5fb4" }}>{kpi.biggy_exito_pct}%</b>
+                {" "}({n0(kpi.biggy_exitosas)} de {n0(kpi.resp_biggy)})
+              </span>
+            )}
+          </div>
+        )}
+
+        {tickets.length === 0 ? (
+          <div style={{ fontSize: 12.5, color: "var(--texto-tenue)", padding: "14px 0" }}>
+            {soloAbiertos ? "No hay tickets abiertos." : "Sin tickets ese día."}
+          </div>
+        ) : (
+          <div style={{ overflowX: "auto", maxHeight: 460, overflowY: "auto" }}>
+            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 11.5 }}>
+              <thead style={{ position: "sticky", top: 0, zIndex: 1 }}>
+                <tr style={{ background: "var(--navy)", color: "#fff" }}>
+                  {["Ticket", "Conductor", "SC", "Atendido por", "Abierto",
+                    "Cerrado", "Duración", "Msj", "Motivo de cierre"].map((h, i) => (
+                    <th key={h} style={{ padding: "7px 9px", fontSize: 10.5, fontWeight: 600,
+                      textAlign: [6,7].includes(i) ? "center" : "left", whiteSpace: "nowrap" }}>{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {tickets.map((t) => {
+                  const dur = n0(t.duracion_min);
+                  // Un ticket abierto hace más de 2 h pide atención; más de 8, urgencia.
+                  const colorDur = !t.abierto ? "var(--texto)"
+                    : dur > 480 ? "#b91c1c" : dur > 120 ? "#b45309" : "var(--texto-suave)";
+                  return (
+                    <tr key={t.caso_id} style={{
+                      borderBottom: "1px solid var(--borde)",
+                      background: t.abierto ? "#fffdf7" : "transparent",
+                    }}>
+                      <td style={{ padding: "7px 9px", fontWeight: 600, whiteSpace: "nowrap" }}>
+                        {t.codigo || `#${t.case_id}`}
+                        {t.abierto && (
+                          <span style={{ fontSize: 9.5, color: "#b45309", fontWeight: 400 }}> · abierto</span>
+                        )}
+                      </td>
+                      <td style={{ padding: "7px 9px" }}>
+                        {t.conductor}
+                        <div style={{ fontSize: 10, color: "var(--texto-tenue)" }}>{t.telefono}</div>
+                      </td>
+                      <td style={{ padding: "7px 9px" }}>{t.sc || "—"}</td>
+                      <td style={{ padding: "7px 9px", color: t.es_biggy ? "#1a5fb4" : "inherit",
+                        fontWeight: t.es_biggy ? 600 : 400 }}>
+                        {t.atendido_por}
+                      </td>
+                      <td style={{ padding: "7px 9px", whiteSpace: "nowrap",
+                        fontVariantNumeric: "tabular-nums" }}>{t.abierto_en}</td>
+                      <td style={{ padding: "7px 9px", whiteSpace: "nowrap",
+                        fontVariantNumeric: "tabular-nums",
+                        color: t.cerrado_en ? "#15803d" : "var(--texto-tenue)" }}>
+                        {t.cerrado_en || "—"}
+                      </td>
+                      <td style={{ padding: "7px 9px", textAlign: "center", fontWeight: 600,
+                        color: colorDur, whiteSpace: "nowrap" }}>
+                        {dur >= 60 ? `${(dur / 60).toFixed(1)} h` : `${dur} min`}
+                      </td>
+                      <td style={{ padding: "7px 9px", textAlign: "center" }}>
+                        {t.mensajes || "—"}
+                        {n0(t.respuestas_biggy) > 0 && (
+                          <div style={{ fontSize: 9.5, color: "#1a5fb4" }}>
+                            {t.respuestas_biggy} de Biggy
+                          </div>
+                        )}
+                      </td>
+                      <td style={{ padding: "7px 9px", fontSize: 11 }}>
+                        {t.motivo_cierre || (t.abierto ? "" : "—")}
+                        {t.cerrado_por && (
+                          <div style={{ fontSize: 9.5, color: "var(--texto-tenue)" }}>
+                            por {t.cerrado_por}
+                          </div>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
       </div>
 
       {config && (
