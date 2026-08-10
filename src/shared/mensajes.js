@@ -1,5 +1,81 @@
 import { sb } from "./supabase.js";
 
+// ═══════════════════════════════════════════════════════════════════════════
+// EL ERROR REAL DE UNA EDGE FUNCTION
+//
+// sb.functions.invoke tira un error genérico —"Edge Function returned a non-2xx
+// status code"— y guarda la respuesta de verdad en error.context, que nadie
+// leía. Por eso el 10 de agosto una analista vio "non-2xx" y tuvimos que
+// revisar tres servidores para descubrir que el motivo estaba ahí adentro.
+//
+// El servicio wa-enviar del VPS ya devuelve { error, codigo, motivo } con el
+// motivo en castellano. Esto solo hay que sacarlo del sobre.
+//
+// El 401 y el 403 los produce la propia Edge Function ANTES de llamar al VPS:
+// sesión vencida y usuario que no está en crm_analistas. Son los dos que dejan
+// cero rastro en los logs del servidor, y los que más confunden.
+// ═══════════════════════════════════════════════════════════════════════════
+async function detalleError(error, quePasaba = "enviar el mensaje") {
+  let status = null, cuerpo = null;
+
+  try {
+    const ctx = error?.context;
+    if (ctx && typeof ctx.text === "function") {          // es un Response
+      status = ctx.status ?? null;
+      const txt = await ctx.text();
+      try { cuerpo = JSON.parse(txt); } catch { cuerpo = txt ? { error: txt } : null; }
+    } else if (ctx && typeof ctx === "object") {
+      status = ctx.status ?? null;
+      cuerpo = ctx.body ?? ctx;
+    }
+  } catch { /* si no se puede leer, se cae al mensaje genérico */ }
+
+  // Lo que dice el servicio, que ya viene explicado para una persona.
+  const motivo = cuerpo?.motivo || cuerpo?.error || null;
+
+  if (status === 401) {
+    return new Error("Tu sesión expiró. Recarga la página (F5) y vuelve a intentar.");
+  }
+  if (status === 403) {
+    return new Error("Tu usuario no está habilitado como analista. Avisa a Camilo para que lo revise.");
+  }
+  if (status === 503) {
+    return new Error(motivo || "WhatsApp no respondió a tiempo. Revisa el hilo antes de reenviar: el mensaje puede haber salido.");
+  }
+  if (motivo) return new Error(motivo);
+  if (status) return new Error(`No se pudo ${quePasaba} (error ${status}). Reintenta en unos segundos.`);
+  return new Error(error?.message || `No se pudo ${quePasaba}.`);
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// LLAVE DE IDEMPOTENCIA
+//
+// El servicio del VPS sabe respetar una llave y no reenviar dos veces el mismo
+// mensaje, pero hasta ahora nadie se la mandaba. Esta es la mitad que faltaba.
+//
+// La regla: mientras un envío FALLE, el reintento del MISMO texto al MISMO
+// teléfono reusa la llave, así que si el primer intento sí llegó a Meta y solo
+// se perdió la respuesta, el conductor no recibe el mensaje dos veces.
+//
+// En cuanto un envío tiene éxito la llave se descarta. Eso es a propósito: si
+// la analista escribe "ok" dos veces a conciencia, tienen que salir los dos.
+// Una llave determinística por texto habría silenciado el segundo.
+// ═══════════════════════════════════════════════════════════════════════════
+const intentos = new Map();
+const VENTANA_IDEM = 2 * 60 * 1000;
+
+function llaveIdem(clave) {
+  const prev = intentos.get(clave);
+  if (prev && Date.now() - prev.ts < VENTANA_IDEM) return prev.idem;
+  const idem = (crypto?.randomUUID ? crypto.randomUUID() : String(Date.now()) + Math.random());
+  intentos.set(clave, { idem, ts: Date.now() });
+  if (intentos.size > 300) {
+    const corte = Date.now() - VENTANA_IDEM;
+    for (const [k, v] of intentos) if (v.ts < corte) intentos.delete(k);
+  }
+  return idem;
+}
+
 // Trae los mensajes de un caso (el hilo), en orden cronológico.
 // Lee de crm_inc_mensajes ligados al case_id.
 export async function mensajesDelCaso(caseId) {
@@ -63,11 +139,19 @@ export async function enviarMensaje({ telefono, texto, caseId, emisorId, plantil
   const plt = plantilla
     ? { ...plantilla, variables: (plantilla.variables || []).map(aplanar) }
     : null;
+  // Misma llave mientras el intento anterior del mismo texto haya fallado.
+  const clave = `${String(telefono).replace(/\D/g, "")}|${caseId ?? ""}|${texto ?? ""}|${plt?.nombre ?? ""}`;
+  const idem = llaveIdem(clave);
+
   const { data, error } = await sb.functions.invoke("whatsapp-enviar", {
-    body: { telefono, texto, case_id: caseId, emisor: "analista", emisor_id: emisorId, plantilla: plt },
+    body: { telefono, texto, case_id: caseId, emisor: "analista", emisor_id: emisorId, plantilla: plt, idem },
   });
-  if (error) throw error;
-  if (!data || data.ok === false) throw new Error(data?.error || "No se pudo enviar");
+  if (error) throw await detalleError(error, "enviar el mensaje");
+  if (!data || data.ok === false) {
+    throw new Error(data?.motivo || data?.error || "No se pudo enviar el mensaje.");
+  }
+  // Salió: la llave se descarta para que un mensaje idéntico posterior sí viaje.
+  intentos.delete(clave);
   return data;
 }
 
@@ -156,8 +240,13 @@ export async function enviarCorreoCliente({ caseId, casoId, destinatario, asunto
   const { data, error } = await sb.functions.invoke("correo-cliente", {
     body: { case_id: caseId, caso_id: casoId, destinatario, asunto, cuerpo, plantilla },
   });
-  if (error) throw new Error("No se pudo enviar el correo. Reintenta en unos segundos.");
-  if (!data || data.ok === false) throw new Error(data?.error || "No se pudo enviar el correo");
+  // Tenía el mismo problema que el envío de WhatsApp: tapaba el motivo real
+  // con un mensaje genérico, así que un correo rechazado por dirección
+  // inválida se veía igual que un servidor caído.
+  if (error) throw await detalleError(error, "enviar el correo");
+  if (!data || data.ok === false) {
+    throw new Error(data?.motivo || data?.error || "No se pudo enviar el correo.");
+  }
   return data;
 }
 
@@ -239,7 +328,9 @@ export async function enviarAdjunto({ file, telefono, caseId, conversacionId, ca
       conversacion_id: conversacionId || null,
     },
   });
-  if (error) throw error;
-  if (!data || data.ok === false) throw new Error(data?.error || "No se pudo enviar el adjunto");
+  if (error) throw await detalleError(error, "enviar el adjunto");
+  if (!data || data.ok === false) {
+    throw new Error(data?.motivo || data?.error || "No se pudo enviar el adjunto.");
+  }
   return data;
 }
