@@ -1095,11 +1095,16 @@ export default function Consultas() {
     // mensajes llegados mucho después. Caso real de ulises morales: el ticket
     // se cerró 11:35 y la línea aparecía tras las fotos de 13:13, como si se
     // hubiera cerrado casi dos horas más tarde.
+    // Sin fecha de cierre → Infinity, así caen al final en vez de desaparecer.
+    // Descartarlos habría sido peor que el problema original: un separador mal
+    // ubicado confunde, uno ausente hace creer que el ticket sigue abierto.
     const cierres = Object.values(casos || {})
       .filter((c) => c && c.origen !== "meli" && !ABIERTOS.includes(c.estado_id))
-      .map((c) => ({ c, en: c.resuelto_en || c.cierre_local_en || null }))
-      .filter((x) => x.en)
-      .sort((a, b) => new Date(a.en) - new Date(b.en));
+      .map((c) => {
+        const en = c.resuelto_en || c.cierre_local_en || null;
+        return { c, en, t: en ? new Date(en).getTime() : Infinity };
+      })
+      .sort((a, b) => a.t - b.t);
     let ic = 0;
 
     function dibujarCierre(x) {
@@ -1115,9 +1120,12 @@ export default function Consultas() {
       out.push(<Burbuja key={m.id} m={m} />);
 
       // Todo cierre ocurrido entre este mensaje y el siguiente va acá.
-      const sigEn = mensajes[i + 1]?.creado_en;
-      while (ic < cierres.length && new Date(cierres[ic].en) <= new Date(m.creado_en)) ic++;
-      while (ic < cierres.length && (!sigEn || new Date(cierres[ic].en) < new Date(sigEn))) {
+      // Se compara en milisegundos y no con objetos Date: new Date(null) da
+      // 1970 y un cierre sin fecha se habría dibujado al principio del hilo.
+      const tMsg = new Date(m.creado_en).getTime();
+      const tSig = mensajes[i + 1] ? new Date(mensajes[i + 1].creado_en).getTime() : null;
+      while (ic < cierres.length && cierres[ic].t <= tMsg) ic++;          // ya pasado
+      while (ic < cierres.length && tSig !== null && cierres[ic].t < tSig) {
         dibujarCierre(cierres[ic]); ic++;
       }
 
