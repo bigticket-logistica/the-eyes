@@ -26,9 +26,23 @@ import { useSearchParams } from "react-router-dom";
 
 const ABIERTOS = ["NEW", "OPEN", "ON_HOLD", "CHECKING"];
 
-function LineaCierre({ codigo, anidadoEn, caso, analistaId, onReabrir }) {
+// Solo la hora, para el sello del separador de cierre: fechaHora trae la fecha
+// completa y en el hilo de un día sobra.
+const hora = (t) => {
+  try {
+    return new Date(t).toLocaleTimeString("es-CL", { hour: "2-digit", minute: "2-digit" });
+  } catch { return ""; }
+};
+
+function LineaCierre({ codigo, anidadoEn, caso, analistaId, onReabrir, cerradoPor }) {
   const color = anidadoEn ? "#1a3a6b" : "#16a34a";
-  const texto = anidadoEn ? `↩ ${codigo} anidado en la incidencia #${anidadoEn}` : `✓ ${codigo} resuelto`;
+  // Quién cerró y a qué hora, en la propia línea. Sin el sello no se podía
+  // saber si un mensaje de arriba llegó antes o después del cierre.
+  const cuando = caso?.resuelto_en || caso?.cierre_local_en || null;
+  const sello = [cerradoPor, cuando ? hora(cuando) : null].filter(Boolean).join(" · ");
+  const texto = anidadoEn
+    ? `↩ ${codigo} anidado en la incidencia #${anidadoEn}`
+    : `✓ ${codigo} resuelto${sello ? ` · ${sello}` : ""}`;
   return (
     <div style={{ display: "flex", alignItems: "center", gap: 8, margin: "14px 0 6px" }}>
       <div style={{ flex: 1, height: 2, background: color, opacity: 0.45 }} />
@@ -1073,9 +1087,40 @@ export default function Consultas() {
 
   function renderHilo() {
     const out = [];
+
+    // Cierres pendientes de dibujar, ordenados por su HORA REAL de cierre.
+    // Antes el separador se insertaba cuando cambiaba el case_id, y eso lo
+    // ubicaba mal: Biggy le cuelga sus borradores al ticket incluso ya cerrado,
+    // así que un borrador posterior arrastraba la línea verde por debajo de
+    // mensajes llegados mucho después. Caso real de ulises morales: el ticket
+    // se cerró 11:35 y la línea aparecía tras las fotos de 13:13, como si se
+    // hubiera cerrado casi dos horas más tarde.
+    const cierres = Object.values(casos || {})
+      .filter((c) => c && c.origen !== "meli" && !ABIERTOS.includes(c.estado_id))
+      .map((c) => ({ c, en: c.resuelto_en || c.cierre_local_en || null }))
+      .filter((x) => x.en)
+      .sort((a, b) => new Date(a.en) - new Date(b.en));
+    let ic = 0;
+
+    function dibujarCierre(x) {
+      const c = x.c;
+      const por = c.cierre_local_por ? nombresAnalistas[c.cierre_local_por] : null;
+      out.push(<LineaCierre key={`cierre-${c.case_id}`} codigo={c.codigo || "#" + c.case_id}
+        anidadoEn={c.anidado_en_case_id || null}
+        caso={c} analistaId={analista?.id} onReabrir={reabrir} cerradoPor={por} />);
+    }
+
     for (let i = 0; i < mensajes.length; i++) {
       const m = mensajes[i];
       out.push(<Burbuja key={m.id} m={m} />);
+
+      // Todo cierre ocurrido entre este mensaje y el siguiente va acá.
+      const sigEn = mensajes[i + 1]?.creado_en;
+      while (ic < cierres.length && new Date(cierres[ic].en) <= new Date(m.creado_en)) ic++;
+      while (ic < cierres.length && (!sigEn || new Date(cierres[ic].en) < new Date(sigEn))) {
+        dibujarCierre(cierres[ic]); ic++;
+      }
+
       const cid = m.case_id;
       const sig = mensajes[i + 1];
       const cambiaTicket = !sig || sig.case_id !== cid;
@@ -1092,13 +1137,15 @@ export default function Consultas() {
         if (c.origen === "meli" && anidadoDeVerdad) {
           // tramo anidado: la conversación se gestiona desde Incidencias
           out.push(<LineaCierre key={`anid-${cid}`} codigo={"Conversación"} anidadoEn={cid} />);
-        } else if (c.origen !== "meli" && !ABIERTOS.includes(c.estado_id)) {
-          out.push(<LineaCierre key={`cierre-${cid}`} codigo={c.codigo || "#" + cid}
-            anidadoEn={c.anidado_en_case_id || null}
-            caso={c} analistaId={analista?.id} onReabrir={reabrir} />);
         }
+        // El separador de cierre ya no se dibuja acá: lo hace el bloque de
+        // arriba, ubicado por hora real. Solo queda el de anidado, que sí
+        // depende del tramo de mensajes y no de un instante.
       }
     }
+    // Cierres sin ningún mensaje posterior —lo normal cuando nadie escribió
+    // después— van al final del hilo.
+    while (ic < cierres.length) { dibujarCierre(cierres[ic]); ic++; }
     return out;
   }
 
