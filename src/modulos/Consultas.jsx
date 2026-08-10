@@ -105,6 +105,35 @@ const ESTADO_PKG = {
   delivered: "Entregado", on_route: "En ruta", not_delivered: "No entregado",
   to_be_dispatched: "Por despachar", at_the_door: "En la puerta",
 };
+// Los teléfonos se comparan SIEMPRE por los últimos 10 dígitos: Meta los manda
+// con código de país, MELI repite el mismo número con y sin él, y las tablas los
+// guardan en formatos distintos.
+const t10 = (v) => String(v || "").replace(/\D/g, "").slice(-10);
+
+// Contactos de una incidencia en una sola forma.
+// fn_incidencias_de_guia ya devuelve comprador_telefonos como arreglo (y en los
+// casos viejos lo sintetiza desde el escalar), pero se tolera el nulo por si
+// quedara corriendo una versión anterior de la función.
+function telefonosDe(i) {
+  const arr = Array.isArray(i.comprador_telefonos) ? i.comprador_telefonos : [];
+  const lista = arr
+    .map((c) => ({ numero: String(c?.numero || "").trim(), etiqueta: c?.etiqueta || null }))
+    .filter((c) => c.numero);
+  if (!lista.length && i.comprador_telefono) {
+    lista.push({ numero: String(i.comprador_telefono), etiqueta: null });
+  }
+  // MELI trae el mismo número dos veces, con y sin código de país ("Registro"
+  // repite el del "Segundo factor"). Se deduplica por los últimos 10 dígitos y
+  // se conserva la primera etiqueta, que es la más específica.
+  const vistos = new Set();
+  return lista.filter((c) => {
+    const k = t10(c.numero);
+    if (!k || vistos.has(k)) return false;
+    vistos.add(k);
+    return true;
+  });
+}
+
 function BuscadorPaquete({ onPasarAlChofer }) {
   const [id, setId] = useState("");
   const [pkg, setPkg] = useState(null);
@@ -140,12 +169,32 @@ function BuscadorPaquete({ onPasarAlChofer }) {
   const refIncidencia = incidencias.find((i) => i.referencia)?.referencia;
   const fallosPrevios = incidencias.length;
 
+  // Números que guardaron las incidencias y que MELI NO devuelve. Son los que
+  // le faltan al conductor: MELI entrega un solo contacto ("Quien recibe"),
+  // mientras la incidencia guarda también el segundo factor de verificación.
+  const telsExtra = (() => {
+    const vistos = new Set([t10(pkg?.comprador?.telefono)].filter(Boolean));
+    const out = [];
+    for (const i of incidencias) {
+      for (const c of telefonosDe(i)) {
+        const k = t10(c.numero);
+        if (!k || vistos.has(k)) continue;
+        vistos.add(k);
+        out.push(c);
+      }
+    }
+    return out;
+  })();
+
   const textoChofer = pkg ? [
     `📦 Paquete ${pkg.id}`,
     pkg.comprador?.nombre ? `Cliente: ${pkg.comprador.nombre}` : null,
     pkg.comprador?.telefono ? `Tel: ${pkg.comprador.telefono}` : null,
     pkg.comprador?.direccion ? `Dirección: ${pkg.comprador.direccion}` : null,
     pkg.comprador?.comentario ? `Referencia: ${pkg.comprador.comentario}` : null,
+    // Un solo número y sin respuesta es un intento perdido: van todos.
+    ...telsExtra.map((c) =>
+      `Tel alternativo${c.etiqueta ? ` (${c.etiqueta})` : ""}: ${c.numero}`),
     refIncidencia && refIncidencia !== pkg.comprador?.comentario
       ? `Dato adicional: ${refIncidencia}` : null,
     fallosPrevios > 1
@@ -213,7 +262,16 @@ function BuscadorPaquete({ onPasarAlChofer }) {
             </div>
           )}
 
-          {incidencias.map((i) => (
+          {incidencias.map((i) => {
+            const tels = telefonosDe(i);
+            // "Distinto al de MELI" ya no aplica número por número. Con dos
+            // contactos legítimos guardados, la pregunta correcta es si el de
+            // MELI está ENTRE ellos: si está, no hay discrepancia (antes se
+            // marcaba ámbar sin motivo). Si no está, ninguno de los guardados es
+            // el vigente y hay que probarlos todos.
+            const telMeli = t10(pkg?.comprador?.telefono);
+            const meliCalza = !telMeli || tels.some((c) => t10(c.numero) === telMeli);
+            return (
             <div key={i.case_id} style={{
               padding: "5px 0", borderTop: "1px dashed rgba(0,0,0,.12)", lineHeight: 1.5,
             }}>
@@ -235,29 +293,46 @@ function BuscadorPaquete({ onPasarAlChofer }) {
                 {i.conductor ? ` · ${i.conductor}` : ""}
               </div>
 
-              {/* Datos del comprador guardados en la incidencia. Se muestran
-                  siempre que existan, y se DESTACA cuando el teléfono difiere
-                  del que devuelve MELI: eso significa que uno de los dos está
-                  desactualizado y conviene probar ambos. */}
-              {(i.comprador_nombre || i.comprador_telefono) && (
+              {/* Datos del comprador guardados en la incidencia.
+                  MELI da UN contacto por paquete ("Quien recibe"); la incidencia
+                  guarda la tabla completa, con el segundo factor de verificación.
+                  Se muestran TODOS con su etiqueta: un solo número que no
+                  contesta es un intento de entrega perdido. */}
+              {(i.comprador_nombre || tels.length > 0 || i.comprador_mail) && (
                 <div style={{ marginTop: 4, padding: "5px 8px", background: "#fff",
                   border: "1px solid var(--borde)", borderRadius: 6, fontSize: 11.5 }}>
                   {i.comprador_nombre && (
                     <div><span style={{ color: "var(--texto-suave)" }}>Cliente:</span>{" "}
                       {i.comprador_nombre}</div>
                   )}
-                  {i.comprador_telefono && (
+                  {tels.length > 0 && (
                     <div>
-                      <span style={{ color: "var(--texto-suave)" }}>Teléfono:</span>{" "}
-                      <b>{i.comprador_telefono}</b>
-                      {pkg?.comprador?.telefono &&
-                        String(pkg.comprador.telefono).replace(/\D/g, "").slice(-10) !==
-                        String(i.comprador_telefono).replace(/\D/g, "").slice(-10) && (
-                        <span style={{ fontSize: 10, color: "#b45309", marginLeft: 5 }}>
-                          distinto al de MELI
-                        </span>
+                      <span style={{ color: "var(--texto-suave)" }}>
+                        {tels.length > 1 ? "Teléfonos:" : "Teléfono:"}
+                      </span>
+                      {tels.map((c) => (
+                        <div key={c.numero} style={{ paddingLeft: 2 }}>
+                          <b style={{ fontVariantNumeric: "tabular-nums" }}>{c.numero}</b>
+                          {c.etiqueta && (
+                            <span style={{ fontSize: 10, color: "var(--texto-tenue)" }}>
+                              {" "}· {c.etiqueta}
+                            </span>
+                          )}
+                          {telMeli && t10(c.numero) === telMeli && (
+                            <span style={{ fontSize: 10, color: "#15803d" }}> · vigente en MELI</span>
+                          )}
+                        </div>
+                      ))}
+                      {!meliCalza && (
+                        <div style={{ fontSize: 10, color: "#b45309" }}>
+                          MELI devuelve otro número: prueba los {tels.length + 1}.
+                        </div>
                       )}
                     </div>
+                  )}
+                  {i.comprador_mail && (
+                    <div><span style={{ color: "var(--texto-suave)" }}>Correo:</span>{" "}
+                      {i.comprador_mail}</div>
                   )}
                   {i.referencia && (
                     <div style={{ fontStyle: "italic", color: "var(--texto-suave)" }}>
@@ -271,7 +346,13 @@ function BuscadorPaquete({ onPasarAlChofer }) {
                     <button onClick={() => onPasarAlChofer([
                       `📦 Paquete ${id.replace(/\D/g, "")}`,
                       i.comprador_nombre ? `Cliente: ${i.comprador_nombre}` : null,
-                      i.comprador_telefono ? `Tel: ${i.comprador_telefono}` : null,
+                      // Todos los números, con etiqueta cuando hay más de uno.
+                      // El correo NO va: el conductor no le escribe mails al
+                      // comprador, y es un dato personal de más en WhatsApp.
+                      ...(tels.length === 1
+                        ? [`Tel: ${tels[0].numero}`]
+                        : tels.map((c) =>
+                            `Tel${c.etiqueta ? ` (${c.etiqueta})` : ""}: ${c.numero}`)),
                       i.referencia ? `Referencia: ${i.referencia}` : null,
                     ].filter(Boolean).join("\n"))}
                       style={{ marginTop: 5, fontSize: 11, padding: "4px 10px" }}>
@@ -283,13 +364,14 @@ function BuscadorPaquete({ onPasarAlChofer }) {
 
               {/* Sin datos guardados: se dice por qué, en vez de dejar el hueco.
                   Los casos anteriores al 10 de agosto no se enriquecieron. */}
-              {!i.comprador_nombre && !i.comprador_telefono && (
+              {!i.comprador_nombre && tels.length === 0 && (
                 <div style={{ fontSize: 10, color: "var(--texto-tenue)", fontStyle: "italic" }}>
                   Sin datos del comprador guardados en esta incidencia
                 </div>
               )}
             </div>
-          ))}
+            );
+          })}
         </div>
       )}
 
@@ -1211,4 +1293,3 @@ export default function Consultas() {
     </div>
   );
 }
-
