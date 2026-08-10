@@ -115,6 +115,9 @@ function Adjunto({ m }) {
             marginTop: 4, cursor: "zoom-in", border: "1px solid var(--borde)",
           }}
         />
+        <a href={url} download style={{ fontSize: 11, color: "var(--naranja)", display: "block", marginTop: 2 }}>
+          Descargar imagen ↓ {pesoLegible(m.media_bytes)}
+        </a>
         {ampliada && (
           <div
             onClick={() => setAmpliada(false)}
@@ -145,7 +148,21 @@ function Adjunto({ m }) {
   }
 
   if (m.tipo_contenido === "video") {
-    return <video controls src={url} style={{ maxWidth: 280, borderRadius: 8, marginTop: 4, display: "block" }} />;
+    return (
+      <div style={{ marginTop: 4 }}>
+        {/* WhatsApp entrega MP4/H.264, que reproduce cualquier navegador.
+            preload="metadata" para no bajar el video completo al abrir el hilo:
+            un video de ruta pesa más de 1 MB y hay varios por conversación. */}
+        <video controls preload="metadata" src={url}
+          style={{ maxWidth: 280, borderRadius: 8, display: "block", border: "1px solid var(--borde)" }} />
+        {/* Descargar es imprescindible acá: un video de una hora de ruta se
+            revisa mejor fuera del navegador, y a veces hay que adjuntarlo a un
+            reporte o mandárselo a un supervisor. */}
+        <a href={url} download style={{ fontSize: 11, color: "var(--naranja)", display: "block", marginTop: 2 }}>
+          Descargar video ↓ {pesoLegible(m.media_bytes)}
+        </a>
+      </div>
+    );
   }
 
   // documento y cualquier otro tipo
