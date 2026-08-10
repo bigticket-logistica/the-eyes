@@ -1,3 +1,4 @@
+import { useState, useRef, useEffect } from "react";
 import { useAuth } from "../shared/auth.jsx";
 import { NavLink } from "react-router-dom";
 import { useAlertas } from "../shared/alertas.jsx";
@@ -27,9 +28,90 @@ function Tab({ to, children, badge }) {
   );
 }
 
+// ── Panel de sonido, detrás de la campana ──────────────────────────────────
+// Antes la campana era solo encendido/apagado. El volumen tiene que poder
+// ajustarse: en una torre con ruido "normal" no alcanza, y en una oficina
+// callada "fuerte" molesta. Se prueba al elegir — sin escucharlo no hay forma
+// de calibrarlo.
+const OPCIONES = [
+  { clave: "silencio", etiqueta: "Silencio", pista: "sin ningún aviso" },
+  { clave: "suave",    etiqueta: "Suave",    pista: "oficina callada" },
+  { clave: "normal",   etiqueta: "Normal",   pista: "recomendado" },
+  { clave: "fuerte",   etiqueta: "Fuerte",   pista: "torre con ruido" },
+];
+
+function PanelSonido({ nivelSonido, setNivelSonido, sonidoActivo, setSonidoActivo, probarSonido }) {
+  const [abierto, setAbierto] = useState(false);
+  const caja = useRef(null);
+
+  // Cerrar al hacer clic afuera. Sin esto el panel queda pegado y tapa las
+  // pestañas de la derecha.
+  useEffect(() => {
+    if (!abierto) return;
+    const fuera = (e) => { if (caja.current && !caja.current.contains(e.target)) setAbierto(false); };
+    document.addEventListener("pointerdown", fuera);
+    return () => document.removeEventListener("pointerdown", fuera);
+  }, [abierto]);
+
+  const actual = sonidoActivo ? nivelSonido : "silencio";
+
+  function elegir(clave) {
+    if (clave === "silencio") { setSonidoActivo(false); return; }
+    setSonidoActivo(true);
+    setNivelSonido(clave);   // suena al elegir, para calibrar
+  }
+
+  return (
+    <div ref={caja} style={{ position: "relative", flexShrink: 0 }}>
+      <button onClick={() => setAbierto((v) => !v)}
+        title={sonidoActivo ? `Sonido: ${nivelSonido}` : "Sonido silenciado"}
+        style={{ background: "transparent", border: "none", color: "#bcd0ec",
+          cursor: "pointer", fontSize: 16, padding: 2 }}>
+        {sonidoActivo ? "🔔" : "🔕"}
+      </button>
+
+      {abierto && (
+        <div style={{ position: "absolute", right: 0, top: 30, zIndex: 9998,
+          background: "#fff", border: "1px solid var(--borde)", borderRadius: 10,
+          boxShadow: "0 6px 22px rgba(0,0,0,.18)", padding: 8, width: 210 }}>
+          <div style={{ fontSize: 10.5, color: "var(--texto-suave)", padding: "2px 6px 6px" }}>
+            Volumen del aviso
+          </div>
+          {OPCIONES.map((o) => (
+            <button key={o.clave} onClick={() => elegir(o.clave)}
+              style={{ display: "flex", width: "100%", alignItems: "baseline", gap: 6,
+                textAlign: "left", background: actual === o.clave ? "var(--naranja-suave)" : "transparent",
+                border: "none", borderRadius: 7, padding: "6px 8px", cursor: "pointer",
+                fontSize: 12.5, color: "var(--texto)" }}>
+              <span style={{ fontWeight: actual === o.clave ? 600 : 400 }}>{o.etiqueta}</span>
+              <span style={{ fontSize: 10.5, color: "var(--texto-tenue)" }}>{o.pista}</span>
+              {actual === o.clave && <span style={{ marginLeft: "auto", color: "var(--naranja)" }}>✓</span>}
+            </button>
+          ))}
+          <div style={{ borderTop: "1px solid var(--borde)", marginTop: 6, paddingTop: 6,
+            display: "flex", alignItems: "center", gap: 6 }}>
+            <button onClick={probarSonido} disabled={!sonidoActivo}
+              style={{ fontSize: 11.5, padding: "4px 10px" }}>
+              🔊 Probar
+            </button>
+            <span style={{ fontSize: 9.5, color: "var(--texto-tenue)", lineHeight: 1.3 }}>
+              Un conductor suena 3 veces
+            </span>
+          </div>
+          <div style={{ fontSize: 9.5, color: "var(--texto-tenue)", padding: "6px 6px 0", lineHeight: 1.35 }}>
+            Si aun en "Fuerte" no se escucha, revisa el volumen del equipo: el
+            navegador no puede pasar de ahí.
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function Topbar() {
   const { analista, salir } = useAuth();
-  const { noLeidos, correosNoLeidos, sonidoActivo, setSonidoActivo } = useAlertas();
+  const { noLeidos, correosNoLeidos, sonidoActivo, setSonidoActivo,
+          nivelSonido, setNivelSonido, probarSonido } = useAlertas();
   const chatNoLeidos = useChatNoLeidos();
 
   return (
@@ -82,11 +164,9 @@ export default function Topbar() {
       </div>
 
       <div style={{ display: "flex", alignItems: "center", gap: 10, flexShrink: 0 }}>
-        <button onClick={() => setSonidoActivo(!sonidoActivo)}
-          title={sonidoActivo ? "Sonido activado" : "Sonido silenciado"}
-          style={{ background: "transparent", border: "none", color: "#bcd0ec", cursor: "pointer", fontSize: 16, padding: 2 }}>
-          {sonidoActivo ? "🔔" : "🔕"}
-        </button>
+        <PanelSonido nivelSonido={nivelSonido} setNivelSonido={setNivelSonido}
+          sonidoActivo={sonidoActivo} setSonidoActivo={setSonidoActivo}
+          probarSonido={probarSonido} />
         <span style={{ color: "#bcd0ec", fontSize: 12.5, whiteSpace: "nowrap", maxWidth: 130, overflow: "hidden", textOverflow: "ellipsis" }} title={analista?.nombre}>{analista?.nombre}</span>
         <div style={{
           width: 28, height: 28, borderRadius: "50%", background: "var(--naranja)",
