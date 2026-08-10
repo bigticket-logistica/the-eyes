@@ -108,18 +108,37 @@ const ESTADO_PKG = {
 function BuscadorPaquete({ onPasarAlChofer }) {
   const [id, setId] = useState("");
   const [pkg, setPkg] = useState(null);
+  const [incidencias, setIncidencias] = useState([]);
   const [buscando, setBuscando] = useState(false);
   const [err, setErr] = useState("");
 
   async function buscar() {
     const limpio = id.replace(/\D/g, "");
     if (!limpio || buscando) return;
-    setBuscando(true); setErr(""); setPkg(null);
+    setBuscando(true); setErr(""); setPkg(null); setIncidencias([]);
     const aviso = setTimeout(() => setErr("Despertando el buscador… un momento."), 2500);
-    try { setPkg(await consultarPaquete(limpio)); setErr(""); }
-    catch (e) { setErr(e.message || "No se pudo consultar. Reintenta en unos segundos."); }
-    finally { clearTimeout(aviso); setBuscando(false); }
+
+    // Las dos consultas van en paralelo: la de incidencias es local y responde
+    // al instante, así que no tiene sentido esperar a MELI para lanzarla.
+    // Y si MELI falla, las incidencias igual se muestran: para un paquete que ya
+    // tuvo problemas, ese historial suele ser lo más útil.
+    const [p, inc] = await Promise.allSettled([
+      consultarPaquete(limpio),
+      sb.rpc("fn_incidencias_de_guia", { p_guia: limpio }),
+    ]);
+    clearTimeout(aviso);
+
+    if (p.status === "fulfilled") { setPkg(p.value); setErr(""); }
+    else setErr(p.reason?.message || "No se pudo consultar MELI. Reintenta en unos segundos.");
+
+    if (inc.status === "fulfilled" && !inc.value.error) setIncidencias(inc.value.data || []);
+    setBuscando(false);
   }
+
+  // La referencia guardada en una incidencia previa la escribió un analista y
+  // suele ser mejor que el comentario de MELI: se agrega si es distinta.
+  const refIncidencia = incidencias.find((i) => i.referencia)?.referencia;
+  const fallosPrevios = incidencias.length;
 
   const textoChofer = pkg ? [
     `📦 Paquete ${pkg.id}`,
@@ -127,6 +146,11 @@ function BuscadorPaquete({ onPasarAlChofer }) {
     pkg.comprador?.telefono ? `Tel: ${pkg.comprador.telefono}` : null,
     pkg.comprador?.direccion ? `Dirección: ${pkg.comprador.direccion}` : null,
     pkg.comprador?.comentario ? `Referencia: ${pkg.comprador.comentario}` : null,
+    refIncidencia && refIncidencia !== pkg.comprador?.comentario
+      ? `Dato adicional: ${refIncidencia}` : null,
+    fallosPrevios > 1
+      ? `\n⚠️ Este paquete ya tuvo ${fallosPrevios} incidencias. Conviene llamar antes de ir.`
+      : null,
   ].filter(Boolean).join("\n") : "";
 
   return (
@@ -163,6 +187,71 @@ function BuscadorPaquete({ onPasarAlChofer }) {
               📤 Pasar datos al chofer
             </button>
           )}
+        </div>
+      )}
+
+      {/* Incidencias previas de esta guía.
+          Se muestran aunque MELI haya fallado: para un paquete con problemas,
+          este historial suele ser más útil que el contacto. */}
+      {incidencias.length > 0 && (
+        <div style={{
+          marginTop: 8, borderRadius: 8, padding: "10px 12px", fontSize: 12,
+          background: incidencias.length > 1 ? "#fef2f2" : "#fffbeb",
+          border: `1px solid ${incidencias.length > 1 ? "#fca5a5" : "#fde68a"}`,
+        }}>
+          <div style={{ fontWeight: 600, marginBottom: 6,
+            color: incidencias.length > 1 ? "#b91c1c" : "#92400e" }}>
+            {incidencias.length === 1
+              ? "1 incidencia previa"
+              : `${incidencias.length} incidencias — ya falló varias veces`}
+          </div>
+
+          {incidencias.length > 1 && (
+            <div style={{ fontSize: 11.5, color: "#b91c1c", marginBottom: 7, lineHeight: 1.45 }}>
+              Dile al conductor que llame al comprador <b>antes de ir</b>: repetir el viaje sin
+              coordinar es perder otro intento.
+            </div>
+          )}
+
+          {incidencias.map((i) => (
+            <div key={i.case_id} style={{
+              padding: "5px 0", borderTop: "1px dashed rgba(0,0,0,.12)", lineHeight: 1.5,
+            }}>
+              <div style={{ display: "flex", gap: 6, alignItems: "baseline", flexWrap: "wrap" }}>
+                <b style={{ fontVariantNumeric: "tabular-nums" }}>{i.cuando}</b>
+                <span>{i.motivo}</span>
+                {i.abierta && (
+                  <span className="pill" style={{ background: "#fff", border: "1px solid #fca5a5",
+                    color: "#b91c1c", fontSize: 10 }}>abierta</span>
+                )}
+                {i.cierre && (
+                  <span style={{ fontSize: 10.5, color: "var(--texto-tenue)" }}>{i.cierre}</span>
+                )}
+              </div>
+              <div style={{ fontSize: 10.5, color: "var(--texto-suave)" }}>
+                #{i.case_id}
+                {i.sc ? ` · ${i.sc}` : ""}
+                {i.ruta ? ` · ruta ${i.ruta}` : ""}
+                {i.conductor ? ` · ${i.conductor}` : ""}
+              </div>
+              {i.referencia && (
+                <div style={{ fontSize: 10.5, color: "var(--texto-suave)", fontStyle: "italic" }}>
+                  Ref: {i.referencia}
+                </div>
+              )}
+              {i.quien_recibio && (
+                <div style={{ fontSize: 10.5, color: "#15803d" }}>
+                  Recibió: {i.quien_recibio}
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+
+      {pkg && incidencias.length === 0 && (
+        <div style={{ fontSize: 11, color: "var(--texto-tenue)", marginTop: 6 }}>
+          Sin incidencias previas de esta guía.
         </div>
       )}
     </div>
