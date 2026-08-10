@@ -153,6 +153,7 @@ function AvisoTicket({ e }) {
   // El ticket puede ser una incidencia de MELI: se dice, porque se gestiona en
   // la otra pestaña. Marcarlo "Sin ticket" hacía parecer que nadie lo tenía.
   const esInc = e.origen === "meli";
+  const cerrado = e.cerrado_codigo || (e.cerrado_case_id ? `#${e.cerrado_case_id}` : null);
 
   let chip = null;
   if (e.sin_tomar) {
@@ -165,8 +166,17 @@ function AvisoTicket({ e }) {
     chip = { texto: esInc ? `Inc · ${e.analista_nombre || "tomado"}` : (e.analista_nombre || "tomado"),
              fondo: "#f0fdf4", borde: "#bbf7d0", color: "#15803d" };
   } else if (e.esperando) {
-    // Escribió y no hay ningún ticket abierto: no aparece en ninguna cola.
-    chip = { texto: "Sin ticket", fondo: "#fef2f2", borde: "#fca5a5", color: "#b91c1c" };
+    // Sin ticket abierto y con algo pendiente: hay que tomar uno. Se distingue
+    // si antes hubo uno cerrado, porque no es lo mismo una conversación que
+    // nadie tomó nunca que una resuelta a la que llegó un mensaje nuevo.
+    chip = cerrado
+      ? { texto: "Mensaje nuevo sin ticket", fondo: "#fef2f2", borde: "#fca5a5", color: "#b91c1c" }
+      : { texto: "Sin ticket", fondo: "#fef2f2", borde: "#fca5a5", color: "#b91c1c" };
+  } else if (cerrado) {
+    // Atendida y resuelta. Antes esto compartía etiqueta con "sin ticket", que
+    // decía exactamente lo contrario de la verdad.
+    chip = { texto: `✓ ${cerrado} cerrado`, fondo: "#f8fafc", borde: "#e2e8f0",
+             color: "var(--texto-suave)" };
   }
 
   const borr = (MOSTRAR_BORRADOR && e.hay_borrador)
