@@ -105,7 +105,18 @@ function Adjunto({ m }) {
     return <div style={{ fontSize: 12, opacity: 0.6 }}>{ICONO[m.tipo_contenido] || "📎"} cargando…</div>;
   }
 
-  if (m.tipo_contenido === "imagen" || m.tipo_contenido === "sticker") {
+  // Un sticker no es una foto: es transparente, chico y decorativo. Con el
+  // marco y los 260 px de la imagen quedaba enorme y con un recuadro blanco
+  // alrededor de algo que debería flotar. Sin descarga ni ampliar: nadie guarda
+  // un sticker ni lo necesita en grande.
+  if (m.tipo_contenido === "sticker") {
+    return (
+      <img src={url} alt="Sticker del conductor"
+        style={{ width: 118, height: "auto", display: "block", marginTop: 2 }} />
+    );
+  }
+
+  if (m.tipo_contenido === "imagen") {
     return (
       <>
         <img
