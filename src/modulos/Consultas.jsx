@@ -100,6 +100,96 @@ async function buscarContexto(telefono) {
 }
 
 
+// ── Aviso de ticket en la fila de la lista ─────────────────────────────────
+// Lo que hay que ver SIN abrir la conversación: si el ticket está sin tomar y
+// cuánto lleva el conductor esperando respuesta.
+//
+// Los umbrales son de minutos, no de horas. En Salud el ámbar está en 2 h y el
+// rojo en 8, pero eso mide tickets; acá mide a una persona esperando en
+// WhatsApp mientras maneja. Biggy tiene 60 s de espera configurados y avisa a
+// los 1.5 min, así que 5 minutos ya es mucho y 15 es un problema.
+const ESPERA_AMBAR = 5;
+const ESPERA_ROJA = 15;
+
+// Un borrador de Biggy NO es un mensaje pendiente de enviar: es la simulación
+// de lo que Biggy respondería si estuviera activo. Nadie debe hacer nada con
+// él, así que mostrarlo como aviso lo hace parecer una tarea — y una etiqueta
+// que parece tarea sin serlo enseña a ignorar las etiquetas.
+//
+// Se deja el interruptor porque el día que exista el botón "Enviar borrador"
+// (con captura del diff humano, la única forma de medir si Biggy acierta), el
+// borrador SÍ pasa a ser algo que una persona revisa y envía. Ese día esto va
+// a true y el aviso vuelve, sin tocar nada más.
+//
+// Ojo: esto no afecta el reloj. El conductor no recibió nada, haya borrador o
+// no, así que la espera se cuenta igual.
+const MOSTRAR_BORRADOR = false;
+
+function textoEspera(m) {
+  if (m < 60) return `${Math.round(m)} min`;
+  const h = Math.floor(m / 60);
+  const r = Math.round(m % 60);
+  return `${h} h ${String(r).padStart(2, "0")}`;
+}
+
+function Chip({ c }) {
+  return (
+    <span style={{ fontSize: 9.5, fontWeight: 600, padding: "1px 6px", borderRadius: 9,
+      background: c.fondo, border: `1px solid ${c.borde}`, color: c.color,
+      maxWidth: 140, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+      {c.texto}
+    </span>
+  );
+}
+
+function AvisoTicket({ e }) {
+  if (!e) return null;
+  const min = e.espera_min == null ? null : Number(e.espera_min);
+  const color = min == null ? "var(--texto-tenue)"
+    : min >= ESPERA_ROJA ? "#b91c1c"
+    : min >= ESPERA_AMBAR ? "#b45309"
+    : "var(--texto-suave)";
+
+  // El ticket puede ser una incidencia de MELI: se dice, porque se gestiona en
+  // la otra pestaña. Marcarlo "Sin ticket" hacía parecer que nadie lo tenía.
+  const esInc = e.origen === "meli";
+
+  let chip = null;
+  if (e.sin_tomar) {
+    chip = { texto: esInc ? `Incidencia sin tomar` : "Sin tomar",
+             fondo: "#fef2f2", borde: "#fca5a5", color: "#b91c1c" };
+  } else if (e.caso_id && e.es_ia) {
+    chip = { texto: `🤖 ${e.analista_nombre || "Biggy"}`,
+             fondo: "#eef2ff", borde: "#c7d2fe", color: "#3730a3" };
+  } else if (e.caso_id) {
+    chip = { texto: esInc ? `Inc · ${e.analista_nombre || "tomado"}` : (e.analista_nombre || "tomado"),
+             fondo: "#f0fdf4", borde: "#bbf7d0", color: "#15803d" };
+  } else if (e.esperando) {
+    // Escribió y no hay ningún ticket abierto: no aparece en ninguna cola.
+    chip = { texto: "Sin ticket", fondo: "#fef2f2", borde: "#fca5a5", color: "#b91c1c" };
+  }
+
+  const borr = (MOSTRAR_BORRADOR && e.hay_borrador)
+    ? { texto: "✍ Borrador por revisar", fondo: "#fffbeb", borde: "#fde68a", color: "#92400e" }
+    : null;
+
+  if (!chip && !borr && min == null) return null;
+
+  return (
+    <div style={{ display: "flex", gap: 5, alignItems: "center", flexWrap: "wrap", marginTop: 3 }}>
+      {chip && <Chip c={chip} />}
+      {borr && <Chip c={borr} />}
+      {min != null && (
+        <span style={{ fontSize: 9.5, fontWeight: min >= ESPERA_AMBAR ? 600 : 500, color }}
+          title="Desde el último mensaje del conductor sin respuesta enviada. Un borrador no cuenta como respuesta: el conductor no lo recibió.">
+          ⏱ {textoEspera(min)} sin respuesta
+        </span>
+      )}
+    </div>
+  );
+}
+
+
 // ── Buscador puntual de paquetes (endpoint shipments de MELI) ───────────────
 const ESTADO_PKG = {
   delivered: "Entregado", on_route: "En ruta", not_delivered: "No entregado",
@@ -597,6 +687,21 @@ export default function Consultas() {
     lista.map((c) => leidosRef.current.has(c.id) ? { ...c, no_leidos: 0 } : c), []);
 
   const [nombresLista, setNombresLista] = useState({});
+
+  // Estado de ticket por conversación, para la lista. Una sola consulta para
+  // todas las filas —no una por fila— y refresco cada 30 s porque el reloj
+  // corre solo aunque no pase nada en la base.
+  const [estadoTk, setEstadoTk] = useState({});
+  const cargarEstadoTickets = useCallback(async () => {
+    const { data, error } = await sb.rpc("fn_consultas_estado_tickets", { p_fecha: fechaSel });
+    // Si falla, la lista sigue funcionando sin los avisos: es información
+    // adicional, no puede tumbar la pantalla.
+    if (error) return;
+    const mapa = {};
+    for (const r of (data || [])) mapa[r.conversacion_id] = r;
+    setEstadoTk(mapa);
+  }, [fechaSel]);
+
   const cargarConvs = useCallback(async () => {
     try {
       const lista = aplicarLeidos(await listarConversaciones());
@@ -643,6 +748,14 @@ export default function Consultas() {
   }, [cargarHilo]);
 
   useEffect(() => { cargarConvs(); }, [cargarConvs]);
+
+  // Se recarga al cambiar el día, cuando llega algo nuevo a la lista, y cada
+  // 30 s para que el reloj avance sin depender de eventos.
+  useEffect(() => {
+    cargarEstadoTickets();
+    const t = setInterval(cargarEstadoTickets, 30000);
+    return () => clearInterval(t);
+  }, [cargarEstadoTickets, convs]);
   useEffect(() => { marcarVistos(); }, [marcarVistos]);
 
   useEffect(() => {
@@ -1024,6 +1137,7 @@ export default function Consultas() {
               <div style={{ fontSize: 12, color: "var(--texto-suave)", marginTop: 2, overflow: "hidden",
                 textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{c.ultimo_mensaje_texto || "—"}</div>
               <div style={{ fontSize: 10, color: "var(--texto-tenue)", marginTop: 2 }}>{hace(c.ultimo_mensaje_en)}{(c.conductor_nombre || nombresLista[c.telefono]) ? ` · ${c.telefono}` : ""}</div>
+              <AvisoTicket e={estadoTk[c.id]} />
             </div>
           );
         })}
