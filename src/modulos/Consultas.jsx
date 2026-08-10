@@ -712,6 +712,15 @@ export default function Consultas() {
 
   const [nombresLista, setNombresLista] = useState({});
 
+  // Los borradores de Biggy son simulaciones de lo que RESPONDERÍA si estuviera
+  // activo: nadie tiene que hacer nada con ellos. En el hilo de una analista son
+  // ruido —tapan lo que dijo el conductor y hacen dudar de si algo se envió— así
+  // que se ocultan. Quedan disponibles solo para admin, porque son la única
+  // ventana a lo que Biggy haría y la materia prima del futuro botón "Enviar
+  // borrador" con el que se va a medir si acierta.
+  const esAdmin = analista?.rol === "admin";
+  const [verBorradores, setVerBorradores] = useState(false);
+
   // Estado de ticket por conversación, para la lista. Una sola consulta para
   // todas las filas —no una por fila— y refresco cada 30 s porque el reloj
   // corre solo aunque no pase nada en la base.
@@ -1088,6 +1097,12 @@ export default function Consultas() {
   function renderHilo() {
     const out = [];
 
+    // Se filtra ANTES de recorrer para que el cálculo de posición de los
+    // separadores use los mensajes realmente visibles: si se filtrara al
+    // dibujar, un cierre podría caer en el hueco de un borrador oculto.
+    const visibles = (mensajes || []).filter((m) =>
+      !(m.direccion === "nota_interna" && m.emisor === "ia") || (esAdmin && verBorradores));
+
     // Cierres pendientes de dibujar, ordenados por su HORA REAL de cierre.
     // Antes el separador se insertaba cuando cambiaba el case_id, y eso lo
     // ubicaba mal: Biggy le cuelga sus borradores al ticket incluso ya cerrado,
@@ -1115,22 +1130,22 @@ export default function Consultas() {
         caso={c} analistaId={analista?.id} onReabrir={reabrir} cerradoPor={por} />);
     }
 
-    for (let i = 0; i < mensajes.length; i++) {
-      const m = mensajes[i];
+    for (let i = 0; i < visibles.length; i++) {
+      const m = visibles[i];
       out.push(<Burbuja key={m.id} m={m} />);
 
       // Todo cierre ocurrido entre este mensaje y el siguiente va acá.
       // Se compara en milisegundos y no con objetos Date: new Date(null) da
       // 1970 y un cierre sin fecha se habría dibujado al principio del hilo.
       const tMsg = new Date(m.creado_en).getTime();
-      const tSig = mensajes[i + 1] ? new Date(mensajes[i + 1].creado_en).getTime() : null;
+      const tSig = visibles[i + 1] ? new Date(visibles[i + 1].creado_en).getTime() : null;
       while (ic < cierres.length && cierres[ic].t <= tMsg) ic++;          // ya pasado
       while (ic < cierres.length && tSig !== null && cierres[ic].t < tSig) {
         dibujarCierre(cierres[ic]); ic++;
       }
 
       const cid = m.case_id;
-      const sig = mensajes[i + 1];
+      const sig = visibles[i + 1];
       const cambiaTicket = !sig || sig.case_id !== cid;
       if (cid && cambiaTicket && casos[cid]) {
         const c = casos[cid];
@@ -1140,7 +1155,7 @@ export default function Consultas() {
         // NO anida la conversación: eso lo decide el analista con el botón.
         // Antes bastaba el saliente y el cartel aparecía solo, contradiciendo a
         // dónde iban realmente los mensajes nuevos.
-        const anidadoDeVerdad = mensajes.some(
+        const anidadoDeVerdad = visibles.some(
           (x) => x.case_id === cid && x.direccion === "entrante");
         if (c.origen === "meli" && anidadoDeVerdad) {
           // tramo anidado: la conversación se gestiona desde Incidencias
@@ -1228,6 +1243,16 @@ export default function Consultas() {
                 {sel.telefono}{ticketAbierto ? ` · ${ticketAbierto.codigo || "#" + ticketAbierto.case_id} abierto` : " · sin ticket abierto"}
               </div>
             </div>
+            {esAdmin && (
+              <label title="Los borradores son lo que Biggy respondería si estuviera activo. No se envían."
+                style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 10.5,
+                  color: "var(--texto-suave)", cursor: "pointer", whiteSpace: "nowrap", flexShrink: 0 }}>
+                <input type="checkbox" checked={verBorradores}
+                  onChange={(e) => setVerBorradores(e.target.checked)}
+                  style={{ width: "auto", margin: 0 }} />
+                🤖 borradores
+              </label>
+            )}
             {ticketAbierto && (
               <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
                 <BotonCompartirChat caso={ticketAbierto} analistaId={analista?.id} compacto />
