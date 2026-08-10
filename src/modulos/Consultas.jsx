@@ -234,14 +234,58 @@ function BuscadorPaquete({ onPasarAlChofer }) {
                 {i.ruta ? ` · ruta ${i.ruta}` : ""}
                 {i.conductor ? ` · ${i.conductor}` : ""}
               </div>
-              {i.referencia && (
-                <div style={{ fontSize: 10.5, color: "var(--texto-suave)", fontStyle: "italic" }}>
-                  Ref: {i.referencia}
+
+              {/* Datos del comprador guardados en la incidencia. Se muestran
+                  siempre que existan, y se DESTACA cuando el teléfono difiere
+                  del que devuelve MELI: eso significa que uno de los dos está
+                  desactualizado y conviene probar ambos. */}
+              {(i.comprador_nombre || i.comprador_telefono) && (
+                <div style={{ marginTop: 4, padding: "5px 8px", background: "#fff",
+                  border: "1px solid var(--borde)", borderRadius: 6, fontSize: 11.5 }}>
+                  {i.comprador_nombre && (
+                    <div><span style={{ color: "var(--texto-suave)" }}>Cliente:</span>{" "}
+                      {i.comprador_nombre}</div>
+                  )}
+                  {i.comprador_telefono && (
+                    <div>
+                      <span style={{ color: "var(--texto-suave)" }}>Teléfono:</span>{" "}
+                      <b>{i.comprador_telefono}</b>
+                      {pkg?.comprador?.telefono &&
+                        String(pkg.comprador.telefono).replace(/\D/g, "").slice(-10) !==
+                        String(i.comprador_telefono).replace(/\D/g, "").slice(-10) && (
+                        <span style={{ fontSize: 10, color: "#b45309", marginLeft: 5 }}>
+                          distinto al de MELI
+                        </span>
+                      )}
+                    </div>
+                  )}
+                  {i.referencia && (
+                    <div style={{ fontStyle: "italic", color: "var(--texto-suave)" }}>
+                      Ref: {i.referencia}
+                    </div>
+                  )}
+                  {i.quien_recibio && (
+                    <div style={{ color: "#15803d" }}>Recibió: {i.quien_recibio}</div>
+                  )}
+                  {onPasarAlChofer && (
+                    <button onClick={() => onPasarAlChofer([
+                      `📦 Paquete ${id.replace(/\D/g, "")}`,
+                      i.comprador_nombre ? `Cliente: ${i.comprador_nombre}` : null,
+                      i.comprador_telefono ? `Tel: ${i.comprador_telefono}` : null,
+                      i.referencia ? `Referencia: ${i.referencia}` : null,
+                    ].filter(Boolean).join("\n"))}
+                      style={{ marginTop: 5, fontSize: 11, padding: "4px 10px" }}>
+                      📤 Pasar estos datos
+                    </button>
+                  )}
                 </div>
               )}
-              {i.quien_recibio && (
-                <div style={{ fontSize: 10.5, color: "#15803d" }}>
-                  Recibió: {i.quien_recibio}
+
+              {/* Sin datos guardados: se dice por qué, en vez de dejar el hueco.
+                  Los casos anteriores al 10 de agosto no se enriquecieron. */}
+              {!i.comprador_nombre && !i.comprador_telefono && (
+                <div style={{ fontSize: 10, color: "var(--texto-tenue)", fontStyle: "italic" }}>
+                  Sin datos del comprador guardados en esta incidencia
                 </div>
               )}
             </div>
@@ -1167,3 +1211,4 @@ export default function Consultas() {
     </div>
   );
 }
+
