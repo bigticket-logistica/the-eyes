@@ -28,16 +28,28 @@ const PLANTILLA = { nombre: "contacto_ruta_torre", idioma: "es_MX" };
 
 const soloDigitos = (t) => String(t || "").replace(/\D/g, "");
 
-export default function NuevoMensaje({ analistaId, onAbrirConversacion, onCerrar }) {
+// `inicial` permite abrir este panel YA PRECARGADO desde otra parte de la
+// aplicación — hoy lo usa el bloque de incidencias sin consulta. Se reutiliza
+// este componente en vez de escribir un segundo selector de plantillas: la
+// regla de la ventana de 24 h es delicada y tenerla en dos lugares garantiza
+// que uno de los dos se desincronice.
+//   inicial = { nombre, telefono, sc, ruta, motivo, alternos: [{numero,...}] }
+export default function NuevoMensaje({ analistaId, onAbrirConversacion, onCerrar, inicial }) {
   const [busca, setBusca] = useState("");
   const [resultados, setResultados] = useState([]);
   const [buscando, setBuscando] = useState(false);
-  const [sel, setSel] = useState(null);          // { nombre, telefono, sc, origen }
+  const [sel, setSel] = useState(
+    inicial?.telefono
+      ? { nombre: inicial.nombre || "conductor", telefono: soloDigitos(inicial.telefono),
+          sc: inicial.sc || null, origen: inicial.origen || "Incidencia",
+          alternos: inicial.alternos || [] }
+      : null,
+  );
 
   const [ventana, setVentana] = useState(null);  // null = averiguando
   const [conv, setConv] = useState(null);
-  const [ruta, setRuta] = useState("");
-  const [motivo, setMotivo] = useState("");
+  const [ruta, setRuta] = useState(inicial?.ruta || "");
+  const [motivo, setMotivo] = useState(inicial?.motivo || "");
   const [libre, setLibre] = useState("");
   const [enviando, setEnviando] = useState(false);
   const [error, setError] = useState("");
@@ -215,6 +227,40 @@ export default function NuevoMensaje({ analistaId, onAbrirConversacion, onCerrar
                 </div>
                 <button onClick={() => setSel(null)} style={{ fontSize: 11.5, padding: "5px 10px" }}>Cambiar</button>
               </div>
+
+              {/* Números alternativos del Directorio para el mismo conductor.
+                  El de MELI es el de la ruta de hoy y va por defecto; estos son
+                  el respaldo cuando no contesta. Se muestra el nombre del
+                  Directorio porque a veces NO coincide con el de MELI (un mismo
+                  número puede tener otra persona registrada) y la analista
+                  necesita verlo antes de escribir. */}
+              {sel.alternos?.length > 0 && (
+                <div style={{ marginBottom: 14 }}>
+                  <div style={{ fontSize: 11.5, color: "var(--texto-suave)", marginBottom: 5 }}>
+                    Otros números de este conductor en el Directorio:
+                  </div>
+                  {sel.alternos.map((a) => {
+                    const num = soloDigitos(a.numero);
+                    const activo = num.slice(-10) === soloDigitos(sel.telefono).slice(-10);
+                    return (
+                      <button key={num} disabled={activo}
+                        onClick={() => setSel((p) => ({ ...p, telefono: num, sc: a.sc || p.sc }))}
+                        style={{
+                          display: "block", width: "100%", textAlign: "left", marginBottom: 4,
+                          fontSize: 11.5, padding: "6px 9px", borderRadius: 7,
+                          border: `1px solid ${activo ? "var(--naranja)" : "var(--borde)"}`,
+                          background: activo ? "#fff7ed" : "#fff",
+                          cursor: activo ? "default" : "pointer",
+                        }}>
+                        <b>{num}</b>
+                        {activo && <span style={{ color: "var(--naranja)" }}> · en uso</span>}
+                        {a.nombre && <span style={{ color: "var(--texto-tenue)" }}> · {a.nombre}</span>}
+                        {a.empresa && <span style={{ color: "var(--texto-tenue)" }}> · {a.empresa}</span>}
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
 
               {ventana === null ? (
                 <div style={{ fontSize: 12.5, color: "var(--texto-suave)", padding: "10px 0" }}>
