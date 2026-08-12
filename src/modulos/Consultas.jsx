@@ -1339,7 +1339,29 @@ export default function Consultas() {
       .filter((c) => c && c.origen !== "meli" && !ABIERTOS.includes(c.estado_id))
       .map((c) => {
         const en = c.resuelto_en || c.cierre_local_en || null;
-        return { c, en, t: en ? new Date(en).getTime() : Infinity };
+        // La línea se DIBUJA tras el último mensaje que pertenece al ticket, no
+        // en la hora de cierre. Son dos cosas distintas a propósito:
+        //   · resuelto_en no se mueve nunca — es cuándo terminó la gestión, y
+        //     de ahí sale el tiempo de cierre de la analista.
+        //   · la posición de la línea sí, porque al bajarla la analista incluyó
+        //     mensajes posteriores y la línea tiene que quedar debajo de ellos.
+        // Antes se usaba resuelto_en para las dos cosas, así que al mover la
+        // línea el dato cambiaba y el dibujo no: se veía como si no hubiera
+        // pasado nada.
+        // El sello sigue mostrando la hora real: "✓ BT-… · Monserrath · 11:35".
+        const ultimoDelTicket = (visibles || [])
+          .filter((m) => m.case_id === c.case_id)
+          .reduce((max, m) => {
+            const t = new Date(m.creado_en).getTime();
+            return t > max ? t : max;
+          }, 0);
+        const tCierre = en ? new Date(en).getTime() : Infinity;
+        return {
+          c, en,
+          // Se toma el mayor de los dos: si nadie movió nada, el último mensaje
+          // del ticket es anterior al cierre y la línea queda donde siempre.
+          t: Math.max(tCierre === Infinity ? 0 : tCierre, ultimoDelTicket) || Infinity,
+        };
       })
       .sort((a, b) => a.t - b.t);
     let ic = 0;
