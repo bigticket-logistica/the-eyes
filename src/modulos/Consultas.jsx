@@ -235,7 +235,7 @@ const MOTIVOS_ES = {
 };
 const motivoES = (m) => MOTIVOS_ES[m] || String(m || "una incidencia").toLowerCase().replace(/_/g, " ");
 
-function BloqueSinConsulta({ filas, cargando, onPreguntar }) {
+function BloqueSinConsulta({ filas, cargando, onPreguntar, onRefrescar }) {
   const [abierto, setAbierto] = useState(false);
   if (!cargando && filas.length === 0) return null;
 
@@ -252,6 +252,15 @@ function BloqueSinConsulta({ filas, cargando, onPreguntar }) {
         <span style={{ marginLeft: "auto", fontSize: 10.5, fontWeight: 700, color: "#fff",
           background: "#b45309", borderRadius: 9, padding: "1px 7px", minWidth: 18, textAlign: "center" }}>
           {cargando ? "…" : filas.length}
+        </span>
+        {/* Refrescar a mano: tras responder una consulta, esperar el ciclo hace
+            dudar de si la lista está viva. Un span y no un button: anidar
+            botones es HTML inválido y React lo advierte. */}
+        <span role="button" tabIndex={0} title="Actualizar ahora"
+          onClick={(e) => { e.stopPropagation(); onRefrescar?.(); }}
+          onKeyDown={(e) => { if (e.key === "Enter") { e.stopPropagation(); onRefrescar?.(); } }}
+          style={{ fontSize: 11, color: "#92400e", cursor: "pointer", padding: "0 2px" }}>
+          ↻
         </span>
       </button>
 
@@ -805,12 +814,15 @@ export default function Consultas() {
     setCargandoSC(false);
   }, [fechaSel]);
 
-  // Se recarga al cambiar el día y cada 3 min. No más seguido: el sincronizador
-  // de MELI trae incidencias cada 5 min, así que ese es el techo real de
-  // novedades y consultar más es gasto sin información nueva.
+  // Cada 60 s. Se probó con 3 min y era demasiado: la analista respondía la
+  // consulta y seguía viendo la fila en la lista, lo que la hacía dudar de si el
+  // sistema funcionaba. Lo que manda el intervalo no es cuándo LLEGAN las
+  // incidencias (cada 5 min con el sincronizador) sino cuándo DESAPARECEN, que
+  // ocurre en el momento en que alguien menciona la guía. La consulta es
+  // liviana, así que el costo de bajarlo es despreciable.
   useEffect(() => {
     cargarSinConsulta();
-    const t = setInterval(cargarSinConsulta, 180000);
+    const t = setInterval(cargarSinConsulta, 60000);
     return () => clearInterval(t);
   }, [cargarSinConsulta]);
 
@@ -1316,7 +1328,7 @@ export default function Consultas() {
         <div style={{ padding: "10px 14px", borderBottom: "1px solid var(--borde)",
           position: "sticky", top: 0, background: "#fff", zIndex: 2 }}>
           <BloqueSinConsulta filas={sinConsulta} cargando={cargandoSC}
-            onPreguntar={preguntarPorIncidencia} />
+            onPreguntar={preguntarPorIncidencia} onRefrescar={cargarSinConsulta} />
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8, gap: 8 }}>
             <div style={{ fontSize: 13, fontWeight: 600 }}>Consultas en ruta</div>
             <button className="btn-naranja" onClick={() => setNuevoMsj(true)}
