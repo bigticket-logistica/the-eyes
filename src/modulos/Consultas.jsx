@@ -214,6 +214,101 @@ function AvisoTicket({ e }) {
 }
 
 
+// ── Incidencias sin consulta ────────────────────────────────────────────────
+// Un conductor levanta una incidencia en Logistic y sigue su ruta. Si nunca
+// escribe a la torre, nadie sabe qué pasó realmente: si intentó entregar, si el
+// cliente no estaba, o si la marcó sin bajarse del vehículo.
+//
+// El cruce es simple: por cada incidencia del día, ¿apareció su guía en algún
+// mensaje de WhatsApp? Basta que la guía se haya mencionado en CUALQUIER
+// dirección — si una analista le pasó los datos del paquete es porque el
+// conductor preguntó por él (aunque fuera por foto o audio) y además ya quedó
+// enterado. Medido el 11-ago: de 52 incidencias, 40 sin una sola mención.
+//
+// Efecto útil del criterio: el mensaje que manda este bloque incluye la guía,
+// así que la incidencia sale de la lista sola. No hay estado que mantener.
+const MOTIVOS_ES = {
+  BUYER_ABSENT: "cliente ausente",
+  BAD_ADDRESS: "dirección incorrecta",
+  INACCESSIBLE_ADDRESS: "dirección inaccesible",
+  BUSINESS_CLOSED: "negocio cerrado",
+};
+const motivoES = (m) => MOTIVOS_ES[m] || String(m || "una incidencia").toLowerCase().replace(/_/g, " ");
+
+function BloqueSinConsulta({ filas, cargando, onPreguntar }) {
+  const [abierto, setAbierto] = useState(false);
+  if (!cargando && filas.length === 0) return null;
+
+  return (
+    <div style={{ marginBottom: 8, border: "1px solid #fde68a", borderRadius: 9,
+      background: "#fffbeb", overflow: "hidden" }}>
+      <button onClick={() => setAbierto((v) => !v)}
+        title="Incidencias del día por las que ningún conductor ha consultado"
+        style={{ display: "flex", alignItems: "center", gap: 7, width: "100%", textAlign: "left",
+          background: "transparent", border: "none", padding: "8px 10px", cursor: "pointer" }}>
+        <span style={{ fontSize: 11, color: "#92400e", transform: abierto ? "rotate(90deg)" : "none",
+          transition: "transform .15s" }}>▶</span>
+        <span style={{ fontSize: 12, fontWeight: 600, color: "#92400e" }}>Incidencias sin consulta</span>
+        <span style={{ marginLeft: "auto", fontSize: 10.5, fontWeight: 700, color: "#fff",
+          background: "#b45309", borderRadius: 9, padding: "1px 7px", minWidth: 18, textAlign: "center" }}>
+          {cargando ? "…" : filas.length}
+        </span>
+      </button>
+
+      {abierto && (
+        <div style={{ maxHeight: 320, overflowY: "auto", borderTop: "1px solid #fde68a" }}>
+          <div style={{ fontSize: 10, color: "#92400e", padding: "6px 10px", lineHeight: 1.35 }}>
+            El conductor nunca mencionó estas guías. Pregúntale qué pasó.
+          </div>
+          {filas.map((f) => (
+            <div key={f.case_id} style={{ padding: "7px 10px", borderTop: "1px solid #fef3c7",
+              background: "#fff" }}>
+              <div style={{ display: "flex", alignItems: "baseline", gap: 6, flexWrap: "wrap" }}>
+                <span style={{ fontSize: 11.5, fontWeight: 600 }}>{f.hora}</span>
+                <span style={{ fontSize: 11.5 }}>{motivoES(f.motivo)}</span>
+                {f.abierta && (
+                  <span style={{ fontSize: 9.5, fontWeight: 700, color: "#b91c1c",
+                    background: "#fef2f2", border: "1px solid #fca5a5", borderRadius: 8, padding: "0 5px" }}>
+                    abierta
+                  </span>
+                )}
+              </div>
+              <div style={{ fontSize: 10.5, color: "var(--texto-suave)", marginTop: 1 }}>
+                {f.conductor || "sin conductor"} · {f.sc || "?"} · {f.ruta || "sin ruta"}
+              </div>
+              <div style={{ fontSize: 10.5, color: "var(--texto-tenue)",
+                fontVariantNumeric: "tabular-nums" }}>
+                {f.shipment_id}
+              </div>
+              {/* El nombre del Directorio solo se muestra cuando NO coincide con
+                  el de MELI: hay números con otra persona registrada, y la
+                  analista tiene que saberlo antes de escribir. */}
+              {f.nombre_directorio && f.conductor
+                && f.nombre_directorio.toLowerCase().replace(/\s+/g, " ").trim()
+                   !== f.conductor.toLowerCase().replace(/\s+/g, " ").trim() && (
+                <div style={{ fontSize: 10, color: "#b45309", marginTop: 1 }}>
+                  ⚠ el Directorio tiene ese número a nombre de {f.nombre_directorio}
+                </div>
+              )}
+              {f.telefono_meli ? (
+                <button onClick={() => onPreguntar(f)}
+                  style={{ fontSize: 11, padding: "4px 10px", marginTop: 5 }}>
+                  💬 Preguntar
+                </button>
+              ) : (
+                <div style={{ fontSize: 10, color: "var(--texto-tenue)", fontStyle: "italic", marginTop: 4 }}>
+                  Sin teléfono en la incidencia — buscar en el Directorio
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+
 // ── Buscador puntual de paquetes (endpoint shipments de MELI) ───────────────
 const ESTADO_PKG = {
   delivered: "Entregado", on_route: "En ruta", not_delivered: "No entregado",
@@ -675,6 +770,47 @@ export default function Consultas() {
   const convRestaurada = useRef(false);
   const saltoHecho = useRef(false);
   const [nuevoMsj, setNuevoMsj] = useState(false);
+
+  // Precarga para NuevoMensaje cuando se abre desde una incidencia sin consulta.
+  const [precarga, setPrecarga] = useState(null);
+
+  // Incidencias del día sin una sola mención de su guía en WhatsApp.
+  const [sinConsulta, setSinConsulta] = useState([]);
+  const [cargandoSC, setCargandoSC] = useState(true);
+  const cargarSinConsulta = useCallback(async () => {
+    setCargandoSC(true);
+    const { data, error } = await sb.rpc("fn_incidencias_sin_consulta", { p_fecha: fechaSel });
+    // Si falla, el bloque simplemente no aparece: es información adicional y no
+    // puede impedir que la analista atienda sus conversaciones.
+    setSinConsulta(error ? [] : (data || []));
+    setCargandoSC(false);
+  }, [fechaSel]);
+
+  // Se recarga al cambiar el día y cada 3 min. No más seguido: el sincronizador
+  // de MELI trae incidencias cada 5 min, así que ese es el techo real de
+  // novedades y consultar más es gasto sin información nueva.
+  useEffect(() => {
+    cargarSinConsulta();
+    const t = setInterval(cargarSinConsulta, 180000);
+    return () => clearInterval(t);
+  }, [cargarSinConsulta]);
+
+  // Abre el panel de envío ya listo: teléfono de la incidencia, ruta, y el
+  // motivo redactado con la guía dentro — esa guía es la que hace que la
+  // incidencia salga de la lista cuando el mensaje sale.
+  function preguntarPorIncidencia(f) {
+    setPrecarga({
+      nombre: f.conductor || "conductor",
+      telefono: f.telefono_meli,
+      sc: f.sc,
+      ruta: f.ruta || f.sc || "",
+      origen: "Incidencia " + f.shipment_id,
+      alternos: Array.isArray(f.telefonos_alternos) ? f.telefonos_alternos : [],
+      motivo: `Registraste una incidencia por ${motivoES(f.motivo)} en el paquete `
+            + `${f.shipment_id} y no nos has contactado. ¿Nos cuentas qué pasó?`,
+    });
+    setNuevoMsj(true);
+  }
   const [convs, setConvs] = useState([]);
   const [fechaSel, setFechaSel] = useState(diaMX());
   const [sel, setSel] = useState(null);
@@ -1178,6 +1314,8 @@ export default function Consultas() {
       <div style={{ borderRight: "1px solid var(--borde)", overflowY: "auto", background: "#fff" }}>
         <div style={{ padding: "10px 14px", borderBottom: "1px solid var(--borde)",
           position: "sticky", top: 0, background: "#fff", zIndex: 2 }}>
+          <BloqueSinConsulta filas={sinConsulta} cargando={cargandoSC}
+            onPreguntar={preguntarPorIncidencia} />
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8, gap: 8 }}>
             <div style={{ fontSize: 13, fontWeight: 600 }}>Consultas en ruta</div>
             <button className="btn-naranja" onClick={() => setNuevoMsj(true)}
@@ -1344,9 +1482,11 @@ export default function Consultas() {
       {nuevoMsj && (
         <NuevoMensaje
           analistaId={analista?.id}
-          onCerrar={() => setNuevoMsj(false)}
+          inicial={precarga}
+          onCerrar={() => { setNuevoMsj(false); setPrecarga(null); }}
           onAbrirConversacion={async (convId) => {
             await cargarConvs();
+            cargarSinConsulta();   // el mensaje lleva la guía: la fila desaparece
             if (convId) {
               const c = (convs || []).find((x) => x.id === convId);
               if (c) abrirConv(c); else setParams({ conv: convId }, { replace: true });
