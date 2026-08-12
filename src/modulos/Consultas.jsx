@@ -1394,7 +1394,13 @@ export default function Consultas() {
       // 1970 y un cierre sin fecha se habría dibujado al principio del hilo.
       const tMsg = new Date(m.creado_en).getTime();
       const tSig = visibles[i + 1] ? new Date(visibles[i + 1].creado_en).getTime() : null;
-      while (ic < cierres.length && cierres[ic].t <= tMsg) ic++;          // ya pasado
+      // Estricto (<) y no (<=): cuando la línea se bajó hasta el ÚLTIMO mensaje
+      // del hilo, su posición coincide exactamente con la hora de ese mensaje.
+      // Con <= se descartaba como "ya pasada" justo al llegar ahí y la línea
+      // desaparecía del hilo — peor que estar mal puesta, porque el ticket se
+      // veía como si siguiera abierto. Ahora cae en el bloque que dibuja los
+      // cierres restantes al final, que es donde corresponde.
+      while (ic < cierres.length && cierres[ic].t < tMsg) ic++;           // ya pasado
       while (ic < cierres.length && tSig !== null && cierres[ic].t < tSig) {
         dibujarCierre(cierres[ic]); ic++;
       }
