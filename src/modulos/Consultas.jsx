@@ -774,6 +774,25 @@ export default function Consultas() {
   // Precarga para NuevoMensaje cuando se abre desde una incidencia sin consulta.
   const [precarga, setPrecarga] = useState(null);
 
+
+  // Abre el panel de envío ya listo: teléfono de la incidencia, ruta, y el
+  // motivo redactado con la guía dentro — esa guía es la que hace que la
+  // incidencia salga de la lista cuando el mensaje sale.
+  function preguntarPorIncidencia(f) {
+    setPrecarga({
+      nombre: f.conductor || "conductor",
+      telefono: f.telefono_meli,
+      sc: f.sc,
+      ruta: f.ruta || f.sc || "",
+      origen: "Incidencia " + f.shipment_id,
+      alternos: Array.isArray(f.telefonos_alternos) ? f.telefonos_alternos : [],
+      motivo: `Registraste una incidencia por ${motivoES(f.motivo)} en el paquete `
+            + `${f.shipment_id} y no nos has contactado. ¿Nos cuentas qué pasó?`,
+    });
+    setNuevoMsj(true);
+  }
+  const [convs, setConvs] = useState([]);
+  const [fechaSel, setFechaSel] = useState(diaMX());
   // Incidencias del día sin una sola mención de su guía en WhatsApp.
   const [sinConsulta, setSinConsulta] = useState([]);
   const [cargandoSC, setCargandoSC] = useState(true);
@@ -795,24 +814,6 @@ export default function Consultas() {
     return () => clearInterval(t);
   }, [cargarSinConsulta]);
 
-  // Abre el panel de envío ya listo: teléfono de la incidencia, ruta, y el
-  // motivo redactado con la guía dentro — esa guía es la que hace que la
-  // incidencia salga de la lista cuando el mensaje sale.
-  function preguntarPorIncidencia(f) {
-    setPrecarga({
-      nombre: f.conductor || "conductor",
-      telefono: f.telefono_meli,
-      sc: f.sc,
-      ruta: f.ruta || f.sc || "",
-      origen: "Incidencia " + f.shipment_id,
-      alternos: Array.isArray(f.telefonos_alternos) ? f.telefonos_alternos : [],
-      motivo: `Registraste una incidencia por ${motivoES(f.motivo)} en el paquete `
-            + `${f.shipment_id} y no nos has contactado. ¿Nos cuentas qué pasó?`,
-    });
-    setNuevoMsj(true);
-  }
-  const [convs, setConvs] = useState([]);
-  const [fechaSel, setFechaSel] = useState(diaMX());
   const [sel, setSel] = useState(null);
   const [mensajes, setMensajes] = useState([]);
   const [casos, setCasos] = useState({});
