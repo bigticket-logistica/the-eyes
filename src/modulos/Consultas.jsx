@@ -34,7 +34,7 @@ const hora = (t) => {
   } catch { return ""; }
 };
 
-function LineaCierre({ codigo, anidadoEn, caso, analistaId, onReabrir, cerradoPor }) {
+function LineaCierre({ codigo, anidadoEn, caso, analistaId, onReabrir, cerradoPor, onDeshacer, movidos }) {
   const color = anidadoEn ? "#1a3a6b" : "#16a34a";
   // Quién cerró y a qué hora, en la propia línea. Sin el sello no se podía
   // saber si un mensaje de arriba llegó antes o después del cierre.
@@ -53,6 +53,16 @@ function LineaCierre({ codigo, anidadoEn, caso, analistaId, onReabrir, cerradoPo
       {caso && !anidadoEn && (
         <span style={{ display: "inline-flex", gap: 5, alignItems: "center", flexShrink: 0 }}>
           <BotonCompartirChat caso={caso} analistaId={analistaId} compacto />
+          {/* Si esta línea se bajó a mano, se puede devolver. Reversible siempre:
+              bajarla de más enterraría una consulta nueva en un ticket cerrado
+              que nadie va a volver a mirar. */}
+          {onDeshacer && movidos > 0 && (
+            <button onClick={() => onDeshacer(caso)}
+              title="Devolver los mensajes que se incluyeron al cerrar aquí"
+              style={{ fontSize: 10.5, padding: "3px 8px", marginRight: 4 }}>
+              ↰ devolver {movidos}
+            </button>
+          )}
           {onReabrir && (
             <button onClick={() => onReabrir(caso)}
               title="Reabrir este ticket: el cronómetro vuelve a correr"
@@ -111,6 +121,41 @@ async function buscarContexto(telefono) {
     }
   } catch (e) { /* el contexto es opcional */ }
   return out;
+}
+
+
+// ── Mover la línea de cierre ────────────────────────────────────────────────
+// El problema: la analista cierra el ticket, el conductor dice "gracias", y ese
+// mensaje queda sin ticket. Al tomarlo nace un BT- que vive 30 segundos.
+// Medido: 44 en una semana, 32 s de promedio, arrastrando la mediana de tiempo
+// de cierre que se mira en Salud.
+//
+// La solución no es automática: la analista decide. Baja la línea de cierre
+// hasta donde quiere, y lo que queda arriba entra al ticket que ya cerró.
+//
+// Por qué hasta un mensaje ELEGIDO y no todo el bloque: el caso real es
+//     "Gracias"                      ← esto entra
+//     "tengo otra consulta 4771…"    ← esto NO, es un ticket nuevo
+// Mover en bloque enterraría la consulta nueva en un ticket cerrado.
+//
+// resuelto_en no cambia: la gestión terminó cuando ella respondió y un
+// agradecimiento no es tiempo de trabajo. Si mover la línea le empeorara el
+// número, no lo haría nunca y volveríamos a los tickets de 32 segundos.
+function CerrarAqui({ onMover, moviendo }) {
+  const [encima, setEncima] = useState(false);
+  return (
+    <div onMouseEnter={() => setEncima(true)} onMouseLeave={() => setEncima(false)}
+      onClick={onMover}
+      title="Bajar el cierre del ticket hasta este mensaje"
+      style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer",
+        padding: "2px 0", opacity: encima ? 1 : 0.28, transition: "opacity .12s" }}>
+      <div style={{ flex: 1, height: 1, background: "#16a34a" }} />
+      <span style={{ fontSize: 9.5, color: "#16a34a", whiteSpace: "nowrap", fontWeight: 600 }}>
+        {moviendo ? "moviendo…" : "— cerrar aquí —"}
+      </span>
+      <div style={{ flex: 1, height: 1, background: "#16a34a" }} />
+    </div>
+  );
 }
 
 
@@ -1225,6 +1270,34 @@ export default function Consultas() {
   const convsDelDia = convs.filter((c) => c.ultimo_mensaje_en && diaMX(c.ultimo_mensaje_en) === fechaSel);
   const hayGrave = ETIQUETAS_CASO.some((e) => e.grave && caract.etiquetas.includes(e.id));
 
+  // ── Bajar la línea de cierre ──────────────────────────────────────────────
+  // Incluye en el ticket ya cerrado los mensajes huérfanos hasta el elegido.
+  // Queda registro en crm_inc_historial de quién lo hizo y qué movió, tantas
+  // veces como se haga.
+  const [moviendoCierre, setMoviendoCierre] = useState(null);
+
+  async function moverCierre(caso, hastaMensajeId) {
+    if (!caso?.id || moviendoCierre) return;
+    setMoviendoCierre(hastaMensajeId);
+    const { data, error } = await sb.rpc("fn_mover_cierre", {
+      p_caso_id: caso.id, p_hasta_mensaje_id: hastaMensajeId,
+    });
+    setMoviendoCierre(null);
+    if (error) { alert("No se pudo mover el cierre: " + error.message); return; }
+    if (data?.incluidos === 0) { alert("No había mensajes sin ticket para incluir."); return; }
+    await abrirConv(sel);
+  }
+
+  async function deshacerCierre(caso) {
+    if (!caso?.id) return;
+    const { data, error } = await sb.rpc("fn_mover_cierre", {
+      p_caso_id: caso.id, p_hasta_mensaje_id: null,
+    });
+    if (error) { alert("No se pudo deshacer: " + error.message); return; }
+    if (data?.liberados === 0) { alert("No hay mensajes movidos que devolver."); return; }
+    await abrirConv(sel);
+  }
+
   async function reabrir(caso) {
     if (!caso?.id) return;
     const motivo = window.prompt(
@@ -1274,10 +1347,21 @@ export default function Consultas() {
     function dibujarCierre(x) {
       const c = x.c;
       const por = c.cierre_local_por ? nombresAnalistas[c.cierre_local_por] : null;
+      // Cuántos mensajes se incluyeron bajando la línea: son los que están
+      // dentro del ticket pero DESPUÉS de su cierre.
+      const movidos = visibles.filter(
+        (m) => m.case_id === c.case_id && x.en
+               && new Date(m.creado_en).getTime() > new Date(x.en).getTime()
+               && m.direccion === "entrante").length;
       out.push(<LineaCierre key={`cierre-${c.case_id}`} codigo={c.codigo || "#" + c.case_id}
         anidadoEn={c.anidado_en_case_id || null}
-        caso={c} analistaId={analista?.id} onReabrir={reabrir} cerradoPor={por} />);
+        caso={c} analistaId={analista?.id} onReabrir={reabrir} cerradoPor={por}
+        onDeshacer={puedeActuar(analista) ? deshacerCierre : null} movidos={movidos} />);
     }
+
+    // El último ticket cerrado del hilo: es el que recibe los mensajes al bajar
+    // la línea. Solo tiene sentido ofrecerlo sobre huérfanos posteriores a él.
+    const ultimoCerrado = cierres.length ? cierres[cierres.length - 1] : null;
 
     for (let i = 0; i < visibles.length; i++) {
       const m = visibles[i];
@@ -1291,6 +1375,16 @@ export default function Consultas() {
       while (ic < cierres.length && cierres[ic].t <= tMsg) ic++;          // ya pasado
       while (ic < cierres.length && tSig !== null && cierres[ic].t < tSig) {
         dibujarCierre(cierres[ic]); ic++;
+      }
+
+      // Control para bajar el cierre: se ofrece bajo cada mensaje SIN TICKET que
+      // sea posterior al último cierre del hilo.
+      if (!m.case_id && ultimoCerrado && puedeActuar(analista)
+          && new Date(m.creado_en).getTime() > (ultimoCerrado.t || 0)) {
+        out.push(
+          <CerrarAqui key={`cerraqui-${m.id}`}
+            moviendo={moviendoCierre === m.id}
+            onMover={() => moverCierre(ultimoCerrado.c, m.id)} />);
       }
 
       const cid = m.case_id;
