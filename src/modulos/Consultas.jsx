@@ -124,6 +124,128 @@ async function buscarContexto(telefono) {
 }
 
 
+// ── Turno de Biggy ──────────────────────────────────────────────────────────
+// Para cubrir la colación, el baño o una emergencia: durante ese rato tiene que
+// haber alguien respondiendo con la misma certeza, y hoy eso se pierde.
+//
+// POR TIEMPO Y NO UN INTERRUPTOR SUELTO
+//   Quien lo activa antes de salir es quien tendría que acordarse de apagarlo.
+//   Si se olvida, Biggy queda autónomo sin nadie mirándolo — la supervisión más
+//   baja justo cuando el riesgo es más alto. Con vencimiento, el olvido falla
+//   del lado seguro: como máximo queda el rato que se pidió.
+//
+// TRANSPARENCIA EN VEZ DE PERMISO
+//   Lo activa la analista, sin pedirle autorización a nadie: nadie va a pedir
+//   permiso para ir al baño. Pero queda registrado quién, cuándo y cuánto en
+//   biggy_turnos. Un analista que prende Biggy tres horas al día no es un
+//   analista eficiente, y eso se ve sin que nadie tenga que vigilarlo.
+const MINUTOS_TURNO = [30, 45, 60, 90];
+
+function TurnoBiggy({ estado, onActivar, onApagar, ocupado, puede }) {
+  const [abierto, setAbierto] = useState(false);
+  const activo = !!estado?.activo;
+  const restan = estado?.minutos_restantes;
+
+  return (
+    <div style={{ marginBottom: 8, borderRadius: 9, overflow: "hidden",
+      border: `1px solid ${activo ? "#c7d2fe" : "var(--borde)"}`,
+      background: activo ? "#eef2ff" : "#f8fafc" }}>
+      <button onClick={() => setAbierto((v) => !v)}
+        style={{ display: "flex", alignItems: "center", gap: 7, width: "100%",
+          textAlign: "left", background: "transparent", border: "none",
+          padding: "8px 10px", cursor: "pointer" }}>
+        <span style={{ fontSize: 13 }}>🤖</span>
+        <span style={{ fontSize: 12, fontWeight: 600,
+          color: activo ? "#3730a3" : "var(--texto-suave)" }}>
+          {activo ? `Biggy activo · ${estado.nivel}` : "Biggy apagado"}
+        </span>
+        {activo && restan != null && (
+          <span style={{ marginLeft: "auto", fontSize: 10.5, fontWeight: 700, color: "#fff",
+            background: restan <= 5 ? "#b45309" : "#4338ca", borderRadius: 9,
+            padding: "1px 7px" }}>
+            {restan} min
+          </span>
+        )}
+        <span style={{ fontSize: 10, color: "var(--texto-tenue)",
+          marginLeft: activo && restan != null ? 4 : "auto" }}>
+          {abierto ? "▲" : "▼"}
+        </span>
+      </button>
+
+      {abierto && (
+        <div style={{ padding: "0 10px 9px", borderTop: "1px solid var(--borde)" }}>
+          {activo ? (
+            <>
+              <div style={{ fontSize: 10.5, color: "var(--texto-suave)", padding: "7px 0 6px",
+                lineHeight: 1.4 }}>
+                Lo activó <b>{estado.activado_por || "alguien"}</b>.
+                {restan != null && ` Se apaga solo en ${restan} minuto${restan === 1 ? "" : "s"}.`}
+                {" "}Si tomas un ticket, Biggy no interviene en él.
+              </div>
+              <div style={{ display: "flex", gap: 5, flexWrap: "wrap" }}>
+                {puede && (
+                  <button onClick={onApagar} disabled={ocupado}
+                    style={{ fontSize: 11, padding: "5px 11px" }}>
+                    ⏹ Apagar ahora
+                  </button>
+                )}
+                {puede && MINUTOS_TURNO.map((m) => (
+                  <button key={m} onClick={() => onActivar(m, estado.nivel)} disabled={ocupado}
+                    title={`Extender el turno a ${m} minutos desde ahora`}
+                    style={{ fontSize: 11, padding: "5px 9px" }}>
+                    +{m}
+                  </button>
+                ))}
+              </div>
+            </>
+          ) : (
+            <>
+              <div style={{ fontSize: 10.5, color: "var(--texto-suave)", padding: "7px 0 6px",
+                lineHeight: 1.4 }}>
+                Actívalo para tu colación o una salida. Se apaga solo al vencer, y
+                queda registrado quién lo activó y por cuánto.
+              </div>
+              {!puede ? (
+                <div style={{ fontSize: 10.5, color: "var(--texto-tenue)", fontStyle: "italic" }}>
+                  Tu usuario es de solo lectura.
+                </div>
+              ) : (
+                <>
+                  <div style={{ fontSize: 10, color: "var(--texto-tenue)", marginBottom: 3 }}>
+                    Responde de verdad al conductor:
+                  </div>
+                  <div style={{ display: "flex", gap: 5, flexWrap: "wrap", marginBottom: 7 }}>
+                    {MINUTOS_TURNO.map((m) => (
+                      <button key={m} className="btn-navy" onClick={() => onActivar(m, "auto")}
+                        disabled={ocupado} style={{ fontSize: 11, padding: "5px 11px" }}>
+                        {m} min
+                      </button>
+                    ))}
+                  </div>
+                  {/* Sombra: escribe el borrador y no lo envía. Sirve para ver qué
+                      habría contestado antes de confiarle la conversación. */}
+                  <div style={{ fontSize: 10, color: "var(--texto-tenue)", marginBottom: 3 }}>
+                    Solo prueba, sin enviar nada:
+                  </div>
+                  <div style={{ display: "flex", gap: 5, flexWrap: "wrap" }}>
+                    {[30, 60].map((m) => (
+                      <button key={m} onClick={() => onActivar(m, "sombra")} disabled={ocupado}
+                        style={{ fontSize: 11, padding: "5px 9px" }}>
+                        {m} min en sombra
+                      </button>
+                    ))}
+                  </div>
+                </>
+              )}
+            </>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+
 // ── Mover la línea de cierre ────────────────────────────────────────────────
 // El problema: la analista cierra el ticket, el conductor dice "gracias", y ese
 // mensaje queda sin ticket. Al tomarlo nace un BT- que vive 30 segundos.
@@ -848,6 +970,36 @@ export default function Consultas() {
   const [convs, setConvs] = useState([]);
   const [fechaSel, setFechaSel] = useState(diaMX());
   // Incidencias del día sin una sola mención de su guía en WhatsApp.
+  // Turno de Biggy. Se refresca cada 30 s porque la cuenta regresiva avanza
+  // sola y porque otra analista puede activarlo o apagarlo.
+  const [turno, setTurno] = useState(null);
+  const [turnoOcupado, setTurnoOcupado] = useState(false);
+  const cargarTurno = useCallback(async () => {
+    const { data, error } = await sb.rpc("fn_biggy_estado_turno");
+    if (!error) setTurno(data || null);
+  }, []);
+  useEffect(() => {
+    cargarTurno();
+    const t = setInterval(cargarTurno, 30000);
+    return () => clearInterval(t);
+  }, [cargarTurno]);
+
+  async function activarTurno(minutos, nivel) {
+    setTurnoOcupado(true);
+    const { error } = await sb.rpc("fn_biggy_turno", { p_minutos: minutos, p_nivel: nivel });
+    setTurnoOcupado(false);
+    if (error) { alert("No se pudo activar: " + error.message); return; }
+    await cargarTurno();
+  }
+
+  async function apagarTurno() {
+    setTurnoOcupado(true);
+    const { error } = await sb.rpc("fn_biggy_turno", { p_minutos: null, p_nivel: "auto" });
+    setTurnoOcupado(false);
+    if (error) { alert("No se pudo apagar: " + error.message); return; }
+    await cargarTurno();
+  }
+
   const [sinConsulta, setSinConsulta] = useState([]);
   const [cargandoSC, setCargandoSC] = useState(true);
   const cargarSinConsulta = useCallback(async () => {
@@ -1449,6 +1601,8 @@ export default function Consultas() {
       <div style={{ borderRight: "1px solid var(--borde)", overflowY: "auto", background: "#fff" }}>
         <div style={{ padding: "10px 14px", borderBottom: "1px solid var(--borde)",
           position: "sticky", top: 0, background: "#fff", zIndex: 2 }}>
+          <TurnoBiggy estado={turno} onActivar={activarTurno} onApagar={apagarTurno}
+            ocupado={turnoOcupado} puede={puedeActuar(analista)} />
           <BloqueSinConsulta filas={sinConsulta} cargando={cargandoSC}
             onPreguntar={preguntarPorIncidencia} onRefrescar={cargarSinConsulta} />
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8, gap: 8 }}>
