@@ -243,3 +243,44 @@ export async function enviarAdjunto({ file, telefono, caseId, conversacionId, ca
   if (!data || data.ok === false) throw new Error(data?.error || "No se pudo enviar el adjunto");
   return data;
 }
+
+// ── Consulta de una ruta (Edge Function ruta-info → VPS) ────────────────────
+// Devuelve { ok, ruta, totales, fallidos, sacas, multiparadas, problemas,
+//            siguiente, comerciales_proximas, crudo }.
+//
+// Pedido por Monserrath el 13-ago: "aún hay Driver que no notifican y vamos a
+// Logistic para visualizar cuáles son [sus fallidos]". El endpoint del VPS saca
+// el motivo del fallido de dentro de cada parada — en el nivel superior MELI
+// dice on_route para todo, incluso en rutas ya completadas.
+//
+// Mismo patrón de reintento que consultarPaquete: el navegador caliente del VPS
+// puede estar arrancando en frío y un segundo intento tras 2 s lo resuelve. Un
+// 404 (ruta inexistente) es respuesta real y no se reintenta.
+async function invocarRuta(id) {
+  const { data, error } = await sb.functions.invoke("ruta-info", { body: { id } });
+  if (error) {
+    const e = new Error("infra"); e.reintentable = true; throw e;
+  }
+  if (!data || data.ok === false) {
+    const msg = data?.error || data?.motivo || "";
+    if (/no encontrada/i.test(msg)) throw new Error(`No existe la ruta ${id}. Revisa el número.`);
+    if (/sesi[oó]n/i.test(msg)) throw new Error("La sesión de MELI está vencida. Pide sincronizar Don B y reintenta.");
+    const e = new Error(msg || "infra"); e.reintentable = !msg; throw e;
+  }
+  return data;
+}
+
+export async function consultarRuta(id) {
+  try {
+    return await invocarRuta(id);
+  } catch (e1) {
+    if (!e1.reintentable && e1.message !== "infra") throw e1;
+    await new Promise((r) => setTimeout(r, 2000));
+    try {
+      return await invocarRuta(id);
+    } catch (e2) {
+      if (!e2.reintentable && e2.message !== "infra") throw e2;
+      throw new Error("El buscador de rutas tardó en despertar y no alcanzó a responder. Espera unos segundos y vuelve a intentar.");
+    }
+  }
+}
