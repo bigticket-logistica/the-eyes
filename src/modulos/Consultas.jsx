@@ -3,7 +3,7 @@ import { sb } from "../shared/supabase.js";
 import { puedeActuar, esObservador } from "../shared/permisos.js";
 import { useAuth } from "../shared/auth.jsx";
 import { hace, fechaHora, diaMX } from "../shared/fechas.js";
-import { listarConversaciones, mensajesDeConversacion, crearCasoConsulta, conversacionPorTelefono, ventanaAbierta, enviarMensaje, resumenIA, consultarPaquete } from "../shared/mensajes.js";
+import { listarConversaciones, mensajesDeConversacion, crearCasoConsulta, conversacionPorTelefono, ventanaAbierta, enviarMensaje, resumenIA, consultarPaquete, consultarRuta } from "../shared/mensajes.js";
 import { useAlertas } from "../shared/alertas.jsx";
 import { ETIQUETAS_CASO, SERVICE_CENTERS_MX } from "../shared/constantes.js";
 import Burbuja from "../componentes/Burbuja.jsx";
@@ -485,6 +485,207 @@ function BloqueSinConsulta({ filas, cargando, onPreguntar, onRefrescar }) {
 }
 
 
+// ── Buscador de ruta ────────────────────────────────────────────────────────
+// Pedido por Monserrath el 13-ago. Su frase exacta: "aún hay Driver que no
+// notifican y vamos a Logistic para visualizar cuáles son [los fallidos]".
+// Pidió cuatro cosas: fallidos con ID y motivo, sacas, PLACES/comercios, y
+// multiparadas ("como 18 paquetes a entregar en un mismo punto").
+//
+// Los fallidos van PRIMERO y abiertos: es lo que resuelve el viaje a Logistic.
+// Fuera de zona no lo pidió, pero apareció en los datos (5 paradas en una sola
+// ruta) y hoy nadie lo ve.
+const MOTIVO_FALLIDO = {
+  buyer_absent: "cliente ausente",
+  bad_address: "dirección incorrecta",
+  business_closed: "negocio cerrado",
+  inaccessible_address: "dirección inaccesible",
+  missing_package: "paquete faltante",
+  broken_package: "paquete dañado",
+  refused_delivery: "rechazó la entrega",
+  missrouted: "fuera de zona",
+  out_of_delivery_zone: "fuera de zona",
+};
+const motivoFallido = (m) =>
+  MOTIVO_FALLIDO[m] || String(m || "sin motivo").replace(/_/g, " ");
+
+function Bloque({ titulo, cuenta, color, abiertoPorDefecto, children }) {
+  const [abierto, setAbierto] = useState(!!abiertoPorDefecto);
+  if (!cuenta) return null;
+  return (
+    <div style={{ marginTop: 8, border: `1px solid ${color.borde}`, borderRadius: 8,
+      background: color.fondo, overflow: "hidden" }}>
+      <button onClick={() => setAbierto((v) => !v)}
+        style={{ display: "flex", alignItems: "center", gap: 6, width: "100%", textAlign: "left",
+          background: "transparent", border: "none", padding: "6px 9px", cursor: "pointer" }}>
+        <span style={{ fontSize: 9.5, color: color.texto,
+          transform: abierto ? "rotate(90deg)" : "none", transition: "transform .15s" }}>▶</span>
+        <span style={{ fontSize: 11.5, fontWeight: 600, color: color.texto }}>{titulo}</span>
+        <span style={{ marginLeft: "auto", fontSize: 10, fontWeight: 700, color: "#fff",
+          background: color.texto, borderRadius: 9, padding: "0 6px" }}>{cuenta}</span>
+      </button>
+      {abierto && (
+        <div style={{ borderTop: `1px solid ${color.borde}`, background: "#fff" }}>{children}</div>
+      )}
+    </div>
+  );
+}
+
+const C_ROJO  = { fondo: "#fef2f2", borde: "#fca5a5", texto: "#b91c1c" };
+const C_AMBAR = { fondo: "#fffbeb", borde: "#fde68a", texto: "#92400e" };
+const C_AZUL  = { fondo: "#eff6ff", borde: "#bfdbfe", texto: "#1d4ed8" };
+const C_GRIS  = { fondo: "#f8fafc", borde: "var(--borde)", texto: "var(--texto-suave)" };
+
+function FilaParada({ p, extra }) {
+  return (
+    <div style={{ padding: "6px 9px", borderTop: "1px solid #f1f5f9", fontSize: 11 }}>
+      <div style={{ display: "flex", gap: 5, alignItems: "baseline", flexWrap: "wrap" }}>
+        <b>parada {p.parada ?? "?"}</b>
+        <span>{p.direccion || "sin dirección"}</span>
+        {p.estado === "complete" && (
+          <span style={{ fontSize: 9.5, color: "#15803d" }}>· ya pasó</span>
+        )}
+      </div>
+      {p.lugar && <div style={{ fontSize: 10.5, color: "var(--texto-suave)" }}>{p.lugar}</div>}
+      {p.horario && (
+        <div style={{ fontSize: 10, color: "var(--texto-tenue)" }}>atienden {p.horario}</div>
+      )}
+      {p.paquetes > 1 && (
+        <div style={{ fontSize: 10, color: "#92400e" }}>{p.paquetes} paquetes en este punto</div>
+      )}
+      {extra}
+    </div>
+  );
+}
+
+function BuscadorRuta({ onVerPaquete }) {
+  const [id, setId] = useState("");
+  const [buscando, setBuscando] = useState(false);
+  const [err, setErr] = useState("");
+  const [r, setR] = useState(null);
+
+  async function buscar() {
+    const limpio = id.replace(/\D/g, "");
+    if (limpio.length < 6) { setErr("El ID de ruta tiene al menos 6 dígitos."); return; }
+    setBuscando(true); setErr(""); setR(null);
+    try {
+      setR(await consultarRuta(limpio));
+    } catch (e) {
+      setErr(e.message || "No se pudo consultar la ruta.");
+    } finally { setBuscando(false); }
+  }
+
+  const t = r?.totales || {};
+  return (
+    <div style={{ borderBottom: "1px solid var(--borde)", paddingBottom: 12, marginBottom: 12 }}>
+      <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 8 }}>🚐 Buscar ruta</div>
+      <div style={{ display: "flex", gap: 6, marginBottom: 8 }}>
+        <input value={id} onChange={(e) => setId(e.target.value)}
+          onKeyDown={(e) => e.key === "Enter" && buscar()}
+          placeholder="ID de ruta (ej. 151424352)"
+          style={{ flex: 1, fontSize: 12.5, padding: "6px 10px",
+            border: "1px solid var(--borde)", borderRadius: 7 }} />
+        <button onClick={buscar} disabled={buscando || !id.trim()}
+          style={{ fontSize: 12, padding: "6px 12px" }}>{buscando ? "…" : "Buscar"}</button>
+      </div>
+      {err && <div style={{ fontSize: 12, color: "#791F1F", marginBottom: 8 }}>{err}</div>}
+
+      {r && (
+        <div>
+          <div style={{ background: "#fafbfc", border: "1px solid var(--borde)", borderRadius: 8,
+            padding: "9px 11px", fontSize: 12, lineHeight: 1.7 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
+              <b>{r.ruta?.codigo || r.ruta?.id}</b>
+              <span className="pill" style={{
+                background: r.ruta?.estado === "active" ? "#fef3c7" : "#dcfce7",
+                color: r.ruta?.estado === "active" ? "#92400e" : "#166534" }}>
+                {r.ruta?.estado === "active" ? "en curso" : r.ruta?.estado}
+              </span>
+            </div>
+            <div>{r.ruta?.conductor || "sin conductor"}</div>
+            <div style={{ fontSize: 11, color: "var(--texto-suave)" }}>
+              {r.ruta?.sc} · {r.ruta?.patente} · {r.ruta?.tipo_vehiculo}
+              {r.ruta?.con_auxiliar ? " · con auxiliar" : ""}
+            </div>
+            {/* Avance en PAQUETES y no en paradas: es la unidad que usa MELI en
+                sus counters y la que se compara con el nivel de servicio. */}
+            <div style={{ marginTop: 4, fontSize: 11.5 }}>
+              <b>{t.entregados ?? "?"}</b> de <b>{t.paquetes ?? "?"}</b> entregados
+              {t.fallidos > 0 && (
+                <span style={{ color: "#b91c1c", fontWeight: 600 }}> · {t.fallidos} fallidos</span>
+              )}
+              {t.por_entregar > 0 && (
+                <span style={{ color: "var(--texto-suave)" }}> · {t.por_entregar} por entregar</span>
+              )}
+            </div>
+            <div style={{ fontSize: 10.5, color: "var(--texto-tenue)" }}>
+              {t.paradas} paradas · {t.pendientes} pendientes
+            </div>
+          </div>
+
+          <Bloque titulo="Fallidos" cuenta={(r.fallidos || []).length} color={C_ROJO} abiertoPorDefecto>
+            {(r.fallidos || []).map((f) => (
+              <div key={f.guia} style={{ padding: "6px 9px", borderTop: "1px solid #fee2e2", fontSize: 11 }}>
+                <div style={{ display: "flex", gap: 5, alignItems: "baseline", flexWrap: "wrap" }}>
+                  <b style={{ fontVariantNumeric: "tabular-nums" }}>{f.guia}</b>
+                  <span style={{ color: "#b91c1c", fontWeight: 600 }}>{motivoFallido(f.motivo)}</span>
+                  <span style={{ fontSize: 10, color: "var(--texto-tenue)" }}>· parada {f.parada}</span>
+                </div>
+                <div style={{ fontSize: 10.5, color: "var(--texto-suave)" }}>
+                  {f.comprador || "sin nombre"} · {f.direccion}
+                  {f.colonia ? `, ${f.colonia}` : ""}
+                </div>
+                {f.cuando && (
+                  <div style={{ fontSize: 10, color: "var(--texto-tenue)" }}>
+                    {new Date(f.cuando).toLocaleTimeString("es-MX",
+                      { hour: "2-digit", minute: "2-digit", timeZone: "America/Mexico_City" })} CDMX
+                  </div>
+                )}
+                {onVerPaquete && (
+                  <button onClick={() => onVerPaquete(f.guia)}
+                    style={{ fontSize: 10.5, padding: "3px 8px", marginTop: 4 }}>
+                    🔍 ver el paquete
+                  </button>
+                )}
+              </div>
+            ))}
+          </Bloque>
+
+          <Bloque titulo="Sacas" cuenta={(r.sacas || []).length} color={C_AMBAR} abiertoPorDefecto>
+            {(r.sacas || []).map((p) => <FilaParada key={`s${p.parada}`} p={p} />)}
+          </Bloque>
+
+          <Bloque titulo="Multiparadas" cuenta={(r.multiparadas || []).length} color={C_AZUL}>
+            {(r.multiparadas || []).map((p) => <FilaParada key={`m${p.parada}`} p={p} />)}
+          </Bloque>
+
+          <Bloque titulo="Fuera de zona y con problema" cuenta={(r.problemas || []).length} color={C_AMBAR}>
+            {(r.problemas || []).map((p) => (
+              <FilaParada key={`p${p.parada}`} p={p} extra={
+                <div style={{ fontSize: 10, color: "#92400e" }}>
+                  {[p.fuera_de_zona && "fuera de zona",
+                    p.con_fallido && "con fallido",
+                    p.con_reclamo && "con reclamo"].filter(Boolean).join(" · ")}
+                </div>
+              } />
+            ))}
+          </Bloque>
+
+          <Bloque titulo="Próximos comercios" cuenta={(r.comerciales_proximas || []).length} color={C_GRIS}>
+            {(r.comerciales_proximas || []).map((p) => <FilaParada key={`c${p.parada}`} p={p} />)}
+          </Bloque>
+
+          {r.siguiente && (
+            <div style={{ marginTop: 8, fontSize: 10.5, color: "var(--texto-suave)" }}>
+              Primera pendiente en el sistema: <b>parada {r.siguiente.parada}</b> · {r.siguiente.direccion}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+
 // ── Buscador puntual de paquetes (endpoint shipments de MELI) ───────────────
 const ESTADO_PKG = {
   delivered: "Entregado", on_route: "En ruta", not_delivered: "No entregado",
@@ -519,16 +720,31 @@ function telefonosDe(i) {
   });
 }
 
-function BuscadorPaquete({ onPasarAlChofer }) {
-  const [id, setId] = useState("");
+function BuscadorPaquete({ onPasarAlChofer, idInicial }) {
+  const [id, setId] = useState(idInicial || "");
   const [pkg, setPkg] = useState(null);
   const [incidencias, setIncidencias] = useState([]);
   const [buscando, setBuscando] = useState(false);
   const [err, setErr] = useState("");
 
-  async function buscar() {
-    const limpio = id.replace(/\D/g, "");
+  // Deja que el buscador de RUTA mande una guía acá: la analista ve un fallido y
+  // pasa directo a los datos del comprador sin copiar el número a mano.
+  // El padre remonta el componente con key={guia}, así que este efecto de montaje
+  // corre una sola vez por guía y no necesita comparar valores anteriores.
+  const montado = useRef(false);
+  useEffect(() => {
+    if (montado.current || !idInicial) return;
+    montado.current = true;
+    buscarGuia(idInicial);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  async function buscar() { return buscarGuia(id); }
+
+  async function buscarGuia(entrada) {
+    const limpio = String(entrada || "").replace(/\D/g, "");
     if (!limpio || buscando) return;
+    setId(limpio);
     setBuscando(true); setErr(""); setPkg(null); setIncidencias([]);
     const aviso = setTimeout(() => setErr("Despertando el buscador… un momento."), 2500);
 
@@ -946,6 +1162,10 @@ export default function Consultas() {
   const convRestaurada = useRef(false);
   const saltoHecho = useRef(false);
   const [nuevoMsj, setNuevoMsj] = useState(false);
+
+  // Guía que el buscador de ruta manda al buscador de paquete. Va con key para
+  // que el componente se remonte y busque solo.
+  const [guiaDesdeRuta, setGuiaDesdeRuta] = useState(null);
 
   // Precarga para NuevoMensaje cuando se abre desde una incidencia sin consulta.
   const [precarga, setPrecarga] = useState(null);
@@ -1789,7 +2009,9 @@ export default function Consultas() {
           <div style={{ padding: 20, fontSize: 12, color: "var(--texto-tenue)", textAlign: "center" }}>—</div>
         ) : (
           <div style={{ padding: 14 }}>
-            <BuscadorPaquete onPasarAlChofer={(t) => setTexto((prev) => (prev ? prev + "\n" : "") + t)} />
+            <BuscadorRuta onVerPaquete={(guia) => setGuiaDesdeRuta(guia)} />
+            <BuscadorPaquete key={guiaDesdeRuta || "vacio"} idInicial={guiaDesdeRuta}
+              onPasarAlChofer={(t) => setTexto((prev) => (prev ? prev + "\n" : "") + t)} />
             <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 10 }}>Ficha del ticket</div>
 
             {/* identidad */}
