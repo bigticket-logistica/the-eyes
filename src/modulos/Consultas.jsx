@@ -381,6 +381,106 @@ function AvisoTicket({ e }) {
 }
 
 
+// ── Tareas que dejó Biggy ───────────────────────────────────────────────────
+// Biggy no puede enviar correos ni llamar. Cuando ofrece que la torre gestione
+// el contacto —lo correcto según el procedimiento— deja la tarea acá.
+//
+// El 17-ago dijo a un conductor "voy a dejarle mensaje y correo a Coreisy… te
+// aviso si tenemos respuesta" y nadie lo hizo: el conductor quedó esperando algo
+// que nunca iba a llegar. Una promesa sin tarea es peor que no ofrecer nada.
+//
+// Se eligió cola en vez de automatizar el correo: redactar un correo a un
+// cliente final de MELI sin supervisión expone la marca de MELI, y hoy no hay
+// forma de medir si esos correos funcionan.
+const TIPO_TAREA = {
+  correo: { icono: "✉️", texto: "enviar correo" },
+  llamar: { icono: "📞", texto: "llamar" },
+  seguimiento: { icono: "🔁", texto: "seguimiento" },
+  otro: { icono: "📌", texto: "pendiente" },
+};
+
+function BloqueTareas({ tareas, cargando, onResolver, onAbrirChat, onRefrescar, puede }) {
+  // Abierto por defecto cuando hay tareas: son compromisos que Biggy ya le
+  // comunicó al conductor, así que esperan a alguien. Un bloque cerrado las
+  // escondería justo cuando importan.
+  const [abierto, setAbierto] = useState(true);
+  if (!cargando && tareas.length === 0) return null;
+
+  return (
+    <div style={{ marginBottom: 8, border: "1px solid #c7d2fe", borderRadius: 9,
+      background: "#eef2ff", overflow: "hidden" }}>
+      <button onClick={() => setAbierto((v) => !v)}
+        title="Cosas que Biggy prometió al conductor y hay que cumplir"
+        style={{ display: "flex", alignItems: "center", gap: 7, width: "100%",
+          textAlign: "left", background: "transparent", border: "none",
+          padding: "8px 10px", cursor: "pointer" }}>
+        <span style={{ fontSize: 11, color: "#3730a3",
+          transform: abierto ? "rotate(90deg)" : "none", transition: "transform .15s" }}>▶</span>
+        <span style={{ fontSize: 12, fontWeight: 600, color: "#3730a3" }}>
+          Tareas pendientes de Biggy
+        </span>
+        <span style={{ marginLeft: "auto", fontSize: 10.5, fontWeight: 700, color: "#fff",
+          background: "#4338ca", borderRadius: 9, padding: "1px 7px", minWidth: 18,
+          textAlign: "center" }}>
+          {cargando ? "…" : tareas.length}
+        </span>
+        <span role="button" tabIndex={0} title="Actualizar ahora"
+          onClick={(e) => { e.stopPropagation(); onRefrescar?.(); }}
+          onKeyDown={(e) => { if (e.key === "Enter") { e.stopPropagation(); onRefrescar?.(); } }}
+          style={{ fontSize: 11, color: "#3730a3", cursor: "pointer", padding: "0 2px" }}>↻</span>
+      </button>
+
+      {abierto && (
+        <div style={{ maxHeight: 300, overflowY: "auto", borderTop: "1px solid #c7d2fe" }}>
+          <div style={{ fontSize: 10, color: "#3730a3", padding: "6px 10px", lineHeight: 1.35 }}>
+            Biggy ya le dijo al conductor que la torre lo iba a gestionar.
+          </div>
+          {tareas.map((t) => {
+            const meta = TIPO_TAREA[t.tipo] || TIPO_TAREA.otro;
+            return (
+              <div key={t.id} style={{ padding: "7px 10px", borderTop: "1px solid #e0e7ff",
+                background: "#fff" }}>
+                <div style={{ display: "flex", gap: 5, alignItems: "baseline", flexWrap: "wrap" }}>
+                  <span style={{ fontSize: 12 }}>{meta.icono}</span>
+                  <span style={{ fontSize: 11.5, fontWeight: 600 }}>{meta.texto}</span>
+                  <span style={{ fontSize: 10, color: "var(--texto-tenue)" }}>
+                    {hace(t.creada_en)}
+                  </span>
+                </div>
+                <div style={{ fontSize: 11, marginTop: 2, lineHeight: 1.35 }}>{t.detalle}</div>
+                <div style={{ fontSize: 10.5, color: "var(--texto-suave)", marginTop: 1 }}>
+                  {t.conductor || "sin conductor"}
+                  {t.shipment_id ? ` · guía ${t.shipment_id}` : ""}
+                </div>
+                {puede && (
+                  <div style={{ display: "flex", gap: 5, marginTop: 5, flexWrap: "wrap" }}>
+                    {t.conversacion_id && (
+                      <button onClick={() => onAbrirChat(t)}
+                        style={{ fontSize: 10.5, padding: "3px 9px" }}>
+                        abrir chat
+                      </button>
+                    )}
+                    <button className="btn-navy" onClick={() => onResolver(t, "hecha")}
+                      style={{ fontSize: 10.5, padding: "3px 9px" }}>
+                      ✓ hecha
+                    </button>
+                    <button onClick={() => onResolver(t, "descartada")}
+                      title="Ya no aplica: el conductor resolvió, o el caso se cerró"
+                      style={{ fontSize: 10.5, padding: "3px 9px" }}>
+                      descartar
+                    </button>
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+
 // ── Incidencias sin consulta ────────────────────────────────────────────────
 // Un conductor levanta una incidencia en Logistic y sigue su ruta. Si nunca
 // escribe a la torre, nadie sabe qué pasó realmente: si intentó entregar, si el
@@ -1305,6 +1405,36 @@ export default function Consultas() {
     await cargarTurno();
   }
 
+  // Tareas que Biggy prometió y esperan a un humano.
+  const [tareas, setTareas] = useState([]);
+  const [cargandoTareas, setCargandoTareas] = useState(true);
+  const cargarTareas = useCallback(async () => {
+    setCargandoTareas(true);
+    const { data, error } = await sb.from("biggy_tareas")
+      .select("*").eq("estado", "pendiente").order("creada_en", { ascending: false }).limit(50);
+    setTareas(error ? [] : (data || []));
+    setCargandoTareas(false);
+  }, []);
+  useEffect(() => {
+    cargarTareas();
+    const t = setInterval(cargarTareas, 60000);
+    return () => clearInterval(t);
+  }, [cargarTareas]);
+
+  async function resolverTarea(t, estado) {
+    // Se pide nota solo al descartar: si ya no aplica, conviene saber por qué —
+    // es la señal de que Biggy está prometiendo cosas que no correspondían.
+    let nota = null;
+    if (estado === "descartada") {
+      nota = window.prompt("¿Por qué ya no aplica?", "");
+      if (nota === null) return;
+    }
+    const { error } = await sb.rpc("fn_tarea_resolver",
+      { p_id: t.id, p_estado: estado, p_nota: nota || null });
+    if (error) { alert("No se pudo actualizar: " + error.message); return; }
+    await cargarTareas();
+  }
+
   const [sinConsulta, setSinConsulta] = useState([]);
   const [cargandoSC, setCargandoSC] = useState(true);
   const cargarSinConsulta = useCallback(async () => {
@@ -1921,6 +2051,11 @@ export default function Consultas() {
       <div style={{ borderRight: "1px solid var(--borde)", overflowY: "auto", background: "#fff" }}>
         <div style={{ padding: "10px 14px", borderBottom: "1px solid var(--borde)",
           position: "sticky", top: 0, background: "#fff", zIndex: 2 }}>
+          <BloqueTareas tareas={tareas} cargando={cargandoTareas}
+            onResolver={resolverTarea} onRefrescar={cargarTareas}
+            puede={puedeActuar(analista)}
+            onAbrirChat={(t) => abrirDesdeBusqueda({
+              conversacion_id: t.conversacion_id, cuando: t.creada_en })} />
           <TurnoBiggy estado={turno} onActivar={activarTurno} onApagar={apagarTurno}
             ocupado={turnoOcupado} puede={puedeActuar(analista)} />
           <BloqueSinConsulta filas={sinConsulta} cargando={cargandoSC}
