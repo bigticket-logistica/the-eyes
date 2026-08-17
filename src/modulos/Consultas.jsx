@@ -485,6 +485,91 @@ function BloqueSinConsulta({ filas, cargando, onPreguntar, onRefrescar }) {
 }
 
 
+// ── Buscador en los chats ───────────────────────────────────────────────────
+// Como el buscador de WhatsApp: se escribe una guía (o una placa, un nombre,
+// una frase) y aparecen todos los mensajes donde salió, de cualquier
+// conversación, abierta o cerrada.
+//
+// El caso real (Monserrath, 16-ago): se cierra un ticket, más tarde llega la
+// respuesta del cliente, y hay que revisar conversación por conversación para
+// encontrar dónde quedó. Y en el cambio de turno: "¿ya se obtuvo respuesta de
+// esta guía?" obligaba a buscar a mano lo que respondió Alan o Jorge.
+//
+// Al tocar un resultado se abre esa conversación. Sin copiar teléfonos ni
+// adivinar en qué chat estaba.
+function BuscadorChats({ onAbrir }) {
+  const [q, setQ] = useState("");
+  const [res, setRes] = useState(null);
+  const [buscando, setBuscando] = useState(false);
+  const [err, setErr] = useState("");
+
+  async function buscar() {
+    const t = q.trim();
+    if (t.length < 3) { setErr("Escribe al menos 3 caracteres."); return; }
+    setBuscando(true); setErr(""); setRes(null);
+    const { data, error } = await sb.rpc("fn_buscar_en_chats", { p_texto: t, p_limite: 40 });
+    setBuscando(false);
+    if (error) { setErr("No se pudo buscar: " + error.message); return; }
+    setRes(data || []);
+  }
+
+  return (
+    <div style={{ borderBottom: "1px solid var(--borde)", paddingBottom: 12, marginBottom: 12 }}>
+      <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 8 }}>🔎 Buscar en los chats</div>
+      <div style={{ display: "flex", gap: 6, marginBottom: 8 }}>
+        <input value={q} onChange={(e) => setQ(e.target.value)}
+          onKeyDown={(e) => e.key === "Enter" && buscar()}
+          placeholder="Guía, placa, nombre o texto"
+          style={{ flex: 1, fontSize: 12.5, padding: "6px 10px",
+            border: "1px solid var(--borde)", borderRadius: 7 }} />
+        <button onClick={buscar} disabled={buscando || q.trim().length < 3}
+          style={{ fontSize: 12, padding: "6px 12px" }}>{buscando ? "…" : "Buscar"}</button>
+      </div>
+      {err && <div style={{ fontSize: 12, color: "#791F1F", marginBottom: 8 }}>{err}</div>}
+
+      {res && res.length === 0 && (
+        <div style={{ fontSize: 11.5, color: "var(--texto-tenue)", fontStyle: "italic" }}>
+          Sin coincidencias en ningún chat.
+        </div>
+      )}
+
+      {res && res.length > 0 && (
+        <div style={{ maxHeight: 340, overflowY: "auto", border: "1px solid var(--borde)",
+          borderRadius: 8 }}>
+          <div style={{ fontSize: 10.5, color: "var(--texto-tenue)", padding: "5px 9px" }}>
+            {res.length} coincidencia{res.length === 1 ? "" : "s"} · toca para abrir el chat
+          </div>
+          {res.map((r) => (
+            <div key={r.mensaje_id} onClick={() => onAbrir(r)}
+              style={{ padding: "7px 9px", borderTop: "1px solid #f1f5f9", cursor: "pointer",
+                background: "#fff" }}>
+              <div style={{ display: "flex", gap: 5, alignItems: "baseline", flexWrap: "wrap" }}>
+                <span style={{ fontSize: 11.5, fontWeight: 600 }}>{r.conductor}</span>
+                <span style={{ fontSize: 10, color: "var(--texto-tenue)" }}>{r.cuando_mx}</span>
+                {r.codigo && (
+                  <span style={{ fontSize: 9.5, padding: "0 5px", borderRadius: 8,
+                    background: r.ticket_abierto ? "#fef3c7" : "#f1f5f9",
+                    color: r.ticket_abierto ? "#92400e" : "var(--texto-suave)" }}>
+                    {r.codigo}{r.ticket_abierto ? " abierto" : ""}
+                  </span>
+                )}
+              </div>
+              <div style={{ fontSize: 10.5, color: "var(--texto-suave)", marginTop: 1 }}>
+                {r.direccion === "entrante" ? "conductor" : r.quien}
+              </div>
+              <div style={{ fontSize: 11, color: "var(--texto)", marginTop: 2,
+                whiteSpace: "pre-wrap", lineHeight: 1.35 }}>
+                {r.fragmento}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+
 // ── Buscador de ruta ────────────────────────────────────────────────────────
 // Pedido por Monserrath el 13-ago. Su frase exacta: "aún hay Driver que no
 // notifican y vamos a Logistic para visualizar cuáles son [los fallidos]".
@@ -1450,6 +1535,21 @@ export default function Consultas() {
     return () => { vivo = false; };
   }, [sel?.id, ticketAbierto?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Abre la conversación de un resultado de búsqueda. Puede no estar en la
+  // lista del día seleccionado —el caso típico es un ticket cerrado de ayer—,
+  // así que se trae por id en vez de buscarla entre las cargadas.
+  async function abrirDesdeBusqueda(r) {
+    const enLista = (convs || []).find((c) => c.id === r.conversacion_id);
+    if (enLista) { abrirConv(enLista); return; }
+    const { data, error } = await sb.from("crm_inc_conversaciones")
+      .select("*").eq("id", r.conversacion_id).maybeSingle();
+    if (error || !data) { alert("No se pudo abrir esa conversación."); return; }
+    // Se cambia el día al del mensaje encontrado: si no, la conversación se abre
+    // pero la lista de la izquierda queda mostrando otro día y desorienta.
+    if (r.cuando) setFechaSel(diaMX(r.cuando));
+    abrirConv(data);
+  }
+
   async function abrirConv(conv) {
     setSel(conv); setCargando(true); setError(null);
     // La conversación abierta vive en la URL: si el módulo se remonta (F5,
@@ -2009,6 +2109,7 @@ export default function Consultas() {
           <div style={{ padding: 20, fontSize: 12, color: "var(--texto-tenue)", textAlign: "center" }}>—</div>
         ) : (
           <div style={{ padding: 14 }}>
+            <BuscadorChats onAbrir={abrirDesdeBusqueda} />
             <BuscadorRuta onVerPaquete={(guia) => setGuiaDesdeRuta(guia)} />
             <BuscadorPaquete key={guiaDesdeRuta || "vacio"} idInicial={guiaDesdeRuta}
               onPasarAlChofer={(t) => setTexto((prev) => (prev ? prev + "\n" : "") + t)} />
