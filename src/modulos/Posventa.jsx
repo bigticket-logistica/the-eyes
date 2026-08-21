@@ -36,18 +36,33 @@ const C = {
 // es la definición del negocio y no un detalle de pintura: si mañana cambia
 // qué sub_estado cuenta como salvado, se cambia acá y las tarjetas, el filtro
 // y los totales quedan consistentes solos.
+//
+// Es un mapa completo y no una cadena de if a propósito. Con la cadena, el
+// último return era el destino de todo lo que no calzaba antes, así que un
+// sub_estado nuevo de MELI caía callado en "en gestión" y contaminaba una
+// tarjeta que dice tener comprobante. Acá cada uno de los siete está escrito,
+// y lo desconocido cae en riesgo: si MELI inventa un estado mañana, aparece
+// arriba pidiendo que alguien lo mire en vez de esconderse en el medio.
+const DESTINO = {
+  WITHOUT_RECEIPT:  "riesgo",   // el conductor todavía no entregó nada
+  WAITING_RECEIPT:  "riesgo",
+  UPLOADED_RECEIPT: "gestion",  // el comprobante ya está cargado en MELI
+  ON_REVIEW:        "gestion",
+  ASSIGNED:         "gestion",
+  TO_BILL:          "perdido",  // MELI está por cobrarlo
+  BILLED:           "perdido",
+  NOT_BILLED:       "salvado",
+};
+
 function clasificar(c) {
-  if (c.sub_estado === "NOT_BILLED") return "salvado";
-  if (c.sub_estado === "BILLED") return "perdido";
-  if (c.necesita_pruebas) return "riesgo";
-  return "gestion";
+  return DESTINO[c.sub_estado] || "riesgo";
 }
 
 const GRUPOS = [
   { clave: "riesgo",  etiqueta: "En riesgo", nota: "MELI espera pruebas",   color: C.naranja,  tinte: C.naranjaTenue },
-  { clave: "gestion", etiqueta: "En gestión", nota: "esperando a MELI",     color: C.navy,     tinte: C.navyTenue },
+  { clave: "gestion", etiqueta: "En gestión", nota: "comprobante entregado", color: C.navy,     tinte: C.navyTenue },
   { clave: "salvado", etiqueta: "Salvado",   nota: "no nos lo cobraron",    color: C.verde,    tinte: "#e9f3ef" },
-  { clave: "perdido", etiqueta: "Perdido",   nota: "cobrado por MELI",      color: C.ladrillo, tinte: C.ladrilloTenue },
+  { clave: "perdido", etiqueta: "Perdido",   nota: "cobrado o por cobrar",  color: C.ladrillo, tinte: C.ladrilloTenue },
 ];
 
 const ESTADOS = { NEW: "Nuevo", IN_PROGRESS: "En curso", CLOSED: "Cerrado" };
