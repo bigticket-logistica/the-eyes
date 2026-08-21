@@ -1,5 +1,5 @@
 import { Fragment, useState, useEffect, useMemo } from "react";
-import { supabase } from "../shared/supabase.js";
+import { sb } from "../shared/supabase.js";
 
 // ── Posventa ───────────────────────────────────────────────────────────────
 // Hoy solo PNR; las devoluciones entran después como una segunda vista del
@@ -217,7 +217,7 @@ export default function Posventa() {
 
   async function cargar() {
     setError(null);
-    const { data, error: err } = await supabase
+    const { data, error: err } = await sb
       .from("vw_pnr_tablero")
       .select("*")
       .limit(5000);
