@@ -151,6 +151,12 @@ export default function Topbar() {
           <Tab to="/bitacora">Bitácora</Tab>
           <Tab to="/directorio">Directorio</Tab>
           <Tab to="/anomalias">Anomalías</Tab>
+          {/* Posventa va después de Anomalías: las dos se miran cuando el día
+              operativo ya cerró, a diferencia de las primeras que se usan en
+              vivo. El contador de casos por vencer se cablea cuando exista el
+              hook; hoy la pestaña entra sin badge para no pedir una consulta
+              más en cada carga de la torre. */}
+          <Tab to="/posventa">Posventa</Tab>
           {/* Salud es una pantalla de infraestructura, no de operación: se
               muestra solo a quien la mantiene. La lista está acá y no en la base
               porque cambia poco y así no hay una consulta más en cada carga. */}
