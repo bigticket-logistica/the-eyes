@@ -10,6 +10,7 @@ import Bitacora from "./modulos/Bitacora.jsx";
 import Correos from "./modulos/Correos.jsx";
 import Mensajes from "./modulos/Mensajes.jsx";
 import Anomalias from "./modulos/Anomalias.jsx";
+import Posventa from "./modulos/Posventa.jsx";
 import Salud from "./modulos/Salud.jsx";
 import Topbar from "./componentes/Topbar.jsx";
 import { AlertasProvider, ContenedorToasts } from "./shared/alertas.jsx";
@@ -65,6 +66,11 @@ export default function App() {
             <Route path="/consultas" element={<Consultas />} />
             <Route path="/mensajes" element={<Mensajes />} />
             <Route path="/anomalias" element={<Anomalias />} />
+            {/* Posventa nace con PNR. Las devoluciones entran después como una
+                segunda vista dentro del mismo módulo, por eso la ruta es
+                /posventa y no /pnr: la pestaña no tiene que cambiar de nombre
+                cuando llegue lo que sigue. */}
+            <Route path="/posventa" element={<Posventa />} />
             <Route path="/salud" element={<Salud />} />
             <Route path="/login" element={<Navigate to="/" replace />} />
             <Route path="*" element={<Navigate to="/" replace />} />
