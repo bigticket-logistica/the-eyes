@@ -49,9 +49,9 @@ const DESTINO = {
   UPLOADED_RECEIPT: "gestion",  // el comprobante ya está cargado en MELI
   ON_REVIEW:        "gestion",
   ASSIGNED:         "gestion",
-  TO_BILL:          "perdido",  // MELI está por cobrarlo
-  BILLED:           "perdido",
-  NOT_BILLED:       "salvado",
+  TO_BILL:          "gestion",  // camino a facturación, pero todavía sin cerrar
+  BILLED:           "perdido",   // "Enviado a facturación" en el panel de MELI
+  NOT_BILLED:       "salvado",  // "Anulado" en el panel de MELI
 };
 
 function clasificar(c) {
@@ -59,11 +59,13 @@ function clasificar(c) {
 }
 
 const GRUPOS = [
-  { clave: "riesgo",  etiqueta: "En riesgo", nota: "MELI espera pruebas",   color: C.naranja,  tinte: C.naranjaTenue },
-  { clave: "gestion", etiqueta: "En gestión", nota: "comprobante entregado", color: C.navy,     tinte: C.navyTenue },
-  { clave: "salvado", etiqueta: "Salvado",   nota: "no nos lo cobraron",    color: C.verde,    tinte: "#e9f3ef" },
-  { clave: "perdido", etiqueta: "Perdido",   nota: "cobrado o por cobrar",  color: C.ladrillo, tinte: C.ladrilloTenue },
+  { clave: "riesgo",  etiqueta: "En riesgo", nota: "MELI espera pruebas",   color: C.naranja,  tinte: C.naranjaTenue,  terminal: false },
+  { clave: "gestion", etiqueta: "En gestión", nota: "comprobante entregado", color: C.navy,     tinte: C.navyTenue,     terminal: false },
+  { clave: "salvado", etiqueta: "Salvado",   nota: "anulado por MELI",      color: C.verde,    tinte: "#e9f3ef",       terminal: true },
+  { clave: "perdido", etiqueta: "Perdido",   nota: "enviado a facturación", color: C.ladrillo, tinte: C.ladrilloTenue, terminal: true },
 ];
+
+const POR_CLAVE = Object.fromEntries(GRUPOS.map((g) => [g.clave, g]));
 
 const ESTADOS = { NEW: "Nuevo", IN_PROGRESS: "En curso", CLOSED: "Cerrado" };
 
@@ -111,12 +113,22 @@ function fechaHito(iso) {
 // El reloj sale de horas_restantes, que ya calcula la vista sobre las 48 h
 // contadas desde fecha_caso. No se recalcula acá para que la pantalla y la
 // base nunca digan cosas distintas.
-function reloj(horas) {
-  if (horas === null || horas === undefined) return { texto: "—", color: C.gris };
-  if (horas <= 0) return { texto: `Vencido ${Math.abs(Math.round(horas))} h`, color: C.ladrillo };
-  if (horas < 6)  return { texto: `${horas.toFixed(1)} h`, color: C.ladrillo };
-  if (horas < 24) return { texto: `${Math.floor(horas)} h`, color: C.naranja };
-  return { texto: `${Math.floor(horas)} h`, color: C.navy };
+//
+// En un caso ya resuelto la cuenta regresiva no significa nada: MELI ya
+// cobró o ya anuló, y las horas que faltaban dejaron de importar en ese
+// momento. Antes seguía corriendo y ponía casos cobrados arriba de todo con
+// un reloj naranja, que es justo lo contrario de lo que hay que mirar.
+function reloj(c) {
+  const g = POR_CLAVE[clasificar(c)];
+  if (g && g.terminal) {
+    return { texto: "—", color: C.gris, titulo: "Resuelto: el SLA dejó de correr" };
+  }
+  const horas = c.horas_restantes;
+  if (horas === null || horas === undefined) return { texto: "—", color: C.gris, titulo: "" };
+  if (horas <= 0) return { texto: `Vencido ${Math.abs(Math.round(horas))} h`, color: C.ladrillo, titulo: "" };
+  if (horas < 6)  return { texto: `${horas.toFixed(1)} h`, color: C.ladrillo, titulo: "" };
+  if (horas < 24) return { texto: `${Math.floor(horas)} h`, color: C.naranja, titulo: "" };
+  return { texto: `${Math.floor(horas)} h`, color: C.navy, titulo: "" };
 }
 
 function Tarjeta({ grupo, monto, casos, activa, onClick }) {
@@ -144,18 +156,80 @@ function Tarjeta({ grupo, monto, casos, activa, onClick }) {
   );
 }
 
-function Hito({ valor, titulo }) {
-  const f = fechaHito(valor);
+// El riel: una línea que atraviesa los cinco hitos, pintada del color del
+// desenlace. El color dice cómo terminó el caso; los puntos llenos dicen por
+// dónde pasó. Las dos cosas juntas son lo que enseña algo — "este se perdió
+// aunque le mandamos tres avisos y subimos el comprobante" es una historia
+// distinta de "este se perdió y nadie lo tocó", y en la lista se distinguen
+// de un vistazo sin abrir ninguna fila.
+//
+// Sólido cuando el caso ya terminó, punteado mientras se mueve: un riel
+// cerrado se lee como un caso cerrado.
+function Riel({ c, color, terminal, fondo }) {
   return (
-    <div title={titulo} style={{ textAlign: "center", lineHeight: 1.15, overflow: "hidden" }}>
-      {f ? (
-        <Fragment>
-          <span style={{ color: C.verde, fontSize: 12, fontWeight: 700 }}>✓</span>
-          <div style={{ fontSize: 8.5, color: "var(--texto-tenue)", whiteSpace: "nowrap" }}>{f}</div>
-        </Fragment>
-      ) : (
-        <span style={{ color: "#cbd2dd", fontSize: 11 }}>○</span>
+    <span style={{ position: "relative", display: "grid", gridTemplateColumns: "repeat(5, 1fr)", gap: 2 }}>
+      <span aria-hidden="true" style={{
+        position: "absolute", left: "10%", right: "10%", top: 5, height: 0,
+        borderTop: terminal ? `2px solid ${color}` : `2px dashed ${color}`,
+        opacity: terminal ? 0.55 : 0.28,
+      }} />
+      {HITOS.map((h) => {
+        const f = fechaHito(c[h.clave]);
+        return (
+          <span key={h.clave} title={f ? `${h.titulo}: ${f}` : `${h.titulo}: pendiente`}
+            style={{ position: "relative", textAlign: "center", lineHeight: 1.15, overflow: "hidden" }}>
+            <span style={{
+              display: "inline-block", width: 9, height: 9, borderRadius: "50%",
+              background: f ? color : fondo,
+              border: f ? `2px solid ${color}` : "1.5px solid #cbd2dd",
+              boxShadow: `0 0 0 2.5px ${fondo}`, verticalAlign: "middle",
+            }} />
+            <div style={{ fontSize: 8.5, color: "var(--texto-tenue)", whiteSpace: "nowrap", marginTop: 1 }}>
+              {f || "\u00a0"}
+            </div>
+          </span>
+        );
+      })}
+    </span>
+  );
+}
+
+function Conciliacion({ fila }) {
+  if (!fila) {
+    return (
+      <div style={{ fontSize: 11.5, color: "var(--texto-tenue)", marginTop: 10 }}>
+        Sin control contra el panel de MELI. Falta que pnr-mx.cjs escriba en pnr_control_mx.
+      </div>
+    );
+  }
+  const calza = fila.brecha_total === 0;
+  const color = calza ? C.verde : C.naranja;
+  const hace = Math.round((Date.now() - new Date(fila.capturado_en).getTime()) / 60000);
+  return (
+    <div style={{
+      display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", marginTop: 10,
+      background: calza ? "#e9f3ef" : C.naranjaTenue, border: `1px solid ${color}`,
+      borderRadius: 10, padding: "7px 12px", fontSize: 12,
+    }}>
+      <span style={{ color, fontWeight: 600 }}>
+        {calza ? "Calza con MELI" : `Faltan ${fila.brecha_total} casos`}
+      </span>
+      <span style={{ color: "var(--texto-suave)" }}>
+        MELI {fila.total_meli} · nosotros {fila.total_base}
+      </span>
+      {fila.brecha_anulado !== 0 && (
+        <span style={{ color: "var(--texto-suave)" }}>
+          anulados {fila.cierre_anulado} vs {fila.base_anulado}
+        </span>
       )}
+      {fila.brecha_facturacion !== 0 && (
+        <span style={{ color: "var(--texto-suave)" }}>
+          facturación {fila.cierre_facturacion} vs {fila.base_facturacion}
+        </span>
+      )}
+      <span style={{ marginLeft: "auto", color: "var(--texto-tenue)" }}>
+        hace {hace < 1 ? "menos de 1" : hace} min
+      </span>
     </div>
   );
 }
@@ -233,7 +307,9 @@ function Detalle({ c, onCopiar }) {
 }
 
 function Fila({ c, abierta, onAbrir, onCopiar }) {
-  const r = reloj(c.horas_restantes);
+  const r = reloj(c);
+  const g = POR_CLAVE[clasificar(c)];
+  const fondo = abierta ? C.grisTenue : "#fff";
   const sub = SUBESTADOS[c.sub_estado] || { corto: c.sub_estado, color: C.gris };
   return (
     <Fragment>
@@ -246,7 +322,7 @@ function Fila({ c, abierta, onAbrir, onCopiar }) {
         <span style={{ fontSize: 11.5, color: "var(--texto-suave)", fontVariantNumeric: "tabular-nums" }}>
           {c.case_id}
         </span>
-        <span style={{ fontSize: 12, fontWeight: 600, color: r.color, whiteSpace: "nowrap" }}>
+        <span title={r.titulo} style={{ fontSize: 12, fontWeight: 600, color: r.color, whiteSpace: "nowrap" }}>
           {r.texto}
         </span>
         <span style={{ minWidth: 0, fontSize: 13, color: "var(--texto)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
@@ -260,9 +336,7 @@ function Fila({ c, abierta, onAbrir, onCopiar }) {
           borderRadius: 20, padding: "1px 7px", textAlign: "center", whiteSpace: "nowrap",
           overflow: "hidden", textOverflow: "ellipsis",
         }}>{sub.corto}</span>
-        <span style={{ display: "grid", gridTemplateColumns: "repeat(5, 1fr)", gap: 2 }}>
-          {HITOS.map((h) => <Hito key={h.clave} valor={c[h.clave]} titulo={h.titulo} />)}
-        </span>
+        <Riel c={c} color={g.color} terminal={g.terminal} fondo={fondo} />
         <span style={{ textAlign: "right", fontSize: 13, fontWeight: 600, color: "var(--texto)" }}>
           {dinero(c.monto)}
         </span>
@@ -282,15 +356,20 @@ export default function Posventa() {
   const [busqueda, setBusqueda] = useState("");
   const [abierta, setAbierta] = useState(null);
   const [aviso, setAviso] = useState("");
+  const [control, setControl] = useState([]);
 
   async function cargar() {
     setError(null);
-    const { data, error: err } = await sb
-      .from("vw_pnr_tablero")
-      .select("*")
-      .limit(5000);
-    if (err) setError(err.message);
-    else setCasos(data || []);
+    const [tablero, ctrl] = await Promise.all([
+      sb.from("vw_pnr_tablero").select("*").limit(5000),
+      sb.from("vw_pnr_control").select("*"),
+    ]);
+    if (tablero.error) setError(tablero.error.message);
+    else setCasos(tablero.data || []);
+    // El control es opcional a propósito: si todavía no existe la tabla o el
+    // scraper no la escribió, la pantalla funciona igual y solo pierde la
+    // franja de conciliación. No vale tumbar el tablero por un chequeo.
+    setControl(ctrl.error ? [] : (ctrl.data || []));
     setCargando(false);
   }
 
@@ -341,15 +420,20 @@ export default function Posventa() {
             .some((v) => String(v || "").toLowerCase().includes(q)))
       : delPeriodo.filter((c) => grupo === "todos" || clasificar(c) === grupo);
 
-    // Orden: primero lo que todavía tiene reloj, del que vence antes al que
-    // vence después. Los vencidos van abajo por monto, porque una vez que el
-    // SLA pasó el reloj ya no distingue nada y lo que decide a cuál ir primero
-    // es cuánta plata hay adentro.
+    // Tres rangos, en orden de lo que hay que mirar primero: lo que todavía
+    // tiene reloj corriendo, lo vencido pero todavía peleable, y lo ya
+    // resuelto. Dentro del primero manda el reloj; en los otros dos manda el
+    // monto, porque una vez que el SLA pasó o el caso cerró el reloj ya no
+    // distingue nada y lo que decide es cuánta plata hay adentro.
+    const rango = (c) => {
+      const g = POR_CLAVE[clasificar(c)];
+      if (g && g.terminal) return 2;
+      return (c.horas_restantes ?? -9999) > 0 ? 0 : 1;
+    };
     return base.slice().sort((a, b) => {
-      const va = (a.horas_restantes ?? -9999) > 0;
-      const vb = (b.horas_restantes ?? -9999) > 0;
-      if (va !== vb) return va ? -1 : 1;
-      if (va) return (a.horas_restantes ?? 0) - (b.horas_restantes ?? 0);
+      const ra = rango(a), rb = rango(b);
+      if (ra !== rb) return ra - rb;
+      if (ra === 0) return (a.horas_restantes ?? 0) - (b.horas_restantes ?? 0);
       return Number(b.monto || 0) - Number(a.monto || 0);
     });
   }, [casos, delPeriodo, grupo, busqueda, buscando]);
@@ -415,6 +499,12 @@ export default function Posventa() {
             onClick={() => { setBusqueda(""); setGrupo(g.clave); setAbierta(null); }} />
         ))}
       </div>
+
+      {/* Conciliación contra el panel de MELI. Es la única parte de la pantalla
+          que puede decir "nos falta algo": todo lo demás describe lo que ya
+          trajimos, y un scraper que se pierde casos se ve idéntico a un día
+          tranquilo. */}
+      <Conciliacion fila={control.find((c) => c.periodo === periodo)} />
 
       {/* Lista */}
       <div style={{ background: "#fff", border: "1px solid var(--borde)", borderRadius: 12, overflow: "hidden", marginTop: 14 }}>
