@@ -202,9 +202,18 @@ function Conciliacion({ fila }) {
       </div>
     );
   }
-  const calza = fila.brecha_total === 0;
+  // Una captura vieja que dice "calza" es la única forma en que este control
+  // puede mentir: el scraper puede llevar horas caído y la franja seguiría
+  // en verde con el último número bueno. Pasados 20 minutos deja de afirmar
+  // nada y pasa a avisar que está mirando una foto vieja.
+  const min = Math.round((Date.now() - new Date(fila.capturado_en).getTime()) / 60000);
+  const vieja = min > 20;
+  const hace = min < 1 ? "menos de 1 min"
+             : min < 60 ? `${min} min`
+             : min < 2880 ? `${Math.round(min / 60)} h`
+             : `${Math.round(min / 1440)} días`;
+  const calza = fila.brecha_total === 0 && !vieja;
   const color = calza ? C.verde : C.naranja;
-  const hace = Math.round((Date.now() - new Date(fila.capturado_en).getTime()) / 60000);
   return (
     <div style={{
       display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", marginTop: 10,
@@ -212,7 +221,10 @@ function Conciliacion({ fila }) {
       borderRadius: 10, padding: "7px 12px", fontSize: 12,
     }}>
       <span style={{ color, fontWeight: 600 }}>
-        {calza ? "Calza con MELI" : `Faltan ${fila.brecha_total} casos`}
+        {vieja ? "Control desactualizado"
+               : fila.brecha_total === 0 ? "Calza con MELI"
+               : fila.brecha_total > 0 ? `Faltan ${fila.brecha_total} casos`
+               : `Tenemos ${Math.abs(fila.brecha_total)} casos de más`}
       </span>
       <span style={{ color: "var(--texto-suave)" }}>
         MELI {fila.total_meli} · nosotros {fila.total_base}
@@ -227,8 +239,8 @@ function Conciliacion({ fila }) {
           facturación {fila.cierre_facturacion} vs {fila.base_facturacion}
         </span>
       )}
-      <span style={{ marginLeft: "auto", color: "var(--texto-tenue)" }}>
-        hace {hace < 1 ? "menos de 1" : hace} min
+      <span style={{ marginLeft: "auto", color: vieja ? C.naranja : "var(--texto-tenue)" }}>
+        hace {hace}
       </span>
     </div>
   );
