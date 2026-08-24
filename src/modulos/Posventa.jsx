@@ -211,24 +211,41 @@ function pct(n, total) {
 function Linea({ etiqueta, meli, propio, total }) {
   const difiere = propio !== null && propio !== undefined && Number(meli || 0) !== Number(propio);
   return (
-    <div style={{ display: "flex", alignItems: "baseline", gap: 8, padding: "2.5px 0" }}>
-      <span style={{ flex: 1, fontSize: 11.5, color: "var(--texto-suave)", minWidth: 0,
+    <div style={{ display: "grid", gridTemplateColumns: "1fr 42px 52px 52px", gap: 6,
+      alignItems: "baseline", padding: "2.5px 0" }}>
+      <span style={{ fontSize: 11.5, color: "var(--texto-suave)", minWidth: 0,
         overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
         {etiqueta}
       </span>
-      {difiere && (
-        <span title="Lo que tenemos nosotros" style={{ fontSize: 11, fontWeight: 600, color: C.naranja }}>
-          {propio}
-        </span>
-      )}
-      <span style={{ fontSize: 11.5, fontWeight: 600, color: difiere ? C.naranja : "var(--texto)",
+      <span style={{ textAlign: "right", fontSize: 11.5, fontWeight: 600, color: "var(--texto)",
         fontVariantNumeric: "tabular-nums" }}>
         {meli ?? "—"}
       </span>
-      <span style={{ width: 48, textAlign: "right", fontSize: 11, color: "var(--texto-tenue)",
+      <span style={{ textAlign: "right", fontSize: 11.5, fontWeight: 600,
+        color: difiere ? C.naranja : "var(--texto)", fontVariantNumeric: "tabular-nums" }}>
+        {propio === null || propio === undefined ? "—" : propio}
+      </span>
+      <span style={{ textAlign: "right", fontSize: 11, color: "var(--texto-tenue)",
         fontVariantNumeric: "tabular-nums" }}>
         {pct(meli, total)}
       </span>
+    </div>
+  );
+}
+
+// Cabecera de las dos columnas numéricas. Sin esto la fila mostraba dos
+// cifras pegadas sin decir cuál era cuál, que es peor que no compararlas:
+// el que mira tiene que adivinar de quién es cada número.
+function Cabecera() {
+  return (
+    <div style={{ display: "grid", gridTemplateColumns: "1fr 42px 52px 52px", gap: 6,
+      padding: "0 0 4px", borderBottom: "1px solid var(--borde)", marginBottom: 4,
+      fontSize: 9.5, letterSpacing: 0.3, textTransform: "uppercase",
+      color: "var(--texto-tenue)", fontWeight: 600 }}>
+      <span />
+      <span style={{ textAlign: "right" }}>MELI</span>
+      <span style={{ textAlign: "right" }}>Nosotros</span>
+      <span />
     </div>
   );
 }
@@ -286,16 +303,20 @@ function Control({ fila, casos }) {
           {total}
         </div>
         <div style={{ fontSize: 11, color: calza && !vieja ? C.verde : C.naranja }}>
-          {vieja ? "control desactualizado"
-                 : calza ? "calzamos"
-                 : `nosotros ${fila.total_base}`}
+          {calza ? "calzamos" : `nosotros ${fila.total_base}`}
         </div>
+        {vieja && (
+          <div style={{ fontSize: 10, color: C.naranja, lineHeight: 1.3, marginTop: 3 }}>
+            Foto vieja: las diferencias pueden ser solo desfase
+          </div>
+        )}
         <div style={{ fontSize: 10, color: vieja ? C.naranja : "var(--texto-tenue)", marginTop: 2 }}>
           {hace}
         </div>
       </div>
 
       <Panel titulo="Estado de los casos">
+        <Cabecera />
         <Linea etiqueta="Nuevo"            meli={fila.est_nuevo}     propio={propio.NEW}         total={total} />
         <Linea etiqueta="Revisión en curso" meli={fila.est_revision} propio={propio.IN_PROGRESS} total={total} />
         <Linea etiqueta="Cerrado"          meli={fila.est_cerrado}   propio={propio.CLOSED}      total={total} />
@@ -303,6 +324,7 @@ function Control({ fila, casos }) {
       </Panel>
 
       <Panel titulo="Detalle de cierre">
+        <Cabecera />
         <Linea etiqueta="Anulado"               meli={fila.cierre_anulado}     propio={anulado}     total={cerrados} />
         <Linea etiqueta="Enviado a facturación" meli={fila.cierre_facturacion} propio={facturacion} total={cerrados} />
       </Panel>
