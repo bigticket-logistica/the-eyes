@@ -194,54 +194,118 @@ function Riel({ c, color, terminal, fondo }) {
   );
 }
 
-function Conciliacion({ fila }) {
+// Control contra el panel de MELI, con el mismo desglose que publican ellos.
+// Cada línea trae las dos cifras: la de MELI y la nuestra. Copiar el panel
+// idéntico se vería mejor pero no serviría de nada — el valor de tenerlo acá
+// es poder ver en qué fila exacta nos separamos, no repetir un número que ya
+// está a un clic de distancia en su sitio.
+//
+// "Motivo de los casos" no está: los 198 son Reclamo PNR al 100%, así que el
+// bloque ocupa una tarjeta entera para decir siempre lo mismo. Si algún día
+// aparece otro motivo, vuelve.
+function pct(n, total) {
+  if (!total) return "0%";
+  return ((Number(n || 0) * 100) / total).toFixed(2) + "%";
+}
+
+function Linea({ etiqueta, meli, propio, total }) {
+  const difiere = propio !== null && propio !== undefined && Number(meli || 0) !== Number(propio);
+  return (
+    <div style={{ display: "flex", alignItems: "baseline", gap: 8, padding: "2.5px 0" }}>
+      <span style={{ flex: 1, fontSize: 11.5, color: "var(--texto-suave)", minWidth: 0,
+        overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+        {etiqueta}
+      </span>
+      {difiere && (
+        <span title="Lo que tenemos nosotros" style={{ fontSize: 11, fontWeight: 600, color: C.naranja }}>
+          {propio}
+        </span>
+      )}
+      <span style={{ fontSize: 11.5, fontWeight: 600, color: difiere ? C.naranja : "var(--texto)",
+        fontVariantNumeric: "tabular-nums" }}>
+        {meli ?? "—"}
+      </span>
+      <span style={{ width: 48, textAlign: "right", fontSize: 11, color: "var(--texto-tenue)",
+        fontVariantNumeric: "tabular-nums" }}>
+        {pct(meli, total)}
+      </span>
+    </div>
+  );
+}
+
+function Panel({ titulo, children }) {
+  return (
+    <div style={{ flex: 1, minWidth: 230, background: "#fff", border: "1px solid var(--borde)",
+      borderRadius: 12, padding: "11px 14px" }}>
+      <div style={{ fontSize: 11.5, fontWeight: 600, color: "var(--texto)", marginBottom: 6 }}>
+        {titulo}
+      </div>
+      {children}
+    </div>
+  );
+}
+
+function Control({ fila, casos }) {
   if (!fila) {
     return (
-      <div style={{ fontSize: 11.5, color: "var(--texto-tenue)", marginTop: 10 }}>
+      <div style={{ fontSize: 11.5, color: "var(--texto-tenue)", marginTop: 14 }}>
         Sin control contra el panel de MELI. Falta que pnr-mx.cjs escriba en pnr_control_mx.
       </div>
     );
   }
+
+  // Los mismos cortes que hace MELI, calculados sobre lo que tenemos guardado.
+  const propio = { NEW: 0, IN_PROGRESS: 0, CLOSED: 0 };
+  let anulado = 0, facturacion = 0;
+  for (const c of casos) {
+    if (propio[c.estado] !== undefined) propio[c.estado] += 1;
+    if (c.sub_estado === "NOT_BILLED") anulado += 1;
+    if (c.sub_estado === "BILLED") facturacion += 1;
+  }
+
   // Una captura vieja que dice "calza" es la única forma en que este control
-  // puede mentir: el scraper puede llevar horas caído y la franja seguiría
-  // en verde con el último número bueno. Pasados 20 minutos deja de afirmar
-  // nada y pasa a avisar que está mirando una foto vieja.
+  // puede mentir: el scraper puede llevar horas caído y el panel seguiría
+  // mostrando el último número bueno. Pasados 20 minutos —cuatro ciclos— deja
+  // de afirmar nada y avisa que está mirando una foto vieja.
   const min = Math.round((Date.now() - new Date(fila.capturado_en).getTime()) / 60000);
   const vieja = min > 20;
-  const hace = min < 1 ? "menos de 1 min"
-             : min < 60 ? `${min} min`
-             : min < 2880 ? `${Math.round(min / 60)} h`
-             : `${Math.round(min / 1440)} días`;
-  const calza = fila.brecha_total === 0 && !vieja;
-  const color = calza ? C.verde : C.naranja;
+  const hace = min < 1 ? "hace menos de 1 min"
+             : min < 60 ? `hace ${min} min`
+             : min < 2880 ? `hace ${Math.round(min / 60)} h`
+             : `hace ${Math.round(min / 1440)} días`;
+  const total = Number(fila.total_meli || 0);
+  const cerrados = Number(fila.est_cerrado || 0);
+  const calza = fila.brecha_total === 0;
+
   return (
-    <div style={{
-      display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", marginTop: 10,
-      background: calza ? "#e9f3ef" : C.naranjaTenue, border: `1px solid ${color}`,
-      borderRadius: 10, padding: "7px 12px", fontSize: 12,
-    }}>
-      <span style={{ color, fontWeight: 600 }}>
-        {vieja ? "Control desactualizado"
-               : fila.brecha_total === 0 ? "Calza con MELI"
-               : fila.brecha_total > 0 ? `Faltan ${fila.brecha_total} casos`
-               : `Tenemos ${Math.abs(fila.brecha_total)} casos de más`}
-      </span>
-      <span style={{ color: "var(--texto-suave)" }}>
-        MELI {fila.total_meli} · nosotros {fila.total_base}
-      </span>
-      {fila.brecha_anulado !== 0 && (
-        <span style={{ color: "var(--texto-suave)" }}>
-          anulados {fila.cierre_anulado} vs {fila.base_anulado}
-        </span>
-      )}
-      {fila.brecha_facturacion !== 0 && (
-        <span style={{ color: "var(--texto-suave)" }}>
-          facturación {fila.cierre_facturacion} vs {fila.base_facturacion}
-        </span>
-      )}
-      <span style={{ marginLeft: "auto", color: vieja ? C.naranja : "var(--texto-tenue)" }}>
-        hace {hace}
-      </span>
+    <div style={{ display: "flex", gap: 12, flexWrap: "wrap", marginTop: 14 }}>
+      <div style={{ width: 168, background: "#fff", border: "1px solid var(--borde)",
+        borderRadius: 12, padding: "11px 14px", textAlign: "center" }}>
+        <div style={{ fontSize: 11.5, color: "var(--texto-suave)" }}>Casos en MELI</div>
+        <div style={{ fontSize: 30, fontWeight: 600, color: "var(--texto)", lineHeight: 1.35 }}>
+          {total}
+        </div>
+        <div style={{ fontSize: 11, color: calza && !vieja ? C.verde : C.naranja }}>
+          {vieja ? "control desactualizado"
+                 : calza ? "calzamos"
+                 : `nosotros ${fila.total_base}`}
+        </div>
+        <div style={{ fontSize: 10, color: vieja ? C.naranja : "var(--texto-tenue)", marginTop: 2 }}>
+          {hace}
+        </div>
+      </div>
+
+      <Panel titulo="Estado de los casos">
+        <Linea etiqueta="Nuevo"            meli={fila.est_nuevo}     propio={propio.NEW}         total={total} />
+        <Linea etiqueta="Revisión en curso" meli={fila.est_revision} propio={propio.IN_PROGRESS} total={total} />
+        <Linea etiqueta="Cerrado"          meli={fila.est_cerrado}   propio={propio.CLOSED}      total={total} />
+        <Linea etiqueta="Cancelado"        meli={fila.est_cancelado} propio={null}               total={total} />
+      </Panel>
+
+      <Panel titulo="Detalle de cierre">
+        <Linea etiqueta="Anulado"               meli={fila.cierre_anulado}     propio={anulado}     total={cerrados} />
+        <Linea etiqueta="Enviado a facturación" meli={fila.cierre_facturacion} propio={facturacion} total={cerrados} />
+      </Panel>
     </div>
   );
 }
@@ -512,11 +576,11 @@ export default function Posventa() {
         ))}
       </div>
 
-      {/* Conciliación contra el panel de MELI. Es la única parte de la pantalla
-          que puede decir "nos falta algo": todo lo demás describe lo que ya
+      {/* Control contra el panel de MELI. Es la única parte de la pantalla que
+          puede decir "nos falta algo": todo lo demás describe lo que ya
           trajimos, y un scraper que se pierde casos se ve idéntico a un día
           tranquilo. */}
-      <Conciliacion fila={control.find((c) => c.periodo === periodo)} />
+      <Control fila={control.find((c) => c.periodo === periodo)} casos={delPeriodo} />
 
       {/* Lista */}
       <div style={{ background: "#fff", border: "1px solid var(--borde)", borderRadius: 12, overflow: "hidden", marginTop: 14 }}>
