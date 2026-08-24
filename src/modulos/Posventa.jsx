@@ -131,7 +131,7 @@ const HITOS = [
 
 // Una sola plantilla de columnas para la cabecera y para las filas: así no
 // hay forma de que se desalineen cuando cambie un ancho.
-const GRID = "14px 84px 84px minmax(130px,1fr) 128px 104px 296px 78px";
+const GRID = "14px 84px 112px minmax(126px,1fr) 128px 104px 296px 78px";
 
 function dinero(n) {
   if (n === null || n === undefined) return "—";
@@ -146,25 +146,53 @@ function fechaHito(iso) {
   });
 }
 
-// El reloj sale de horas_restantes, que ya calcula la vista sobre las 48 h
-// contadas desde fecha_caso. No se recalcula acá para que la pantalla y la
-// base nunca digan cosas distintas.
+// El reloj no usa horas_restantes de la vista: ese número se congela en el
+// momento de la consulta y a los veinte minutos ya miente. Se calcula contra
+// fecha_caso con un tick propio, así el contador sube de verdad mientras el
+// analista mira la pantalla.
 //
-// En un caso ya resuelto la cuenta regresiva no significa nada: MELI ya
-// cobró o ya anuló, y las horas que faltaban dejaron de importar en ese
-// momento. Antes seguía corriendo y ponía casos cobrados arriba de todo con
-// un reloj naranja, que es justo lo contrario de lo que hay que mirar.
-function reloj(c) {
+// Cuenta hacia arriba, no hacia atrás, y muestra debajo cuándo nació el caso.
+// El regresivo obligaba a hacer la resta de cabeza para saber de cuándo era;
+// así se ven las dos cosas y la barra dice a simple vista cuánto falta.
+const SLA_H = 48;
+
+function Reloj({ c, ahora }) {
   const g = POR_CLAVE[clasificar(c)];
   if (g && g.terminal) {
-    return { texto: "—", color: C.gris, titulo: "Resuelto: el SLA dejó de correr" };
+    return (
+      <span title="Resuelto: el SLA dejó de correr"
+        style={{ fontSize: 12, color: C.gris }}>—</span>
+    );
   }
-  const horas = c.horas_restantes;
-  if (horas === null || horas === undefined) return { texto: "—", color: C.gris, titulo: "" };
-  if (horas <= 0) return { texto: `Vencido ${Math.abs(Math.round(horas))} h`, color: C.ladrillo, titulo: "" };
-  if (horas < 6)  return { texto: `${horas.toFixed(1)} h`, color: C.ladrillo, titulo: "" };
-  if (horas < 24) return { texto: `${Math.floor(horas)} h`, color: C.naranja, titulo: "" };
-  return { texto: `${Math.floor(horas)} h`, color: C.navy, titulo: "" };
+
+  const inicio = c.fecha_caso ? new Date(c.fecha_caso).getTime() : null;
+  if (!inicio) return <span style={{ fontSize: 12, color: C.gris }}>—</span>;
+
+  const transcurrido = (ahora - inicio) / 3600000;
+  const restante = SLA_H - transcurrido;
+  const pct = Math.max(0, Math.min(100, (transcurrido / SLA_H) * 100));
+  const color = restante < 6 ? C.ladrillo : restante < 24 ? C.naranja : C.navy;
+
+  const h = Math.floor(transcurrido);
+  const m = Math.floor((transcurrido - h) * 60);
+
+  return (
+    <span style={{ display: "block", lineHeight: 1.2 }}
+      title={restante > 0
+        ? `Quedan ${restante.toFixed(1)} h de las ${SLA_H}`
+        : `Vencido hace ${Math.abs(restante).toFixed(1)} h`}>
+      <span style={{ fontSize: 12.5, fontWeight: 600, color, fontVariantNumeric: "tabular-nums" }}>
+        {h}:{String(m).padStart(2, "0")}
+      </span>
+      <span style={{ fontSize: 9.5, color: "var(--texto-tenue)" }}> / {SLA_H} h</span>
+      <span style={{ display: "block", height: 3, borderRadius: 2, background: "#e6eaf1", margin: "2px 0 1px" }}>
+        <span style={{ display: "block", height: 3, borderRadius: 2, width: `${pct}%`, background: color }} />
+      </span>
+      <span style={{ fontSize: 9, color: "var(--texto-tenue)", whiteSpace: "nowrap" }}>
+        {c.cuando_mx || "—"}
+      </span>
+    </span>
+  );
 }
 
 function Tarjeta({ grupo, monto, casos, activa, onClick }) {
@@ -462,8 +490,7 @@ function Detalle({ c, onCopiar, onPedir, trayendo }) {
   );
 }
 
-function Fila({ c, abierta, onAbrir, onCopiar, onPedir, trayendo }) {
-  const r = reloj(c);
+function Fila({ c, abierta, onAbrir, onCopiar, onPedir, trayendo, ahora }) {
   const g = POR_CLAVE[clasificar(c)];
   const fondo = abierta ? C.grisTenue : "#fff";
   const sub = SUBESTADOS[c.sub_estado] || { corto: c.sub_estado, color: C.gris };
@@ -478,9 +505,7 @@ function Fila({ c, abierta, onAbrir, onCopiar, onPedir, trayendo }) {
         <span style={{ fontSize: 11.5, color: "var(--texto-suave)", fontVariantNumeric: "tabular-nums" }}>
           {c.case_id}
         </span>
-        <span title={r.titulo} style={{ fontSize: 12, fontWeight: 600, color: r.color, whiteSpace: "nowrap" }}>
-          {r.texto}
-        </span>
+        <Reloj c={c} ahora={ahora} />
         <span style={{ minWidth: 0, fontSize: 13, color: "var(--texto)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
           {c.conductor || "Sin conductor"}
         </span>
@@ -513,6 +538,7 @@ export default function Posventa() {
   const [abiertas, setAbiertas] = useState(new Set());
   const [aviso, setAviso] = useState("");
   const [trayendo, setTrayendo] = useState(new Set());
+  const [ahora, setAhora] = useState(() => Date.now());
 
   async function cargar() {
     setError(null);
@@ -524,6 +550,12 @@ export default function Posventa() {
     else setCasos(data || []);
     setCargando(false);
   }
+
+  // Un tick por minuto mueve todos los relojes sin volver a consultar la base.
+  useEffect(() => {
+    const t = setInterval(() => setAhora(Date.now()), 60000);
+    return () => clearInterval(t);
+  }, []);
 
   useEffect(() => {
     cargar();
@@ -717,7 +749,7 @@ export default function Posventa() {
         </div>
 
         <div style={{ overflowX: "auto" }}>
-          <div style={{ minWidth: 1060 }}>
+          <div style={{ minWidth: 1090 }}>
             {/* Cabecera de columnas: sin esto los cinco tildes no se sabe qué
                 marcan. Usa la misma plantilla de grid que las filas. */}
             <div style={{
@@ -753,7 +785,7 @@ export default function Posventa() {
                 <Fila key={c.case_id} c={c} abierta={abiertas.has(c.case_id)}
                   onAbrir={() => abrirFila(c)}
                   onCopiar={copiar} onPedir={pedirDetalle}
-                  trayendo={trayendo.has(c.case_id)} />
+                  trayendo={trayendo.has(c.case_id)} ahora={ahora} />
               ))
             )}
           </div>
