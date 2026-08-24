@@ -196,6 +196,24 @@ function Reloj({ c, ahora }) {
   );
 }
 
+// Cabecera que ordena. El analista preguntó dos veces cómo estaba ordenada la
+// lista: si hay que explicarlo, la pantalla debería decirlo sola.
+function ColOrden({ campo, orden, onClick, derecha, children }) {
+  const activa = orden.campo === campo;
+  return (
+    <button onClick={() => onClick(campo)}
+      style={{
+        background: "transparent", border: "none", padding: 0, cursor: "pointer",
+        font: "inherit", letterSpacing: "inherit", textTransform: "inherit",
+        textAlign: derecha ? "right" : "left",
+        color: activa ? C.navy : "var(--texto-tenue)",
+        fontWeight: activa ? 700 : 600,
+      }}>
+      {children}{activa ? (orden.dir === "asc" ? " \u2191" : " \u2193") : ""}
+    </button>
+  );
+}
+
 function Tarjeta({ grupo, monto, casos, activa, onClick }) {
   return (
     <button onClick={onClick} title={`Ver solo ${grupo.etiqueta.toLowerCase()}`}
@@ -615,6 +633,48 @@ export default function Posventa() {
       ? { campo, dir: o.dir === "asc" ? "desc" : "asc" }
       : { campo, dir: campo === "monto" ? "desc" : "asc" });
     setAbiertas(new Set());
+  }
+
+  // Se llama al desplegar la fila y desde el botón. Sin secreto configurado no
+  // intenta: mejor un aviso claro que un fetch que falla en silencio.
+  async function pedirDetalle(caseId, forzar) {
+    if (!SECRETO_PNR) {
+      setAviso("Falta VITE_PNR_API_SECRET");
+      setTimeout(() => setAviso(""), 2500);
+      return;
+    }
+    setTrayendo((prev) => new Set(prev).add(caseId));
+    try {
+      const r = await fetch(`${API_PNR}/pnr-detalle/${caseId}${forzar ? "?forzar=1" : ""}`,
+        { headers: { "x-api-secret": SECRETO_PNR } });
+      const j = await r.json();
+      if (!j.ok) throw new Error(j.error || "sin detalle");
+      // Se mezcla en memoria en vez de recargar toda la lista: la fila está
+      // abierta y una recarga la cerraría de golpe delante del analista.
+      setCasos((prev) => prev.map((x) => x.case_id === caseId
+        ? { ...x, ...soloDetalle(j.detalle),
+            detalle_capturado_en: j.detalle.capturado_en,
+            detalle_error: j.detalle.error || null }
+        : x));
+    } catch (e) {
+      setCasos((prev) => prev.map((x) => x.case_id === caseId
+        ? { ...x, detalle_error: String(e.message || e) } : x));
+    } finally {
+      setTrayendo((prev) => { const n = new Set(prev); n.delete(caseId); return n; });
+    }
+  }
+
+  // Varias filas pueden quedar abiertas: el analista compara casos del mismo
+  // conductor o de la misma ruta, y cerrarle la anterior cada vez lo obliga a
+  // memorizar lo que acaba de leer.
+  function abrirFila(c) {
+    const estaba = abiertas.has(c.case_id);
+    setAbiertas((prev) => {
+      const n = new Set(prev);
+      if (estaba) n.delete(c.case_id); else n.add(c.case_id);
+      return n;
+    });
+    if (!estaba && !detalleFresco(c) && !trayendo.has(c.case_id)) pedirDetalle(c.case_id, false);
   }
 
   function copiar(texto, mensaje) {
