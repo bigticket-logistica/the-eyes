@@ -8,6 +8,20 @@ import { sb } from "../shared/supabase.js";
 // tres RPC de totales que después habría que mantener sincronizadas a mano
 // con la misma regla de clasificación.
 
+// El detalle de MELI es SSR: no hay JSON que pedir, hay que abrir la página.
+// Por eso vive en un servicio aparte del VPS de México, detrás de Caddy, y se
+// llama solo cuando el analista despliega una fila. El resultado queda en
+// pnr_detalle_mx, así que la segunda vez que abren ese caso ya viene con la
+// consulta principal y no hay llamada.
+const API_PNR = import.meta.env.VITE_PNR_API_URL || "https://api-mx.bigticket.cl/pnr";
+const SECRETO_PNR = import.meta.env.VITE_PNR_API_SECRET || "";
+const FRESCURA_MS = 12 * 3600 * 1000;
+
+function detalleFresco(c) {
+  if (!c || !c.detalle_capturado_en) return false;
+  return Date.now() - new Date(c.detalle_capturado_en).getTime() < FRESCURA_MS;
+}
+
 const VISTAS = [
   { clave: "pnr",          etiqueta: "PNR",          activa: true  },
   { clave: "devoluciones", etiqueta: "Devoluciones", activa: false },
@@ -290,68 +304,143 @@ function Dato({ etiqueta, valor }) {
   );
 }
 
-function Detalle({ c, onCopiar }) {
+function Bloque({ titulo, children, tono }) {
+  return (
+    <div style={{ marginBottom: 12 }}>
+      <div style={{ fontSize: 11, color: tono || "var(--texto-suave)", fontWeight: 600, marginBottom: 6 }}>
+        {titulo}
+      </div>
+      {children}
+    </div>
+  );
+}
+
+function Detalle({ c, onCopiar, onPedir, trayendo }) {
   const sinRuta = !c.conductor_ruta && !c.patente && !c.fecha_ruta;
   const sub = SUBESTADOS[c.sub_estado] || { largo: c.sub_estado };
+  const hayDetalle = !!c.detalle_capturado_en && !c.detalle_error;
+
+  // La defensa del caso en una línea. Si MELI registró la entrega en el
+  // domicilio exacto y con constancia de quién recibió, el reclamo se pelea
+  // solo — y eso hoy el analista lo descubre abriendo MELI caso por caso.
+  const enDomicilio = /^A\s*0([.,]0+)?\s*km/i.test(c.distancia_texto || "");
+  const defendible = enDomicilio && !!c.recibio_quien;
+
   return (
     <div style={{ padding: "12px 16px 14px 44px", background: C.grisTenue, borderTop: "1px solid var(--borde)" }}>
-      <div style={{ display: "flex", flexWrap: "wrap", gap: 18, marginBottom: 12 }}>
-        <Dato etiqueta="Caso PNR" valor={c.case_id} />
-        <Dato etiqueta="Guía" valor={c.shipment_id} />
-        <Dato etiqueta="Ruta" valor={`${c.route_code || "—"} · ${c.route_id || "—"}`} />
-        <Dato etiqueta="Centro" valor={c.service_center} />
-        <Dato etiqueta="Nace" valor={c.cuando_mx} />
-        <Dato etiqueta="Transcurrido" valor={c.horas_transcurridas != null ? `${Math.round(c.horas_transcurridas)} h` : null} />
-        <Dato etiqueta="Estado MELI" valor={`${ESTADOS[c.estado] || c.estado} · ${sub.largo}`} />
-        <Dato etiqueta="Periodo" valor={c.periodo} />
-      </div>
-
-      {/* Contexto de la ruta. Viene del cruce por route_id con la última
-          captura histórica de rutas_monitoreo_mx; si no cruzó se dice, no se
-          esconde: un caso sin ruta es justamente el que hay que ir a buscar
-          a mano a Logistic. */}
-      <div style={{ fontSize: 11, color: "var(--texto-suave)", fontWeight: 600, marginBottom: 6 }}>
-        Contexto de la ruta
-      </div>
-      {sinRuta ? (
-        <div style={{ fontSize: 12, color: "var(--texto-tenue)", marginBottom: 12 }}>
-          Sin captura de la ruta {c.route_id || "—"} en el monitor. Hay que buscarla en Logistic.
+      <Bloque titulo="Caso">
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 18 }}>
+          <Dato etiqueta="Caso PNR" valor={c.case_id} />
+          <Dato etiqueta="Guía" valor={c.shipment_id} />
+          <Dato etiqueta="Ruta" valor={`${c.route_code || "—"} · ${c.route_id || "—"}`} />
+          <Dato etiqueta="Centro" valor={c.service_center} />
+          <Dato etiqueta="Nace" valor={c.cuando_mx} />
+          <Dato etiqueta="Transcurrido" valor={c.horas_transcurridas != null ? `${Math.round(c.horas_transcurridas)} h` : null} />
+          <Dato etiqueta="Estado MELI" valor={`${ESTADOS[c.estado] || c.estado} · ${sub.largo}`} />
+          <Dato etiqueta="Responsable" valor={c.responsable} />
         </div>
-      ) : (
-        <div style={{ display: "flex", flexWrap: "wrap", gap: 18, marginBottom: 12 }}>
-          <Dato etiqueta="Conductor de ruta" valor={c.conductor_ruta} />
-          <Dato etiqueta="Placa" valor={c.patente} />
-          <Dato etiqueta="Fecha de ruta" valor={c.fecha_ruta} />
-          <Dato etiqueta="Estado" valor={c.estado_ruta} />
-          <Dato etiqueta="Paquetes" valor={c.pkg_total != null ? `${c.pkg_delivered ?? 0} de ${c.pkg_total} · ${c.pkg_not_delivered ?? 0} no entregados` : null} />
+      </Bloque>
+
+      {hayDetalle && (
+        <Fragment>
+          <Bloque titulo="Datos del reclamo">
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 18 }}>
+              <div style={{ minWidth: 260, flex: 1 }}>
+                <div style={{ fontSize: 10, color: "var(--texto-tenue)", textTransform: "uppercase", letterSpacing: 0.3 }}>
+                  Producto
+                </div>
+                <div style={{ fontSize: 12.5, color: "var(--texto)" }}>{c.producto || "—"}</div>
+              </div>
+              <Dato etiqueta="Valor" valor={c.valor_compra != null ? dinero(c.valor_compra) : null} />
+              <Dato etiqueta="Reclamante" valor={c.reclamante} />
+              <Dato etiqueta="Designado para recibir" valor={c.designado_recibir} />
+            </div>
+            {c.mensaje_reclamo && (
+              <div style={{ marginTop: 8, fontSize: 12.5, color: "var(--texto)", background: "#fff",
+                border: "1px solid var(--borde)", borderRadius: 8, padding: "8px 10px" }}>
+                “{c.mensaje_reclamo}”
+              </div>
+            )}
+          </Bloque>
+
+          {/* Prueba de entrega: el bloque que decide si el caso se pelea o se
+              paga. Va antes que el contexto de ruta a propósito. */}
+          <Bloque titulo="Prueba de entrega" tono={defendible ? C.verde : undefined}>
+            {defendible && (
+              <div style={{ fontSize: 12, color: C.verde, background: "#e9f3ef",
+                border: `1px solid ${C.verde}`, borderRadius: 8, padding: "6px 10px", marginBottom: 8 }}>
+                Entregado en el domicilio y con constancia de quién recibió.
+              </div>
+            )}
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 18 }}>
+              <Dato etiqueta="Fecha de entrega" valor={c.entregado_en} />
+              <Dato etiqueta="Recibió" valor={c.recibio_quien} />
+              <Dato etiqueta="Nombre" valor={c.recibio_nombre} />
+              <Dato etiqueta="Documento" valor={c.recibio_documento} />
+              <Dato etiqueta="Distancia" valor={c.distancia_texto} />
+            </div>
+          </Bloque>
+        </Fragment>
+      )}
+
+      <Bloque titulo="Ruta y conductor">
+        {sinRuta && !hayDetalle ? (
+          <div style={{ fontSize: 12, color: "var(--texto-tenue)" }}>
+            Sin captura de la ruta {c.route_id || "—"} en el monitor. Traé el detalle de MELI o buscala en Logistic.
+          </div>
+        ) : (
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 18 }}>
+            <Dato etiqueta="Conductor" valor={c.transportista || c.conductor_ruta || c.conductor} />
+            <Dato etiqueta="Teléfono" valor={c.telefono} />
+            <Dato etiqueta="Transportadora" valor={c.transportadora} />
+            <Dato etiqueta="Placa" valor={c.patente} />
+            <Dato etiqueta="Fecha de ruta" valor={c.fecha_ruta} />
+            <Dato etiqueta="Paquetes" valor={c.pkg_total != null ? `${c.pkg_delivered ?? 0} de ${c.pkg_total} · ${c.pkg_not_delivered ?? 0} no entregados` : null} />
+          </div>
+        )}
+      </Bloque>
+
+      <Bloque titulo="Cumplimiento">
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 18 }}>
+          {HITOS.map((h) => (
+            <Dato key={h.clave} etiqueta={h.titulo} valor={fechaHito(c[h.clave]) || "Pendiente"} />
+          ))}
+        </div>
+      </Bloque>
+
+      {c.detalle_error && (
+        <div style={{ fontSize: 11.5, color: C.ladrillo, background: C.ladrilloTenue,
+          border: `1px solid ${C.ladrillo}`, borderRadius: 8, padding: "6px 10px", marginBottom: 10 }}>
+          No se pudo traer el detalle de MELI: {c.detalle_error}
         </div>
       )}
 
-      {/* Los mismos hitos de la fila, acá con el nombre largo. */}
-      <div style={{ fontSize: 11, color: "var(--texto-suave)", fontWeight: 600, marginBottom: 6 }}>
-        Cumplimiento
-      </div>
-      <div style={{ display: "flex", flexWrap: "wrap", gap: 18, marginBottom: 12 }}>
-        {HITOS.map((h) => (
-          <Dato key={h.clave} etiqueta={h.titulo} valor={fechaHito(c[h.clave]) || "Pendiente"} />
-        ))}
-      </div>
-
-      <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
         <button onClick={() => onCopiar(String(c.case_id), "Caso copiado")}
           style={{ fontSize: 11.5, padding: "5px 11px" }}>Copiar caso</button>
         <button onClick={() => onCopiar(c.shipment_id, "Guía copiada")}
           style={{ fontSize: 11.5, padding: "5px 11px" }}>Copiar guía</button>
-        <button onClick={() => onCopiar(c.route_code || "", "Ruta copiada")}
-          style={{ fontSize: 11.5, padding: "5px 11px" }}>Copiar ruta</button>
+        {c.telefono && (
+          <button onClick={() => onCopiar(c.telefono, "Teléfono copiado")}
+            style={{ fontSize: 11.5, padding: "5px 11px" }}>Copiar teléfono</button>
+        )}
+        <button onClick={() => onPedir(c.case_id, true)} disabled={trayendo}
+          style={{ fontSize: 11.5, padding: "5px 11px" }}>
+          {trayendo ? "Trayendo de MELI…" : hayDetalle ? "Actualizar detalle" : "Traer detalle"}
+        </button>
         <button disabled title="Falta definir plantilla y tiempos de escalonamiento"
           style={{ fontSize: 11.5, padding: "5px 11px" }}>Avisar al conductor</button>
+        {hayDetalle && (
+          <span style={{ marginLeft: "auto", fontSize: 10, color: "var(--texto-tenue)" }}>
+            detalle de {fechaHito(c.detalle_capturado_en)}
+          </span>
+        )}
       </div>
     </div>
   );
 }
 
-function Fila({ c, abierta, onAbrir, onCopiar }) {
+function Fila({ c, abierta, onAbrir, onCopiar, onPedir, trayendo }) {
   const r = reloj(c);
   const g = POR_CLAVE[clasificar(c)];
   const fondo = abierta ? C.grisTenue : "#fff";
@@ -386,7 +475,7 @@ function Fila({ c, abierta, onAbrir, onCopiar }) {
           {dinero(c.monto)}
         </span>
       </div>
-      {abierta && <Detalle c={c} onCopiar={onCopiar} />}
+      {abierta && <Detalle c={c} onCopiar={onCopiar} onPedir={onPedir} trayendo={trayendo} />}
     </Fragment>
   );
 }
@@ -401,11 +490,12 @@ export default function Posventa() {
   const [busqueda, setBusqueda] = useState("");
   const [abierta, setAbierta] = useState(null);
   const [aviso, setAviso] = useState("");
+  const [trayendo, setTrayendo] = useState(new Set());
 
   async function cargar() {
     setError(null);
     const { data, error: err } = await sb
-      .from("vw_pnr_tablero")
+      .from("vw_pnr_detalle")
       .select("*")
       .limit(5000);
     if (err) setError(err.message);
@@ -478,6 +568,39 @@ export default function Posventa() {
     });
   }, [casos, delPeriodo, grupo, busqueda, buscando]);
 
+  // Se llama al desplegar la fila y desde el botón. Sin secreto configurado no
+  // intenta: mejor un aviso claro que un fetch que falla en silencio.
+  async function pedirDetalle(caseId, forzar) {
+    if (!SECRETO_PNR) {
+      setAviso("Falta VITE_PNR_API_SECRET");
+      setTimeout(() => setAviso(""), 2500);
+      return;
+    }
+    setTrayendo((s) => new Set(s).add(caseId));
+    try {
+      const r = await fetch(`${API_PNR}/pnr-detalle/${caseId}${forzar ? "?forzar=1" : ""}`,
+        { headers: { "x-api-secret": SECRETO_PNR } });
+      const j = await r.json();
+      if (!j.ok) throw new Error(j.error || "sin detalle");
+      // Se mezcla en memoria en vez de recargar toda la lista: la fila está
+      // abierta y una recarga la cerraría de golpe delante del analista.
+      setCasos((prev) => prev.map((x) => x.case_id === caseId
+        ? { ...x, ...j.detalle, detalle_capturado_en: j.detalle.capturado_en, detalle_error: j.detalle.error || null }
+        : x));
+    } catch (e) {
+      setCasos((prev) => prev.map((x) => x.case_id === caseId
+        ? { ...x, detalle_error: String(e.message || e) } : x));
+    } finally {
+      setTrayendo((s) => { const n = new Set(s); n.delete(caseId); return n; });
+    }
+  }
+
+  function abrirFila(c) {
+    const cerrar = abierta === c.case_id;
+    setAbierta(cerrar ? null : c.case_id);
+    if (!cerrar && !detalleFresco(c) && !trayendo.has(c.case_id)) pedirDetalle(c.case_id, false);
+  }
+
   function copiar(texto, mensaje) {
     navigator.clipboard.writeText(texto || "");
     setAviso(mensaje);
@@ -525,7 +648,7 @@ export default function Posventa() {
       {error && (
         <div style={{ background: C.ladrilloTenue, border: `1px solid ${C.ladrillo}`, color: C.ladrillo,
           borderRadius: 10, padding: "10px 14px", fontSize: 12.5, marginBottom: 14 }}>
-          No se pudo leer vw_pnr_tablero: {error}
+          No se pudo leer vw_pnr_detalle: {error}
         </div>
       )}
 
