@@ -68,55 +68,56 @@ const C = {
   grisTenue:    "#f4f6f9",
 };
 
-// Regla de clasificación del dinero. Está acá arriba, en un solo lugar, porque
-// es la definición del negocio y no un detalle de pintura: si mañana cambia
-// qué sub_estado cuenta como salvado, se cambia acá y las tarjetas, el filtro
-// y los totales quedan consistentes solos.
+// Los ocho estados de MELI con el nombre y el motivo que usa el analista de
+// PNR. El texto es el de su planilla, sin reinterpretar: si la pantalla y la
+// planilla dicen cosas distintas, gana la planilla y el analista deja de
+// confiar en la pantalla.
 //
-// Es un mapa completo y no una cadena de if a propósito. Con la cadena, el
-// último return era el destino de todo lo que no calzaba antes, así que un
-// sub_estado nuevo de MELI caía callado en "en gestión" y contaminaba una
-// tarjeta que dice tener comprobante. Acá cada uno de los siete está escrito,
-// y lo desconocido cae en riesgo: si MELI inventa un estado mañana, aparece
-// arriba pidiendo que alguien lo mire en vez de esconderse en el medio.
-const DESTINO = {
-  WITHOUT_RECEIPT:  "riesgo",   // el conductor todavía no entregó nada
-  WAITING_RECEIPT:  "riesgo",
-  UPLOADED_RECEIPT: "gestion",  // el comprobante ya está cargado en MELI
-  ON_REVIEW:        "gestion",
-  ASSIGNED:         "gestion",
-  TO_BILL:          "gestion",  // camino a facturación, pero todavía sin cerrar
-  BILLED:           "perdido",   // "Enviado a facturación" en el panel de MELI
-  NOT_BILLED:       "salvado",  // "Anulado" en el panel de MELI
-};
+// `grupo` es lo que agrupa las tarjetas de arriba, y responde a una sola
+// pregunta: quién tiene que mover. Es la diferencia entre un caso donde hay
+// algo que hacer y uno donde solo queda esperar.
+const ESTADOS_PNR = [
+  { clave: "WAITING_RECEIPT",  etiqueta: "Esperando comprobante",   corto: "Esperando compr.",   motivo: "Pendiente de resolución",                              grupo: "responder" },
+  { clave: "TO_BILL",          etiqueta: "Con Penalidad",           corto: "Con penalidad",      motivo: "Pendiente de resolución, con probabilidad de pasar a cobro 50%", grupo: "responder" },
+  { clave: "UPLOADED_RECEIPT", etiqueta: "Comprobante Cargado",     corto: "Compr. cargado",     motivo: "Respuesta enviada a mandante",                         grupo: "meli" },
+  { clave: "ASSIGNED",         etiqueta: "Pendiente de revisión",   corto: "Pend. revisión",     motivo: "Pendiente de revisión por Mercado Libre",              grupo: "meli" },
+  { clave: "ON_REVIEW",        etiqueta: "En Revisión",             corto: "En revisión",        motivo: "En revisión por Mercado Libre",                        grupo: "meli" },
+  { clave: "WITHOUT_RECEIPT",  etiqueta: "Sin Comprobante Cargado", corto: "Sin comprobante",    motivo: "Sin respuesta, sin respaldo",                          grupo: "sinrespaldo" },
+  { clave: "NOT_BILLED",       etiqueta: "Anulado",                 corto: "Anulado",            motivo: "Reclamo cerrado por cliente o por Mercado Libre",      grupo: "cerrado" },
+  { clave: "BILLED",           etiqueta: "Enviado a Facturación",   corto: "A facturación",      motivo: "Pasa a cobro",                                         grupo: "cerrado" },
+];
 
+const POR_ESTADO = Object.fromEntries(ESTADOS_PNR.map((e) => [e.clave, e]));
+
+// Un sub_estado que MELI invente mañana cae en "responder": aparece arriba
+// pidiendo que alguien lo mire, en vez de esconderse en el medio.
 function clasificar(c) {
-  return DESTINO[c.sub_estado] || "riesgo";
+  const e = POR_ESTADO[c.sub_estado];
+  return e ? e.grupo : "responder";
 }
 
 const GRUPOS = [
-  { clave: "riesgo",  etiqueta: "En riesgo", nota: "MELI espera pruebas",   color: C.naranja,  tinte: C.naranjaTenue,  terminal: false },
-  { clave: "gestion", etiqueta: "En gestión", nota: "comprobante entregado", color: C.navy,     tinte: C.navyTenue,     terminal: false },
-  { clave: "salvado", etiqueta: "Salvado",   nota: "anulado por MELI",      color: C.verde,    tinte: "#e9f3ef",       terminal: true },
-  { clave: "perdido", etiqueta: "Perdido",   nota: "enviado a facturación", color: C.ladrillo, tinte: C.ladrilloTenue, terminal: true },
+  { clave: "responder",   etiqueta: "Por responder",  nota: "nos toca a nosotros",  color: C.naranja,  tinte: C.naranjaTenue,  terminal: false },
+  { clave: "meli",        etiqueta: "Con respaldo",   nota: "Mercado Libre revisa", color: C.navy,     tinte: C.navyTenue,     terminal: false },
+  { clave: "sinrespaldo", etiqueta: "Sin respaldo",   nota: "respondido sin foto",  color: C.ladrillo, tinte: C.ladrilloTenue, terminal: true  },
+  { clave: "cerrado",     etiqueta: "Cerrados",       nota: "anulados y cobrados",  color: C.verde,    tinte: "#e9f3ef",       terminal: true  },
 ];
 
 const POR_CLAVE = Object.fromEntries(GRUPOS.map((g) => [g.clave, g]));
 
 const ESTADOS = { NEW: "Nuevo", IN_PROGRESS: "En curso", CLOSED: "Cerrado" };
 
-// Etiquetas cortas: la columna es angosta y "Esperando comprobante" completo
-// empujaba el resto de la fila. El texto largo queda en el detalle.
-const SUBESTADOS = {
-  WITHOUT_RECEIPT:  { corto: "Sin comprob.", largo: "Sin comprobante",       color: C.ladrillo },
-  WAITING_RECEIPT:  { corto: "Esperando",    largo: "Esperando comprobante", color: C.naranja },
-  UPLOADED_RECEIPT: { corto: "Subido",       largo: "Comprobante subido",    color: C.navy },
-  ON_REVIEW:        { corto: "En revisión",  largo: "En revisión",           color: C.navy },
-  ASSIGNED:         { corto: "Asignado",     largo: "Asignado",              color: C.navy },
-  TO_BILL:          { corto: "Por cobrar",   largo: "Por cobrar",            color: C.naranja },
-  BILLED:           { corto: "Cobrado",      largo: "Cobrado",               color: C.ladrillo },
-  NOT_BILLED:       { corto: "No cobrado",   largo: "No cobrado",            color: C.verde },
+// Color del chip por grupo: el estado puntual lo dice el texto, el color solo
+// tiene que decir si hay algo que hacer.
+const COLOR_GRUPO = {
+  responder: C.naranja, meli: C.navy, sinrespaldo: C.ladrillo, cerrado: C.verde,
 };
+
+function chipEstado(sub) {
+  const e = POR_ESTADO[sub];
+  if (!e) return { corto: sub, largo: sub, color: C.gris };
+  return { corto: e.corto, largo: e.etiqueta, color: COLOR_GRUPO[e.grupo] || C.gris };
+}
 
 // Línea de cumplimiento del caso, en el orden en que debería ocurrir. Las dos
 // últimas llegan de la vista actualizada; si todavía no corriste el SQL vienen
@@ -131,7 +132,7 @@ const HITOS = [
 
 // Una sola plantilla de columnas para la cabecera y para las filas: así no
 // hay forma de que se desalineen cuando cambie un ancho.
-const GRID = "14px 84px 112px minmax(126px,1fr) 128px 104px 296px 78px";
+const GRID = "14px 84px 112px minmax(118px,1fr) 122px 126px 286px 78px";
 
 function dinero(n) {
   if (n === null || n === undefined) return "—";
@@ -258,87 +259,70 @@ function Riel({ c, color, terminal, fondo }) {
   );
 }
 
-// Panel de control, con el mismo formato del panel de MELI: Casos, Estado de
-// los casos y Detalle de cierre. Los números salen de nuestra base, que es
-// donde el analista los va a usar, y hoy son los mismos que publica MELI.
+// Tabla de los ocho estados, con el motivo tal como lo escribió el analista.
+// Reemplaza al panel que copiaba el resumen de MELI: aquel repetía un número
+// que ya está a un clic en su sitio, y este dice algo que MELI no dice — qué
+// significa cada estado y cuánta plata hay en cada uno.
 //
-// No lleva conciliación ni marcas de frescura. Se probó y no servía: el
-// desglose sale de los mismos casos de los dos lados, así que comparar era
-// comparar un número contra sí mismo, y la única "diferencia" que aparecía
-// era el desfase contra una foto vieja.
+// Cada fila filtra la lista. Las tarjetas de arriba sirven para entrar por
+// grupo; esta tabla, para entrar por estado puntual.
 function pct(n, total) {
   if (!total) return "0%";
-  return ((Number(n || 0) * 100) / total).toFixed(2) + "%";
+  return ((Number(n || 0) * 100) / total).toFixed(1) + "%";
 }
 
-function Linea({ etiqueta, valor, total }) {
-  return (
-    <div style={{ display: "grid", gridTemplateColumns: "1fr 46px 56px", gap: 6,
-      alignItems: "baseline", padding: "3px 0" }}>
-      <span style={{ fontSize: 11.5, color: "var(--texto-suave)", minWidth: 0,
-        overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-        {etiqueta}
-      </span>
-      <span style={{ textAlign: "right", fontSize: 11.5, fontWeight: 600, color: "var(--texto)",
-        fontVariantNumeric: "tabular-nums" }}>
-        {valor}
-      </span>
-      <span style={{ textAlign: "right", fontSize: 11, color: "var(--texto-tenue)",
-        fontVariantNumeric: "tabular-nums" }}>
-        {pct(valor, total)}
-      </span>
-    </div>
-  );
-}
-
-function Panel({ titulo, children }) {
-  return (
-    <div style={{ flex: 1, minWidth: 230, background: "#fff", border: "1px solid var(--borde)",
-      borderRadius: 12, padding: "11px 14px" }}>
-      <div style={{ fontSize: 11.5, fontWeight: 600, color: "var(--texto)", marginBottom: 6 }}>
-        {titulo}
-      </div>
-      {children}
-    </div>
-  );
-}
-
-function Control({ casos }) {
+function TablaEstados({ casos, filtro, onFiltrar }) {
   const total = casos.length;
-  const est = { NEW: 0, IN_PROGRESS: 0, CLOSED: 0 };
-  let anulado = 0, facturacion = 0;
+  const por = {};
   for (const c of casos) {
-    if (est[c.estado] !== undefined) est[c.estado] += 1;
-    if (c.sub_estado === "NOT_BILLED") anulado += 1;
-    if (c.sub_estado === "BILLED") facturacion += 1;
+    const k = c.sub_estado || "?";
+    if (!por[k]) por[k] = { n: 0, monto: 0 };
+    por[k].n += 1;
+    por[k].monto += Number(c.monto || 0);
   }
-  // MELI saca los porcentajes del cierre sobre los cerrados, no sobre el
-  // total. Si se dividiera por el total no cuadrarían contra su panel y
-  // parecería un error nuestro.
-  const cerrados = est.CLOSED;
 
   return (
-    <div style={{ display: "flex", gap: 12, flexWrap: "wrap", marginTop: 14 }}>
-      <div style={{ width: 168, background: "#fff", border: "1px solid var(--borde)",
-        borderRadius: 12, padding: "11px 14px", textAlign: "center",
-        display: "flex", flexDirection: "column", justifyContent: "center" }}>
-        <div style={{ fontSize: 11.5, color: "var(--texto-suave)" }}>Casos</div>
-        <div style={{ fontSize: 30, fontWeight: 600, color: "var(--texto)", lineHeight: 1.35 }}>
-          {total}
-        </div>
+    <div style={{ background: "#fff", border: "1px solid var(--borde)", borderRadius: 12,
+      overflow: "hidden", marginTop: 14 }}>
+      <div style={{ display: "grid", gridTemplateColumns: "210px 62px 92px 58px 1fr", gap: 10,
+        padding: "7px 14px", background: C.grisTenue, borderBottom: "1px solid var(--borde)",
+        fontSize: 9.5, letterSpacing: 0.3, textTransform: "uppercase",
+        color: "var(--texto-tenue)", fontWeight: 600 }}>
+        <span>Estado</span>
+        <span style={{ textAlign: "right" }}>Casos</span>
+        <span style={{ textAlign: "right" }}>Monto</span>
+        <span style={{ textAlign: "right" }}>%</span>
+        <span>Motivo</span>
       </div>
 
-      <Panel titulo="Estado de los casos">
-        <Linea etiqueta="Nuevo"             valor={est.NEW}         total={total} />
-        <Linea etiqueta="Revisión en curso" valor={est.IN_PROGRESS} total={total} />
-        <Linea etiqueta="Cerrado"           valor={est.CLOSED}      total={total} />
-        <Linea etiqueta="Cancelado"         valor={0}               total={total} />
-      </Panel>
-
-      <Panel titulo="Detalle de cierre">
-        <Linea etiqueta="Anulado"               valor={anulado}     total={cerrados} />
-        <Linea etiqueta="Enviado a facturación" valor={facturacion} total={cerrados} />
-      </Panel>
+      {ESTADOS_PNR.map((e) => {
+        const d = por[e.clave] || { n: 0, monto: 0 };
+        const activa = filtro.tipo === "estado" && filtro.valor === e.clave;
+        const vacia = d.n === 0;
+        return (
+          <div key={e.clave} onClick={() => !vacia && onFiltrar(e.clave)}
+            style={{
+              display: "grid", gridTemplateColumns: "210px 62px 92px 58px 1fr", gap: 10,
+              padding: "6px 14px", borderTop: "1px solid var(--borde)",
+              cursor: vacia ? "default" : "pointer",
+              background: activa ? C.naranjaTenue : "#fff",
+              opacity: vacia ? 0.45 : 1,
+            }}>
+            <span style={{ fontSize: 12, fontWeight: activa ? 600 : 500,
+              color: COLOR_GRUPO[e.grupo] || "var(--texto)" }}>
+              {e.etiqueta}
+            </span>
+            <span style={{ textAlign: "right", fontSize: 12, fontWeight: 600, color: "var(--texto)",
+              fontVariantNumeric: "tabular-nums" }}>{d.n}</span>
+            <span style={{ textAlign: "right", fontSize: 12, color: "var(--texto)",
+              fontVariantNumeric: "tabular-nums" }}>{dinero(d.monto)}</span>
+            <span style={{ textAlign: "right", fontSize: 11, color: "var(--texto-tenue)",
+              fontVariantNumeric: "tabular-nums" }}>{pct(d.n, total)}</span>
+            <span style={{ fontSize: 11.5, color: "var(--texto-suave)", overflow: "hidden",
+              textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{e.motivo}</span>
+          </div>
+        );
+      })}
     </div>
   );
 }
@@ -367,7 +351,7 @@ function Bloque({ titulo, children, tono }) {
 
 function Detalle({ c, onCopiar, onPedir, trayendo }) {
   const sinRuta = !c.conductor_ruta && !c.patente && !c.fecha_ruta;
-  const sub = SUBESTADOS[c.sub_estado] || { largo: c.sub_estado };
+  const sub = chipEstado(c.sub_estado);
   const hayDetalle = !!c.detalle_capturado_en && !c.detalle_error;
 
   // La defensa del caso en una línea. Si MELI registró la entrega en el
@@ -493,7 +477,7 @@ function Detalle({ c, onCopiar, onPedir, trayendo }) {
 function Fila({ c, abierta, onAbrir, onCopiar, onPedir, trayendo, ahora }) {
   const g = POR_CLAVE[clasificar(c)];
   const fondo = abierta ? C.grisTenue : "#fff";
-  const sub = SUBESTADOS[c.sub_estado] || { corto: c.sub_estado, color: C.gris };
+  const sub = chipEstado(c.sub_estado);
   return (
     <Fragment>
       <div onClick={onAbrir} style={{
@@ -532,7 +516,7 @@ export default function Posventa() {
   const [casos, setCasos] = useState([]);
   const [cargando, setCargando] = useState(true);
   const [error, setError] = useState(null);
-  const [grupo, setGrupo] = useState("riesgo");
+  const [filtro, setFiltro] = useState({ tipo: "grupo", valor: "responder" });
   const [periodo, setPeriodo] = useState("");
   const [busqueda, setBusqueda] = useState("");
   const [abiertas, setAbiertas] = useState(new Set());
@@ -582,8 +566,8 @@ export default function Posventa() {
   );
 
   const totales = useMemo(() => {
-    const t = { riesgo: { monto: 0, n: 0 }, gestion: { monto: 0, n: 0 },
-                salvado: { monto: 0, n: 0 }, perdido: { monto: 0, n: 0 } };
+    const t = {};
+    for (const g of GRUPOS) t[g.clave] = { monto: 0, n: 0 };
     for (const c of delPeriodo) {
       const k = clasificar(c);
       t[k].monto += Number(c.monto || 0);
@@ -603,7 +587,11 @@ export default function Posventa() {
       ? casos.filter((c) =>
           [c.case_id, c.shipment_id, c.route_code, c.route_id, c.conductor, c.service_center, c.patente]
             .some((v) => String(v || "").toLowerCase().includes(q)))
-      : delPeriodo.filter((c) => grupo === "todos" || clasificar(c) === grupo);
+      : delPeriodo.filter((c) => {
+          if (filtro.tipo === "todos") return true;
+          if (filtro.tipo === "estado") return c.sub_estado === filtro.valor;
+          return clasificar(c) === filtro.valor;
+        });
 
     // Orden simple y predecible: por defecto el más viejo arriba, que es el
     // que más cerca está de perderse. La versión anterior mandaba los vencidos
@@ -620,7 +608,7 @@ export default function Posventa() {
       const d = valor(a) - valor(b);
       return orden.dir === "asc" ? d : -d;
     });
-  }, [casos, delPeriodo, grupo, busqueda, buscando, orden]);
+  }, [casos, delPeriodo, filtro, busqueda, buscando, orden]);
 
   function ordenar(campo) {
     setOrden((o) => o.campo === campo
@@ -686,27 +674,31 @@ export default function Posventa() {
       <div style={{ display: "flex", gap: 12, flexWrap: "wrap", marginBottom: 8 }}>
         {GRUPOS.map((g) => (
           <Tarjeta key={g.clave} grupo={g} monto={totales[g.clave].monto} casos={totales[g.clave].n}
-            activa={!buscando && grupo === g.clave}
-            onClick={() => { setBusqueda(""); setGrupo(g.clave); setAbiertas(new Set()); }} />
+            activa={!buscando && filtro.tipo === "grupo" && filtro.valor === g.clave}
+            onClick={() => { setBusqueda(""); setFiltro({ tipo: "grupo", valor: g.clave }); setAbiertas(new Set()); }} />
         ))}
       </div>
 
       {/* Mismo formato que el panel de MELI, con los números de nuestra base. */}
-      <Control casos={delPeriodo} />
+      <TablaEstados casos={delPeriodo} filtro={filtro}
+        onFiltrar={(clave) => { setBusqueda(""); setFiltro({ tipo: "estado", valor: clave }); setAbiertas(new Set()); }} />
 
       {/* Lista */}
       <div style={{ background: "#fff", border: "1px solid var(--borde)", borderRadius: 12, overflow: "hidden", marginTop: 14 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "9px 16px", flexWrap: "wrap" }}>
           <span style={{ fontSize: 13, fontWeight: 600, color: "var(--texto)" }}>
-            {buscando ? "Resultados" : (GRUPOS.find((g) => g.clave === grupo) || {}).etiqueta || "Todos"}
+            {buscando ? "Resultados"
+              : filtro.tipo === "estado" ? (POR_ESTADO[filtro.valor] || {}).etiqueta || "Casos"
+              : filtro.tipo === "todos" ? "Todos"
+              : (POR_CLAVE[filtro.valor] || {}).etiqueta || "Casos"}
           </span>
-          <button onClick={() => { setBusqueda(""); setGrupo("todos"); setAbiertas(new Set()); }}
+          <button onClick={() => { setBusqueda(""); setFiltro({ tipo: "todos", valor: null }); setAbiertas(new Set()); }}
             style={{
               fontSize: 11.5, padding: "4px 10px", borderRadius: 20, cursor: "pointer",
-              border: "1px solid " + (!buscando && grupo === "todos" ? C.navy : "var(--borde)"),
-              background: !buscando && grupo === "todos" ? C.navyTenue : "#fff",
-              color: !buscando && grupo === "todos" ? C.navy : "var(--texto-suave)",
-              fontWeight: !buscando && grupo === "todos" ? 600 : 400,
+              border: "1px solid " + (!buscando && filtro.tipo === "todos" ? C.navy : "var(--borde)"),
+              background: !buscando && filtro.tipo === "todos" ? C.navyTenue : "#fff",
+              color: !buscando && filtro.tipo === "todos" ? C.navy : "var(--texto-suave)",
+              fontWeight: !buscando && filtro.tipo === "todos" ? 600 : 400,
             }}>
             Todos
           </button>
