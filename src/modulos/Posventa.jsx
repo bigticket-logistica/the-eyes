@@ -539,6 +539,7 @@ export default function Posventa() {
   const [aviso, setAviso] = useState("");
   const [trayendo, setTrayendo] = useState(new Set());
   const [ahora, setAhora] = useState(() => Date.now());
+  const [orden, setOrden] = useState({ campo: "sla", dir: "asc" });
 
   async function cargar() {
     setError(null);
@@ -604,62 +605,28 @@ export default function Posventa() {
             .some((v) => String(v || "").toLowerCase().includes(q)))
       : delPeriodo.filter((c) => grupo === "todos" || clasificar(c) === grupo);
 
-    // Tres rangos, en orden de lo que hay que mirar primero: lo que todavía
-    // tiene reloj corriendo, lo vencido pero todavía peleable, y lo ya
-    // resuelto. Dentro del primero manda el reloj; en los otros dos manda el
-    // monto, porque una vez que el SLA pasó o el caso cerró el reloj ya no
-    // distingue nada y lo que decide es cuánta plata hay adentro.
-    const rango = (c) => {
-      const g = POR_CLAVE[clasificar(c)];
-      if (g && g.terminal) return 2;
-      return (c.horas_restantes ?? -9999) > 0 ? 0 : 1;
+    // Orden simple y predecible: por defecto el más viejo arriba, que es el
+    // que más cerca está de perderse. La versión anterior mandaba los vencidos
+    // al fondo razonando que el SLA ya no los distingue, y con eso escondía un
+    // caso de $1.655 con 145 horas debajo de uno de $69 con media hora. Un
+    // caso vencido sigue abierto en MELI y sigue siendo plata que se puede
+    // pelear; que el reloj se haya pasado no lo vuelve menos urgente.
+    const valor = (c) => {
+      if (orden.campo === "monto") return Number(c.monto || 0);
+      if (orden.campo === "caso") return Number(c.case_id || 0);
+      return c.horas_restantes == null ? 9999 : Number(c.horas_restantes);
     };
     return base.slice().sort((a, b) => {
-      const ra = rango(a), rb = rango(b);
-      if (ra !== rb) return ra - rb;
-      if (ra === 0) return (a.horas_restantes ?? 0) - (b.horas_restantes ?? 0);
-      return Number(b.monto || 0) - Number(a.monto || 0);
+      const d = valor(a) - valor(b);
+      return orden.dir === "asc" ? d : -d;
     });
-  }, [casos, delPeriodo, grupo, busqueda, buscando]);
+  }, [casos, delPeriodo, grupo, busqueda, buscando, orden]);
 
-  // Se llama al desplegar la fila y desde el botón. Sin secreto configurado no
-  // intenta: mejor un aviso claro que un fetch que falla en silencio.
-  async function pedirDetalle(caseId, forzar) {
-    if (!SECRETO_PNR) {
-      setAviso("Falta VITE_PNR_API_SECRET");
-      setTimeout(() => setAviso(""), 2500);
-      return;
-    }
-    setTrayendo((s) => new Set(s).add(caseId));
-    try {
-      const r = await fetch(`${API_PNR}/pnr-detalle/${caseId}${forzar ? "?forzar=1" : ""}`,
-        { headers: { "x-api-secret": SECRETO_PNR } });
-      const j = await r.json();
-      if (!j.ok) throw new Error(j.error || "sin detalle");
-      // Se mezcla en memoria en vez de recargar toda la lista: la fila está
-      // abierta y una recarga la cerraría de golpe delante del analista.
-      setCasos((prev) => prev.map((x) => x.case_id === caseId
-        ? { ...x, ...soloDetalle(j.detalle), detalle_capturado_en: j.detalle.capturado_en, detalle_error: j.detalle.error || null }
-        : x));
-    } catch (e) {
-      setCasos((prev) => prev.map((x) => x.case_id === caseId
-        ? { ...x, detalle_error: String(e.message || e) } : x));
-    } finally {
-      setTrayendo((s) => { const n = new Set(s); n.delete(caseId); return n; });
-    }
-  }
-
-  function abrirFila(c) {
-    // Varias filas pueden quedar abiertas: el analista compara casos del mismo
-    // conductor o de la misma ruta, y cerrarle la anterior cada vez lo obliga
-    // a memorizar lo que acaba de leer.
-    const estaba = abiertas.has(c.case_id);
-    setAbiertas((prev) => {
-      const n = new Set(prev);
-      if (estaba) n.delete(c.case_id); else n.add(c.case_id);
-      return n;
-    });
-    if (!estaba && !detalleFresco(c) && !trayendo.has(c.case_id)) pedirDetalle(c.case_id, false);
+  function ordenar(campo) {
+    setOrden((o) => o.campo === campo
+      ? { campo, dir: o.dir === "asc" ? "desc" : "asc" }
+      : { campo, dir: campo === "monto" ? "desc" : "asc" });
+    setAbiertas(new Set());
   }
 
   function copiar(texto, mensaje) {
@@ -744,7 +711,7 @@ export default function Posventa() {
             Todos
           </button>
           <span style={{ marginLeft: "auto", fontSize: 11.5, color: "var(--texto-tenue)" }}>
-            {lista.length} en pantalla · {buscando ? "todos los periodos" : "por vencer primero, después por monto"}
+            {lista.length} en pantalla{buscando ? " · todos los periodos" : ""}
           </span>
         </div>
 
@@ -759,8 +726,8 @@ export default function Posventa() {
               color: "var(--texto-tenue)", fontWeight: 600,
             }}>
               <span />
-              <span>Caso</span>
-              <span>SLA 48 h</span>
+              <ColOrden campo="caso" orden={orden} onClick={ordenar}>Caso</ColOrden>
+              <ColOrden campo="sla" orden={orden} onClick={ordenar}>SLA 48 h</ColOrden>
               <span>Conductor</span>
               <span>Ruta · centro</span>
               <span style={{ textAlign: "center" }}>Estado</span>
@@ -769,7 +736,7 @@ export default function Posventa() {
                   <span key={h.clave} title={h.titulo} style={{ textAlign: "center" }}>{h.etiqueta}</span>
                 ))}
               </span>
-              <span style={{ textAlign: "right" }}>Monto</span>
+              <ColOrden campo="monto" orden={orden} onClick={ordenar} derecha>Monto</ColOrden>
             </div>
 
             {cargando ? (
