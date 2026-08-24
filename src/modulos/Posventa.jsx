@@ -722,8 +722,9 @@ export default function Posventa() {
             ) : (
               lista.map((c) => (
                 <Fila key={c.case_id} c={c} abierta={abierta === c.case_id}
-                  onAbrir={() => setAbierta(abierta === c.case_id ? null : c.case_id)}
-                  onCopiar={copiar} />
+                  onAbrir={() => abrirFila(c)}
+                  onCopiar={copiar} onPedir={pedirDetalle}
+                  trayendo={trayendo.has(c.case_id)} />
               ))
             )}
           </div>
