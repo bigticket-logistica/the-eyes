@@ -22,6 +22,28 @@ function detalleFresco(c) {
   return Date.now() - new Date(c.detalle_capturado_en).getTime() < FRESCURA_MS;
 }
 
+// Campos que el detalle puede aportar a una fila. Lista blanca a propósito:
+// mezclar el objeto entero pisaba `periodo` con el null que trae el detalle
+// de algunos casos, la fila se caía del filtro de quincena, la lista se
+// reordenaba y en esa posición quedaba otro caso — con otro nombre. La fila
+// abierta parecía cambiar de conductor sola.
+//
+// texto_crudo tampoco entra: son ~4 KB por caso que no se muestran en ningún
+// lado y que por 204 filas solo ocupan memoria.
+const CAMPOS_DETALLE = [
+  "producto", "valor_compra", "reclamante", "designado_recibir", "mensaje_reclamo",
+  "entregado_en", "recibio_quien", "recibio_nombre", "recibio_documento",
+  "distancia_texto", "responsable", "tipo_operacion", "direccion_envio",
+  "transportadora", "transportista", "conductor_id", "telefono",
+  "estacion_destino", "id_seguimiento", "estado_texto",
+];
+
+function soloDetalle(d) {
+  const out = {};
+  for (const k of CAMPOS_DETALLE) if (d[k] !== undefined) out[k] = d[k];
+  return out;
+}
+
 const VISTAS = [
   { clave: "pnr",          etiqueta: "PNR",          activa: true  },
   { clave: "devoluciones", etiqueta: "Devoluciones", activa: false },
@@ -488,7 +510,7 @@ export default function Posventa() {
   const [grupo, setGrupo] = useState("riesgo");
   const [periodo, setPeriodo] = useState("");
   const [busqueda, setBusqueda] = useState("");
-  const [abierta, setAbierta] = useState(null);
+  const [abiertas, setAbiertas] = useState(new Set());
   const [aviso, setAviso] = useState("");
   const [trayendo, setTrayendo] = useState(new Set());
 
@@ -585,7 +607,7 @@ export default function Posventa() {
       // Se mezcla en memoria en vez de recargar toda la lista: la fila está
       // abierta y una recarga la cerraría de golpe delante del analista.
       setCasos((prev) => prev.map((x) => x.case_id === caseId
-        ? { ...x, ...j.detalle, detalle_capturado_en: j.detalle.capturado_en, detalle_error: j.detalle.error || null }
+        ? { ...x, ...soloDetalle(j.detalle), detalle_capturado_en: j.detalle.capturado_en, detalle_error: j.detalle.error || null }
         : x));
     } catch (e) {
       setCasos((prev) => prev.map((x) => x.case_id === caseId
@@ -596,9 +618,16 @@ export default function Posventa() {
   }
 
   function abrirFila(c) {
-    const cerrar = abierta === c.case_id;
-    setAbierta(cerrar ? null : c.case_id);
-    if (!cerrar && !detalleFresco(c) && !trayendo.has(c.case_id)) pedirDetalle(c.case_id, false);
+    // Varias filas pueden quedar abiertas: el analista compara casos del mismo
+    // conductor o de la misma ruta, y cerrarle la anterior cada vez lo obliga
+    // a memorizar lo que acaba de leer.
+    const estaba = abiertas.has(c.case_id);
+    setAbiertas((prev) => {
+      const n = new Set(prev);
+      if (estaba) n.delete(c.case_id); else n.add(c.case_id);
+      return n;
+    });
+    if (!estaba && !detalleFresco(c) && !trayendo.has(c.case_id)) pedirDetalle(c.case_id, false);
   }
 
   function copiar(texto, mensaje) {
@@ -629,7 +658,7 @@ export default function Posventa() {
         </div>
         <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 8 }}>
           {aviso && <span style={{ fontSize: 11.5, color: C.verde }}>{aviso}</span>}
-          <input value={busqueda} onChange={(e) => { setBusqueda(e.target.value); setAbierta(null); }}
+          <input value={busqueda} onChange={(e) => { setBusqueda(e.target.value); setAbiertas(new Set()); }}
             placeholder="Buscar caso, guía, ruta o conductor"
             style={{ fontSize: 12.5, padding: "5px 10px", borderRadius: 7,
               border: "1px solid var(--borde)", width: 250 }} />
@@ -659,7 +688,7 @@ export default function Posventa() {
         {GRUPOS.map((g) => (
           <Tarjeta key={g.clave} grupo={g} monto={totales[g.clave].monto} casos={totales[g.clave].n}
             activa={!buscando && grupo === g.clave}
-            onClick={() => { setBusqueda(""); setGrupo(g.clave); setAbierta(null); }} />
+            onClick={() => { setBusqueda(""); setGrupo(g.clave); setAbiertas(new Set()); }} />
         ))}
       </div>
 
@@ -672,7 +701,7 @@ export default function Posventa() {
           <span style={{ fontSize: 13, fontWeight: 600, color: "var(--texto)" }}>
             {buscando ? "Resultados" : (GRUPOS.find((g) => g.clave === grupo) || {}).etiqueta || "Todos"}
           </span>
-          <button onClick={() => { setBusqueda(""); setGrupo("todos"); setAbierta(null); }}
+          <button onClick={() => { setBusqueda(""); setGrupo("todos"); setAbiertas(new Set()); }}
             style={{
               fontSize: 11.5, padding: "4px 10px", borderRadius: 20, cursor: "pointer",
               border: "1px solid " + (!buscando && grupo === "todos" ? C.navy : "var(--borde)"),
@@ -721,7 +750,7 @@ export default function Posventa() {
               </div>
             ) : (
               lista.map((c) => (
-                <Fila key={c.case_id} c={c} abierta={abierta === c.case_id}
+                <Fila key={c.case_id} c={c} abierta={abiertas.has(c.case_id)}
                   onAbrir={() => abrirFila(c)}
                   onCopiar={copiar} onPedir={pedirDetalle}
                   trayendo={trayendo.has(c.case_id)} />
