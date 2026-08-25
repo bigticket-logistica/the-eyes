@@ -144,12 +144,25 @@ function chipEstado(sub) {
 // Línea de cumplimiento del caso, en el orden en que debería ocurrir. Las dos
 // últimas llegan de la vista actualizada; si todavía no corriste el SQL vienen
 // undefined y se pintan como pendientes, sin romper nada.
+// Línea de cumplimiento del caso, en el orden en que debería ocurrir.
+//
+// `inferir` existe por un agujero de origen: pnr_historial_mx empezó a grabar
+// el 21 de agosto a las 09:32 de México, así que todo comprobante cargado
+// antes de esa hora no tiene fecha. Sin esto, un círculo hueco significaba dos
+// cosas distintas —"no pasó" y "pasó pero no lo vimos"— y el analista no podía
+// distinguirlas. Cuando el sub_estado prueba que el hito ocurrió, el punto se
+// pinta lleno y la fecha dice "sin fecha".
+//
+// Solo se infiere hacia adelante y desde estados que lo garantizan: un caso en
+// UPLOADED_RECEIPT tuvo comprobante, seguro. Un NOT_BILLED pudo llegar ahí sin
+// comprobante —el comprador retira el reclamo— así que ahí no se infiere nada.
 const HITOS = [
   { clave: "avisado_inicial_en",   etiqueta: "Aviso 1", titulo: "Primer aviso al conductor" },
   { clave: "avisado_24h_en",       etiqueta: "Aviso 2", titulo: "Escalamiento al supervisor (24 h)" },
   { clave: "avisado_final_en",     etiqueta: "Aviso 3", titulo: "Escalamiento al dueño (40 h)" },
   { clave: "pruebas_recibidas_en", etiqueta: "Pruebas", titulo: "El conductor entregó las pruebas" },
-  { clave: "comprobante_en",       etiqueta: "Cargado", titulo: "Comprobante cargado en MELI" },
+  { clave: "comprobante_en",       etiqueta: "Cargado", titulo: "Comprobante cargado en MELI",
+    inferir: (c) => ["UPLOADED_RECEIPT", "ON_REVIEW", "ASSIGNED"].includes(c.sub_estado) },
 ];
 
 // Una sola plantilla de columnas para la cabecera y para las filas: así no
@@ -280,6 +293,24 @@ function Riel({ c, color, terminal, fondo }) {
       }} />
       {HITOS.map((h) => {
         const f = fechaHito(c[h.clave]);
+        // Ocurrió, pero antes de que el historial existiera: punto lleno y
+        // "sin fecha". El hecho es cierto; lo que falta es el cuándo.
+        const inferido = !f && h.inferir && h.inferir(c);
+        if (inferido) {
+          return (
+            <span key={h.clave} title={`${h.titulo}: ocurrió, sin fecha registrada`}
+              style={{ position: "relative", textAlign: "center", lineHeight: 1.15, overflow: "hidden" }}>
+              <span style={{
+                display: "inline-block", width: 9, height: 9, borderRadius: "50%",
+                background: color, border: `2px solid ${color}`, opacity: 0.55,
+                boxShadow: `0 0 0 2.5px ${fondo}`, verticalAlign: "middle",
+              }} />
+              <div style={{ fontSize: 8, color: "var(--texto-tenue)", whiteSpace: "nowrap", marginTop: 1 }}>
+                sin fecha
+              </div>
+            </span>
+          );
+        }
         // En un caso cerrado, un hito sin cumplir no está "pendiente": no va a
         // ocurrir nunca. El círculo hueco invita a esperarlo; la raya dice que
         // esa puerta ya se cerró.
@@ -526,13 +557,15 @@ function Detalle({ c, onPedir, trayendo, supervisor }) {
           <div style={{ border: "1px solid var(--borde)", borderRadius: 10, background: "#fff", padding: "7px 10px" }}>
             {HITOS.map((h) => {
               const f = fechaHito(c[h.clave]);
+              const inferido = !f && h.inferir && h.inferir(c);
               return (
                 <div key={h.clave} style={{ display: "flex", justifyContent: "space-between",
                   alignItems: "baseline", gap: 8, padding: "1.5px 0" }}>
                   <span style={{ fontSize: 11, color: "var(--texto-suave)" }}>{h.etiqueta}</span>
-                  <span style={{ fontSize: 10.5, color: f ? C.verde : "var(--texto-tenue)",
-                    fontVariantNumeric: "tabular-nums" }}>
-                    {f || "pendiente"}
+                  <span title={inferido ? "Ocurrió antes de que se registrara el historial" : ""}
+                    style={{ fontSize: 10.5, fontVariantNumeric: "tabular-nums",
+                      color: f ? C.verde : inferido ? "var(--texto-suave)" : "var(--texto-tenue)" }}>
+                    {f || (inferido ? "sí, sin fecha" : "pendiente")}
                   </span>
                 </div>
               );
