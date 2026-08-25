@@ -78,7 +78,7 @@ const C = {
 // algo que hacer y uno donde solo queda esperar.
 const ESTADOS_PNR = [
   { clave: "WAITING_RECEIPT",  etiqueta: "Esperando comprobante",   corto: "Esperando compr.",   motivo: "Pendiente de resolución",                              grupo: "responder" },
-  { clave: "TO_BILL",          etiqueta: "Con Penalidad",           corto: "Con penalidad",      motivo: "Pendiente de resolución, con probabilidad de pasar a cobro 50%", grupo: "responder" },
+  { clave: "TO_BILL",          etiqueta: "Con Penalidad",           corto: "Con penalidad",      motivo: "Pendiente de resolución, con probabilidad de pasar a cobro 50%", grupo: "penalidad" },
   { clave: "UPLOADED_RECEIPT", etiqueta: "Comprobante Cargado",     corto: "Compr. cargado",     motivo: "Respuesta enviada a mandante",                         grupo: "meli" },
   { clave: "ASSIGNED",         etiqueta: "Pendiente de revisión",   corto: "Pend. revisión",     motivo: "Pendiente de revisión por Mercado Libre",              grupo: "meli" },
   { clave: "ON_REVIEW",        etiqueta: "En Revisión",             corto: "En revisión",        motivo: "En revisión por Mercado Libre",                        grupo: "meli" },
@@ -97,7 +97,12 @@ function clasificar(c) {
 }
 
 const GRUPOS = [
-  { clave: "responder",   etiqueta: "Por responder",  nota: "nos toca a nosotros",  color: C.naranja,  tinte: C.naranjaTenue,  terminal: false },
+  { clave: "responder",   etiqueta: "Por responder",  nota: "falta el comprobante", color: C.naranja,  tinte: C.naranjaTenue,  terminal: false },
+  // Con Penalidad va aparte y no dentro de "Por responder" porque la acción es
+  // otra: acá no se sube una foto, se pide revisión. Mezclarlos hacía que el
+  // analista abriera el caso esperando cargar el comprobante y se encontrara
+  // con un botón distinto.
+  { clave: "penalidad",   etiqueta: "Con penalidad",  nota: "pedir revisión",       color: "#b8651c",  tinte: "#fdf3e8",       terminal: false },
   { clave: "meli",        etiqueta: "Con respaldo",   nota: "Mercado Libre revisa", color: C.navy,     tinte: C.navyTenue,     terminal: false },
   { clave: "sinrespaldo", etiqueta: "Sin respaldo",   nota: "respondido sin foto",  color: C.ladrillo, tinte: C.ladrilloTenue, terminal: true  },
   { clave: "cerrado",     etiqueta: "Cerrados",       nota: "anulados y cobrados",  color: C.verde,    tinte: "#e9f3ef",       terminal: true  },
@@ -110,7 +115,8 @@ const ESTADOS = { NEW: "Nuevo", IN_PROGRESS: "En curso", CLOSED: "Cerrado" };
 // Color del chip por grupo: el estado puntual lo dice el texto, el color solo
 // tiene que decir si hay algo que hacer.
 const COLOR_GRUPO = {
-  responder: C.naranja, meli: C.navy, sinrespaldo: C.ladrillo, cerrado: C.verde,
+  responder: C.naranja, penalidad: "#b8651c", meli: C.navy,
+  sinrespaldo: C.ladrillo, cerrado: C.verde,
 };
 
 function chipEstado(sub) {
@@ -218,7 +224,7 @@ function Tarjeta({ grupo, monto, casos, activa, onClick }) {
   return (
     <button onClick={onClick} title={`Ver solo ${grupo.etiqueta.toLowerCase()}`}
       style={{
-        flex: 1, minWidth: 178, textAlign: "left", cursor: "pointer",
+        flex: 1, minWidth: 158, textAlign: "left", cursor: "pointer",
         background: activa ? grupo.tinte : "#fff",
         border: `1px solid ${activa ? grupo.color : "var(--borde)"}`,
         borderTop: `3px solid ${grupo.color}`,
