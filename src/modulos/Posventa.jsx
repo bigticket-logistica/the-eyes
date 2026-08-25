@@ -479,8 +479,10 @@ function Contacto({ icono, rol, nombre, telefono, extra, alternos }) {
 //
 // El bucket es privado, así que cada archivo necesita su URL firmada. Se piden
 // al abrir la fila y duran una hora.
-function Pruebas({ tarea }) {
+function Pruebas({ tarea, onRepedir }) {
   const [urls, setUrls] = useState({});
+  const [pidiendo, setPidiendo] = useState(false);
+  const [motivo, setMotivo] = useState("");
   const fotos = (tarea && Array.isArray(tarea.fotos) ? tarea.fotos : []) || [];
 
   useEffect(() => {
@@ -551,11 +553,55 @@ function Pruebas({ tarea }) {
           “{tarea.comentario}”
         </div>
       )}
+
+      {tarea.veces_pedida > 1 && (
+        <div style={{ fontSize: 10.5, color: "var(--texto-tenue)", marginTop: 4 }}>
+          Pedida {tarea.veces_pedida} veces
+          {tarea.motivo_reabrir ? ` · último rechazo: ${tarea.motivo_reabrir}` : ""}
+        </div>
+      )}
+
+      {/* Volver a pedir. El motivo es obligatorio: "manda otra" sin decir qué
+          falta hace que el supervisor mande lo mismo, y se pierde otro turno
+          del reloj. */}
+      {(fotos.length > 0 || sinPruebas) && (
+        pidiendo ? (
+          <div style={{ marginTop: 8 }}>
+            <input value={motivo} onChange={(e) => setMotivo(e.target.value)}
+              placeholder="Qué falta: por ejemplo, no se ve el número de la casa"
+              style={{ width: "100%", fontSize: 12, padding: "6px 9px", borderRadius: 8,
+                border: "1px solid var(--borde)", marginBottom: 6 }} />
+            <div style={{ display: "flex", gap: 6 }}>
+              <button onClick={() => { onRepedir(tarea, motivo.trim()); setPidiendo(false); setMotivo(""); }}
+                disabled={motivo.trim().length < 4}
+                style={{ fontSize: 11.5, padding: "5px 11px", borderRadius: 8,
+                  cursor: motivo.trim().length < 4 ? "default" : "pointer",
+                  border: `1px solid ${motivo.trim().length < 4 ? "var(--borde)" : C.naranja}`,
+                  background: motivo.trim().length < 4 ? "#fff" : C.naranja,
+                  color: motivo.trim().length < 4 ? "var(--texto-tenue)" : "#fff" }}>
+                Pedir de nuevo
+              </button>
+              <button onClick={() => { setPidiendo(false); setMotivo(""); }}
+                style={{ fontSize: 11.5, padding: "5px 11px", borderRadius: 8,
+                  border: "1px solid var(--borde)", background: "#fff", cursor: "pointer" }}>
+                Cancelar
+              </button>
+            </div>
+          </div>
+        ) : (
+          <button onClick={() => setPidiendo(true)}
+            style={{ marginTop: 8, fontSize: 11.5, padding: "5px 11px", borderRadius: 8,
+              border: "1px solid var(--borde)", background: "#fff",
+              color: "var(--texto-suave)", cursor: "pointer" }}>
+            Estas pruebas no sirven, pedir otras
+          </button>
+        )
+      )}
     </div>
   );
 }
 
-function Detalle({ c, onPedir, trayendo, supervisor, tarea, onTareaCreada }) {
+function Detalle({ c, onPedir, trayendo, supervisor, tarea, onTareaCreada, onRepedir }) {
   const [panel, setPanel] = useState(false);
   const [creando, setCreando] = useState(false);
   const [errorTarea, setErrorTarea] = useState("");
@@ -671,7 +717,7 @@ function Detalle({ c, onPedir, trayendo, supervisor, tarea, onTareaCreada }) {
             </div>
           </div>
 
-          <Pruebas tarea={tarea} />
+          <Pruebas tarea={tarea} onRepedir={onRepedir} />
         </div>
 
         {/* Derecha: a quién llamar y el botón que lo dispara */}
@@ -797,7 +843,7 @@ function Detalle({ c, onPedir, trayendo, supervisor, tarea, onTareaCreada }) {
   );
 }
 
-function Fila({ c, abierta, onAbrir, onPedir, trayendo, ahora, supervisor, tarea, onTareaCreada }) {
+function Fila({ c, abierta, onAbrir, onPedir, trayendo, ahora, supervisor, tarea, onTareaCreada, onRepedir }) {
   const g = POR_CLAVE[clasificar(c)];
   const fondo = abierta ? C.grisTenue : "#fff";
   const sub = chipEstado(c.sub_estado);
@@ -839,7 +885,7 @@ function Fila({ c, abierta, onAbrir, onPedir, trayendo, ahora, supervisor, tarea
         </span>
       </div>
       {abierta && <Detalle c={c} onPedir={onPedir} trayendo={trayendo} supervisor={supervisor}
-        tarea={tarea} onTareaCreada={onTareaCreada} />}
+        tarea={tarea} onTareaCreada={onTareaCreada} onRepedir={onRepedir} />}
     </Fragment>
   );
 }
@@ -1054,6 +1100,22 @@ export default function Posventa() {
   // Varias filas pueden quedar abiertas: el analista compara casos del mismo
   // conductor o de la misma ruta, y cerrarle la anterior cada vez lo obliga a
   // memorizar lo que acaba de leer.
+  // Reabrir no borra las fotos rechazadas: son el registro de qué se mandó y
+  // por qué no alcanzó. Si se borraran, la próxima discusión empieza de cero.
+  async function repedirPruebas(t, motivo) {
+    if (!t || !motivo) return;
+    const { data, error } = await sb.from("pnr_tareas_mx").update({
+      estado: "pendiente",
+      vista_en: null,
+      completada_en: null,
+      reabierta_en: new Date().toISOString(),
+      reabierta_por: "posventa",
+      motivo_reabrir: motivo,
+      veces_pedida: (t.veces_pedida || 1) + 1,
+    }).eq("id", t.id).select().single();
+    if (!error && data) setTareas((prev) => ({ ...prev, [data.case_id]: data }));
+  }
+
   function agregarTarea(t) {
     if (t) setTareas((prev) => ({ ...prev, [t.case_id]: t }));
   }
@@ -1222,7 +1284,7 @@ export default function Posventa() {
                   onAbrir={() => abrirFila(c)}
                   onPedir={pedirDetalle} trayendo={trayendo.has(c.case_id)}
                   ahora={ahora} supervisor={supervisores[c.service_center]}
-                  tarea={tareas[c.case_id]} onTareaCreada={agregarTarea} />
+                  tarea={tareas[c.case_id]} onTareaCreada={agregarTarea} onRepedir={repedirPruebas} />
               ))
             )}
           </div>
