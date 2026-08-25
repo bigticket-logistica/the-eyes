@@ -473,8 +473,39 @@ function Contacto({ icono, rol, nombre, telefono, extra, alternos }) {
   );
 }
 
-function Detalle({ c, onPedir, trayendo, supervisor }) {
+function Detalle({ c, onPedir, trayendo, supervisor, tarea, onTareaCreada }) {
   const [panel, setPanel] = useState(false);
+  const [creando, setCreando] = useState(false);
+  const [errorTarea, setErrorTarea] = useState("");
+
+  // El supervisor se copia en la fila en vez de resolverse por join al leerla:
+  // si mañana cambia el supervisor del centro, la tarea vieja tiene que seguir
+  // diciendo a quién se le pidió, no a quién le tocaría hoy.
+  async function crearTarea() {
+    if (!supervisor) return;
+    setCreando(true);
+    setErrorTarea("");
+    const { data, error } = await sb.from("pnr_tareas_mx").insert({
+      case_id: c.case_id,
+      sc: c.service_center,
+      supervisor_nombre: supervisor.supervisor_nombre,
+      supervisor_email: supervisor.supervisor_email,
+      supervisor_telefono: supervisor.supervisor_telefono,
+      creada_por: "posventa",
+    }).select().single();
+    if (error) {
+      // El índice único deja una sola tarea viva por caso. Si ya existe, no es
+      // un error que el analista tenga que entender: es que alguien ya la pidió.
+      setErrorTarea(/duplicate|unique/i.test(error.message)
+        ? "Ya hay una tarea abierta para este caso."
+        : error.message);
+      setCreando(false);
+      return;
+    }
+    setCreando(false);
+    if (onTareaCreada) onTareaCreada(data);
+  }
+
   const hayDetalle = !!c.detalle_capturado_en && !c.detalle_error;
 
   // La defensa del caso en una línea. Si MELI registró la entrega en el
@@ -564,7 +595,7 @@ function Detalle({ c, onPedir, trayendo, supervisor }) {
           <Contacto icono="🚚" rol="Conductor"
             nombre={c.transportista || c.conductor_ruta || c.conductor}
             telefono={c.telefono || c.telefono_ruta}
-            extra={[c.transportadora, c.patente].filter(Boolean).join(" · ")} />
+            extra={[c.patente, c.transportadora].filter(Boolean).join(" · ")} />
 
           <Contacto icono="👤" rol="Reclamante"
             nombre={c.reclamante || c.designado_recibir}
@@ -602,28 +633,60 @@ function Detalle({ c, onPedir, trayendo, supervisor }) {
 
           {panel && (
             <div style={{ border: "1px solid var(--borde)", borderRadius: 10, background: "#fff", padding: "9px 11px" }}>
-              <div style={{ fontSize: 11, fontWeight: 600, color: "var(--texto-suave)", marginBottom: 6 }}>
-                Se van a generar cuatro envíos
-              </div>
-              {[
-                { n: "WhatsApp al conductor", d: c.telefono },
-                { n: "Tarea al supervisor",   d: supervisor ? supervisor.supervisor_nombre : null },
-                { n: "Correo al tercero",     d: c.transportadora },
-                { n: "WhatsApp al tercero",   d: null },
-              ].map((x) => (
-                <div key={x.n} style={{ display: "flex", justifyContent: "space-between", gap: 8, padding: "2px 0" }}>
-                  <span style={{ fontSize: 11.5, color: "var(--texto)" }}>{x.n}</span>
-                  <span style={{ fontSize: 11, color: x.d ? "var(--texto-suave)" : C.ladrillo,
-                    textAlign: "right", maxWidth: 130, overflow: "hidden", textOverflow: "ellipsis",
-                    whiteSpace: "nowrap" }}>
-                    {x.d || "falta el destino"}
-                  </span>
-                </div>
-              ))}
-              <button disabled title="Faltan las plantillas de aviso"
-                style={{ width: "100%", marginTop: 8, fontSize: 12, padding: "7px 10px" }}>
-                Enviar los cuatro
-              </button>
+              {tarea ? (
+                <Fragment>
+                  <div style={{ fontSize: 11.5, fontWeight: 600, color: C.verde, marginBottom: 4 }}>
+                    Tarea creada
+                  </div>
+                  <div style={{ fontSize: 11.5, color: "var(--texto-suave)", lineHeight: 1.4 }}>
+                    {tarea.supervisor_nombre || tarea.sc} la tiene en su bitácora desde
+                    {" "}{fechaHito(tarea.creada_en)}. Estado: {tarea.estado}.
+                  </div>
+                  {(tarea.fotos || []).length > 0 && (
+                    <div style={{ fontSize: 11.5, color: C.verde, marginTop: 4 }}>
+                      {tarea.fotos.length} {tarea.fotos.length === 1 ? "foto" : "fotos"} cargadas
+                    </div>
+                  )}
+                  {tarea.comentario && (
+                    <div style={{ fontSize: 11.5, color: "var(--texto)", marginTop: 4 }}>
+                      “{tarea.comentario}”
+                    </div>
+                  )}
+                </Fragment>
+              ) : (
+                <Fragment>
+                  <div style={{ fontSize: 11.5, fontWeight: 600, color: "var(--texto-suave)", marginBottom: 6 }}>
+                    Se le pide la foto de la entrega a
+                  </div>
+                  <div style={{ fontSize: 12.5, color: "var(--texto)" }}>
+                    {supervisor ? supervisor.supervisor_nombre : `Sin supervisor para ${c.service_center}`}
+                  </div>
+                  {supervisor && (
+                    <div style={{ fontSize: 11, color: "var(--texto-tenue)", lineHeight: 1.4 }}>
+                      {supervisor.supervisor_email}
+                      {supervisor.supervisor_telefono ? ` · ${supervisor.supervisor_telefono}` : " · sin teléfono"}
+                    </div>
+                  )}
+                  {/* El correo y el WhatsApp vienen después. Se listan en gris
+                      para que el analista sepa qué pasa y qué no: prometer un
+                      correo que no sale es peor que no mencionarlo. */}
+                  <div style={{ fontSize: 10.5, color: "var(--texto-tenue)", marginTop: 6, lineHeight: 1.4 }}>
+                    Por ahora solo se crea la tarea en la bitácora. El correo y el WhatsApp
+                    al conductor quedan pendientes.
+                  </div>
+                  <button onClick={crearTarea} disabled={!supervisor || creando}
+                    style={{ width: "100%", marginTop: 8, fontSize: 12.5, fontWeight: 600,
+                      padding: "8px 10px", borderRadius: 8, cursor: supervisor ? "pointer" : "default",
+                      border: `1px solid ${supervisor ? C.naranja : "var(--borde)"}`,
+                      background: supervisor ? C.naranja : "#fff",
+                      color: supervisor ? "#fff" : "var(--texto-tenue)" }}>
+                    {creando ? "Creando…" : "Crear la tarea"}
+                  </button>
+                  {errorTarea && (
+                    <div style={{ fontSize: 11, color: C.ladrillo, marginTop: 6 }}>{errorTarea}</div>
+                  )}
+                </Fragment>
+              )}
             </div>
           )}
 
@@ -650,7 +713,7 @@ function Detalle({ c, onPedir, trayendo, supervisor }) {
   );
 }
 
-function Fila({ c, abierta, onAbrir, onPedir, trayendo, ahora, supervisor }) {
+function Fila({ c, abierta, onAbrir, onPedir, trayendo, ahora, supervisor, tarea, onTareaCreada }) {
   const g = POR_CLAVE[clasificar(c)];
   const fondo = abierta ? C.grisTenue : "#fff";
   const sub = chipEstado(c.sub_estado);
@@ -691,7 +754,8 @@ function Fila({ c, abierta, onAbrir, onPedir, trayendo, ahora, supervisor }) {
           {dinero(c.monto)}
         </span>
       </div>
-      {abierta && <Detalle c={c} onPedir={onPedir} trayendo={trayendo} supervisor={supervisor} />}
+      {abierta && <Detalle c={c} onPedir={onPedir} trayendo={trayendo} supervisor={supervisor}
+        tarea={tarea} onTareaCreada={onTareaCreada} />}
     </Fragment>
   );
 }
@@ -710,6 +774,7 @@ export default function Posventa() {
   const [ahora, setAhora] = useState(() => Date.now());
   const [orden, setOrden] = useState({ campo: "sla", dir: "asc" });
   const [supervisores, setSupervisores] = useState({});
+  const [tareas, setTareas] = useState({});
 
   async function cargar() {
     setError(null);
@@ -720,12 +785,23 @@ export default function Posventa() {
       // pedirlo caso por caso.
       sb.from("vw_pnr_supervisor").select("*"),
     ]);
+    // Las tareas vivas del periodo, para que el panel muestre si ya se pidió la
+    // foto y en qué quedó, en vez de ofrecer crearla otra vez.
+    const tar = await sb.from("pnr_tareas_mx")
+      .select("id, case_id, sc, estado, supervisor_nombre, creada_en, fotos, comentario")
+      .in("estado", ["pendiente", "vista", "completada", "sin_pruebas"])
+      .limit(5000);
     if (tablero.error) setError(tablero.error.message);
     else setCasos(tablero.data || []);
     if (!sup.error && sup.data) {
       const m = {};
       for (const f of sup.data) if (f.estacion_origen) m[f.estacion_origen] = f;
       setSupervisores(m);
+    }
+    if (!tar.error && tar.data) {
+      const m = {};
+      for (const f of tar.data) m[f.case_id] = f;
+      setTareas(m);
     }
     setCargando(false);
   }
@@ -854,6 +930,10 @@ export default function Posventa() {
   // Varias filas pueden quedar abiertas: el analista compara casos del mismo
   // conductor o de la misma ruta, y cerrarle la anterior cada vez lo obliga a
   // memorizar lo que acaba de leer.
+  function agregarTarea(t) {
+    if (t) setTareas((prev) => ({ ...prev, [t.case_id]: t }));
+  }
+
   function abrirFila(c) {
     const estaba = abiertas.has(c.case_id);
     setAbiertas((prev) => {
@@ -1017,7 +1097,8 @@ export default function Posventa() {
                 <Fila key={c.case_id} c={c} abierta={abiertas.has(c.case_id)}
                   onAbrir={() => abrirFila(c)}
                   onPedir={pedirDetalle} trayendo={trayendo.has(c.case_id)}
-                  ahora={ahora} supervisor={supervisores[c.service_center]} />
+                  ahora={ahora} supervisor={supervisores[c.service_center]}
+                  tarea={tareas[c.case_id]} onTareaCreada={agregarTarea} />
               ))
             )}
           </div>
