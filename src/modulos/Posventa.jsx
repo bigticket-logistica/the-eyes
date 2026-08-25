@@ -36,6 +36,7 @@ const CAMPOS_DETALLE = [
   "distancia_texto", "responsable", "tipo_operacion", "direccion_envio",
   "transportadora", "transportista", "conductor_id", "telefono",
   "estacion_destino", "id_seguimiento", "estado_texto",
+  "telefono_reclamante", "telefonos_alternos", "direccion_entrega",
 ];
 
 function soloDetalle(d) {
@@ -408,143 +409,194 @@ function Dato({ etiqueta, valor }) {
   );
 }
 
-function Bloque({ titulo, children, tono }) {
+// Ficha de contacto. Nombre arriba, teléfono grande abajo: el teléfono es lo
+// que el analista va a leer en voz alta o a copiar, así que es el dato con más
+// peso visual de la tarjeta, no una línea más de la grilla.
+function Contacto({ icono, rol, nombre, telefono, extra, alternos }) {
   return (
-    <div style={{ marginBottom: 12 }}>
-      <div style={{ fontSize: 11, color: tono || "var(--texto-suave)", fontWeight: 600, marginBottom: 6 }}>
-        {titulo}
+    <div style={{ border: "1px solid var(--borde)", borderRadius: 10, padding: "8px 10px", background: "#fff" }}>
+      <div style={{ fontSize: 10, color: "var(--texto-tenue)", textTransform: "uppercase",
+        letterSpacing: 0.3, marginBottom: 2 }}>
+        {icono} {rol}
       </div>
-      {children}
+      <div style={{ fontSize: 12.5, color: "var(--texto)", lineHeight: 1.3 }}>{nombre || "—"}</div>
+      <div style={{ fontSize: 14, fontWeight: 600, color: telefono ? C.navy : "var(--texto-tenue)",
+        fontVariantNumeric: "tabular-nums", lineHeight: 1.4 }}>
+        {telefono || "sin teléfono"}
+      </div>
+      {alternos && (
+        <div style={{ fontSize: 10.5, color: "var(--texto-tenue)" }}>alternos: {alternos}</div>
+      )}
+      {extra && (
+        <div style={{ fontSize: 11, color: "var(--texto-suave)", lineHeight: 1.35, marginTop: 3 }}>{extra}</div>
+      )}
     </div>
   );
 }
 
-function Detalle({ c, onCopiar, onPedir, trayendo }) {
-  const sinRuta = !c.conductor_ruta && !c.patente && !c.fecha_ruta;
-  const sub = chipEstado(c.sub_estado);
+function Detalle({ c, onPedir, trayendo, supervisor }) {
+  const [panel, setPanel] = useState(false);
   const hayDetalle = !!c.detalle_capturado_en && !c.detalle_error;
 
   // La defensa del caso en una línea. Si MELI registró la entrega en el
   // domicilio exacto y con constancia de quién recibió, el reclamo se pelea
   // solo — y eso hoy el analista lo descubre abriendo MELI caso por caso.
   const enDomicilio = /^A\s*0([.,]0+)?\s*km/i.test(c.distancia_texto || "");
-  const defendible = enDomicilio && !!c.recibio_quien;
+  const conConstancia = !!c.recibio_quien;
+  const defendible = enDomicilio && conConstancia;
+
+  const marco = defendible
+    ? { borde: C.verde, fondo: "#e9f3ef", texto: C.verde }
+    : conConstancia
+      ? { borde: "var(--borde)", fondo: "#fff", texto: "var(--texto-suave)" }
+      : { borde: C.naranja, fondo: C.naranjaTenue, texto: C.naranja };
 
   return (
     <div style={{ padding: "12px 16px 14px 44px", background: C.grisTenue, borderTop: "1px solid var(--borde)" }}>
-      <Bloque titulo="Caso">
-        <div style={{ display: "flex", flexWrap: "wrap", gap: 18 }}>
-          <Dato etiqueta="Caso PNR" valor={c.case_id} />
-          <Dato etiqueta="Guía" valor={c.shipment_id} />
-          <Dato etiqueta="Ruta" valor={`${c.route_code || "—"} · ${c.route_id || "—"}`} />
-          <Dato etiqueta="Centro" valor={c.service_center} />
-          <Dato etiqueta="Nace" valor={c.cuando_mx} />
-          <Dato etiqueta="Transcurrido" valor={c.horas_transcurridas != null ? `${Math.round(c.horas_transcurridas)} h` : null} />
-          <Dato etiqueta="Estado MELI" valor={`${ESTADOS[c.estado] || c.estado} · ${sub.largo}`} />
-          <Dato etiqueta="Responsable" valor={c.responsable} />
-        </div>
-      </Bloque>
+      <div style={{ display: "grid", gridTemplateColumns: "minmax(0,1.7fr) minmax(240px,1fr)", gap: 12 }}>
 
-      {hayDetalle && (
-        <Fragment>
-          <Bloque titulo="Datos del reclamo">
-            <div style={{ display: "flex", flexWrap: "wrap", gap: 18 }}>
-              <div style={{ minWidth: 260, flex: 1 }}>
-                <div style={{ fontSize: 10, color: "var(--texto-tenue)", textTransform: "uppercase", letterSpacing: 0.3 }}>
-                  Producto
-                </div>
-                <div style={{ fontSize: 12.5, color: "var(--texto)" }}>{c.producto || "—"}</div>
+        {/* Izquierda: los hechos del caso */}
+        <div>
+          <div style={{ border: "1px solid var(--borde)", borderRadius: 10, background: "#fff",
+            padding: "9px 11px", marginBottom: 8 }}>
+            <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", marginBottom: 6 }}>
+              <span style={{ fontSize: 11, fontWeight: 600, color: "var(--texto-suave)" }}>Caso y reclamo</span>
+              <span style={{ fontSize: 10.5, color: "var(--texto-tenue)" }}>
+                {c.case_id} · guía {c.shipment_id}
+              </span>
+            </div>
+            {c.producto && (
+              <div style={{ fontSize: 13.5, color: "var(--texto)", lineHeight: 1.35, marginBottom: 6 }}>
+                {c.producto}
               </div>
-              <Dato etiqueta="Valor" valor={c.valor_compra != null ? dinero(c.valor_compra) : null} />
-              <Dato etiqueta="Reclamante" valor={c.reclamante} />
-              <Dato etiqueta="Designado para recibir" valor={c.designado_recibir} />
+            )}
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 16 }}>
+              <Dato etiqueta="Valor" valor={c.valor_compra != null ? dinero(c.valor_compra) : dinero(c.monto)} />
+              <Dato etiqueta="Nace" valor={c.cuando_mx} />
+              <Dato etiqueta="Centro" valor={c.service_center} />
+              <Dato etiqueta="Ruta" valor={`${c.route_code || "—"} · ${c.route_id || "—"}`} />
+              <Dato etiqueta="Estado MELI" valor={(POR_ESTADO[c.sub_estado] || {}).etiqueta} />
+              <Dato etiqueta="Responsable" valor={c.responsable} />
             </div>
             {c.mensaje_reclamo && (
-              <div style={{ marginTop: 8, fontSize: 12.5, color: "var(--texto)", background: "#fff",
-                border: "1px solid var(--borde)", borderRadius: 8, padding: "8px 10px" }}>
+              <div style={{ marginTop: 7, fontSize: 12.5, color: "var(--texto)", background: C.grisTenue,
+                borderRadius: 8, padding: "6px 9px" }}>
                 “{c.mensaje_reclamo}”
               </div>
             )}
-          </Bloque>
+          </div>
 
-          {/* Prueba de entrega: el bloque que decide si el caso se pelea o se
-              paga. Va antes que el contexto de ruta a propósito. */}
-          <Bloque titulo="Prueba de entrega" tono={defendible ? C.verde : undefined}>
-            {defendible && (
-              <div style={{ fontSize: 12, color: C.verde, background: "#e9f3ef",
-                border: `1px solid ${C.verde}`, borderRadius: 8, padding: "6px 10px", marginBottom: 8 }}>
-                Entregado en el domicilio y con constancia de quién recibió.
-              </div>
-            )}
-            <div style={{ display: "flex", flexWrap: "wrap", gap: 18 }}>
-              <Dato etiqueta="Fecha de entrega" valor={c.entregado_en} />
+          {/* Prueba de entrega. El color lo dice antes que el texto: verde si
+              hay constancia y la entrega fue en el domicilio, naranja si no hay
+              constancia de nada. Es la única parte de la fila que decide si el
+              caso se pelea o se paga. */}
+          <div style={{ border: `1px solid ${marco.borde}`, background: marco.fondo,
+            borderRadius: 10, padding: "9px 11px" }}>
+            <div style={{ fontSize: 11, fontWeight: 600, color: marco.texto, marginBottom: 6 }}>
+              Prueba de entrega
+              {defendible && " · entregado en el domicilio y con constancia"}
+              {!conConstancia && hayDetalle && " · sin constancia de quién recibió"}
+            </div>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 16 }}>
+              <Dato etiqueta="Entregado" valor={c.entregado_en} />
               <Dato etiqueta="Recibió" valor={c.recibio_quien} />
               <Dato etiqueta="Nombre" valor={c.recibio_nombre} />
               <Dato etiqueta="Documento" valor={c.recibio_documento} />
               <Dato etiqueta="Distancia" valor={c.distancia_texto} />
             </div>
-          </Bloque>
-        </Fragment>
-      )}
-
-      <Bloque titulo="Ruta y conductor">
-        {sinRuta && !hayDetalle ? (
-          <div style={{ fontSize: 12, color: "var(--texto-tenue)" }}>
-            Sin captura de la ruta {c.route_id || "—"} en el monitor. Traé el detalle de MELI o buscala en Logistic.
           </div>
-        ) : (
-          <div style={{ display: "flex", flexWrap: "wrap", gap: 18 }}>
-            <Dato etiqueta="Conductor" valor={c.transportista || c.conductor_ruta || c.conductor} />
-            <Dato etiqueta="Teléfono" valor={c.telefono} />
-            <Dato etiqueta="Transportadora" valor={c.transportadora} />
-            <Dato etiqueta="Placa" valor={c.patente} />
-            <Dato etiqueta="Fecha de ruta" valor={c.fecha_ruta} />
-            <Dato etiqueta="Paquetes" valor={c.pkg_total != null ? `${c.pkg_delivered ?? 0} de ${c.pkg_total} · ${c.pkg_not_delivered ?? 0} no entregados` : null} />
-          </div>
-        )}
-      </Bloque>
-
-      <Bloque titulo="Cumplimiento">
-        <div style={{ display: "flex", flexWrap: "wrap", gap: 18 }}>
-          {HITOS.map((h) => (
-            <Dato key={h.clave} etiqueta={h.titulo} valor={fechaHito(c[h.clave]) || "Pendiente"} />
-          ))}
         </div>
-      </Bloque>
+
+        {/* Derecha: a quién llamar y el botón que lo dispara */}
+        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+          <Contacto icono="🚚" rol="Conductor"
+            nombre={c.transportista || c.conductor_ruta || c.conductor}
+            telefono={c.telefono}
+            extra={[c.transportadora, c.patente].filter(Boolean).join(" · ")} />
+
+          <Contacto icono="👤" rol="Reclamante"
+            nombre={c.reclamante || c.designado_recibir}
+            telefono={c.telefono_reclamante}
+            alternos={c.telefonos_alternos}
+            extra={c.direccion_entrega} />
+
+          {/* El cumplimiento estaba como bloque propio y repetía el riel de la
+              fila. Acá va comprimido y junto al botón, que es donde importa:
+              saber a quién ya se le avisó antes de volver a avisarle. */}
+          <div style={{ border: "1px solid var(--borde)", borderRadius: 10, background: "#fff", padding: "7px 10px" }}>
+            {HITOS.map((h) => {
+              const f = fechaHito(c[h.clave]);
+              return (
+                <div key={h.clave} style={{ display: "flex", justifyContent: "space-between",
+                  alignItems: "baseline", gap: 8, padding: "1.5px 0" }}>
+                  <span style={{ fontSize: 11, color: "var(--texto-suave)" }}>{h.etiqueta}</span>
+                  <span style={{ fontSize: 10.5, color: f ? C.verde : "var(--texto-tenue)",
+                    fontVariantNumeric: "tabular-nums" }}>
+                    {f || "pendiente"}
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+
+          <button onClick={() => setPanel((v) => !v)}
+            style={{ fontSize: 13, fontWeight: 600, padding: "9px 14px", borderRadius: 9,
+              border: `1px solid ${C.naranja}`, background: panel ? C.naranjaTenue : C.naranja,
+              color: panel ? C.naranja : "#fff", cursor: "pointer" }}>
+            {panel ? "Cerrar" : "Notificar"}
+          </button>
+
+          {panel && (
+            <div style={{ border: "1px solid var(--borde)", borderRadius: 10, background: "#fff", padding: "9px 11px" }}>
+              <div style={{ fontSize: 11, fontWeight: 600, color: "var(--texto-suave)", marginBottom: 6 }}>
+                Se van a generar cuatro envíos
+              </div>
+              {[
+                { n: "WhatsApp al conductor", d: c.telefono },
+                { n: "Tarea al supervisor",   d: supervisor ? supervisor.supervisor_nombre : null },
+                { n: "Correo al tercero",     d: c.transportadora },
+                { n: "WhatsApp al tercero",   d: null },
+              ].map((x) => (
+                <div key={x.n} style={{ display: "flex", justifyContent: "space-between", gap: 8, padding: "2px 0" }}>
+                  <span style={{ fontSize: 11.5, color: "var(--texto)" }}>{x.n}</span>
+                  <span style={{ fontSize: 11, color: x.d ? "var(--texto-suave)" : C.ladrillo,
+                    textAlign: "right", maxWidth: 130, overflow: "hidden", textOverflow: "ellipsis",
+                    whiteSpace: "nowrap" }}>
+                    {x.d || "falta el destino"}
+                  </span>
+                </div>
+              ))}
+              <button disabled title="Faltan las plantillas de aviso"
+                style={{ width: "100%", marginTop: 8, fontSize: 12, padding: "7px 10px" }}>
+                Enviar los cuatro
+              </button>
+            </div>
+          )}
+
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
+            <span style={{ fontSize: 10, color: "var(--texto-tenue)" }}>
+              {hayDetalle ? `detalle de ${fechaHito(c.detalle_capturado_en)}` : "sin detalle de MELI"}
+            </span>
+            <button onClick={() => onPedir(c.case_id, true)} disabled={trayendo}
+              title="Volver a leer el caso en MELI"
+              style={{ fontSize: 11, padding: "3px 9px" }}>
+              {trayendo ? "trayendo…" : "actualizar"}
+            </button>
+          </div>
+        </div>
+      </div>
 
       {c.detalle_error && (
         <div style={{ fontSize: 11.5, color: C.ladrillo, background: C.ladrilloTenue,
-          border: `1px solid ${C.ladrillo}`, borderRadius: 8, padding: "6px 10px", marginBottom: 10 }}>
+          border: `1px solid ${C.ladrillo}`, borderRadius: 8, padding: "6px 10px", marginTop: 8 }}>
           No se pudo traer el detalle de MELI: {c.detalle_error}
         </div>
       )}
-
-      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
-        <button onClick={() => onCopiar(String(c.case_id), "Caso copiado")}
-          style={{ fontSize: 11.5, padding: "5px 11px" }}>Copiar caso</button>
-        <button onClick={() => onCopiar(c.shipment_id, "Guía copiada")}
-          style={{ fontSize: 11.5, padding: "5px 11px" }}>Copiar guía</button>
-        {c.telefono && (
-          <button onClick={() => onCopiar(c.telefono, "Teléfono copiado")}
-            style={{ fontSize: 11.5, padding: "5px 11px" }}>Copiar teléfono</button>
-        )}
-        <button onClick={() => onPedir(c.case_id, true)} disabled={trayendo}
-          style={{ fontSize: 11.5, padding: "5px 11px" }}>
-          {trayendo ? "Trayendo de MELI…" : hayDetalle ? "Actualizar detalle" : "Traer detalle"}
-        </button>
-        <button disabled title="Falta definir plantilla y tiempos de escalonamiento"
-          style={{ fontSize: 11.5, padding: "5px 11px" }}>Avisar al conductor</button>
-        {hayDetalle && (
-          <span style={{ marginLeft: "auto", fontSize: 10, color: "var(--texto-tenue)" }}>
-            detalle de {fechaHito(c.detalle_capturado_en)}
-          </span>
-        )}
-      </div>
     </div>
   );
 }
 
-function Fila({ c, abierta, onAbrir, onCopiar, onPedir, trayendo, ahora }) {
+function Fila({ c, abierta, onAbrir, onPedir, trayendo, ahora, supervisor }) {
   const g = POR_CLAVE[clasificar(c)];
   const fondo = abierta ? C.grisTenue : "#fff";
   const sub = chipEstado(c.sub_estado);
@@ -576,7 +628,7 @@ function Fila({ c, abierta, onAbrir, onCopiar, onPedir, trayendo, ahora }) {
           {dinero(c.monto)}
         </span>
       </div>
-      {abierta && <Detalle c={c} onCopiar={onCopiar} onPedir={onPedir} trayendo={trayendo} />}
+      {abierta && <Detalle c={c} onPedir={onPedir} trayendo={trayendo} supervisor={supervisor} />}
     </Fragment>
   );
 }
@@ -594,15 +646,24 @@ export default function Posventa() {
   const [trayendo, setTrayendo] = useState(new Set());
   const [ahora, setAhora] = useState(() => Date.now());
   const [orden, setOrden] = useState({ campo: "sla", dir: "asc" });
+  const [supervisores, setSupervisores] = useState({});
 
   async function cargar() {
     setError(null);
-    const { data, error: err } = await sb
-      .from("vw_pnr_detalle")
-      .select("*")
-      .limit(5000);
-    if (err) setError(err.message);
-    else setCasos(data || []);
+    const [tablero, sup] = await Promise.all([
+      sb.from("vw_pnr_detalle").select("*").limit(5000),
+      // Los supervisores se leen una vez por carga: son diez centros y cambian
+      // poco. Sirven para saber a quién le va la tarea del escalamiento sin
+      // pedirlo caso por caso.
+      sb.from("vw_pnr_supervisor").select("*"),
+    ]);
+    if (tablero.error) setError(tablero.error.message);
+    else setCasos(tablero.data || []);
+    if (!sup.error && sup.data) {
+      const m = {};
+      for (const f of sup.data) if (f.estacion_origen) m[f.estacion_origen] = f;
+      setSupervisores(m);
+    }
     setCargando(false);
   }
 
@@ -734,12 +795,6 @@ export default function Posventa() {
       return n;
     });
     if (!estaba && !detalleFresco(c) && !trayendo.has(c.case_id)) pedirDetalle(c.case_id, false);
-  }
-
-  function copiar(texto, mensaje) {
-    navigator.clipboard.writeText(texto || "");
-    setAviso(mensaje);
-    setTimeout(() => setAviso(""), 1600);
   }
 
   return (
@@ -894,8 +949,8 @@ export default function Posventa() {
               lista.map((c) => (
                 <Fila key={c.case_id} c={c} abierta={abiertas.has(c.case_id)}
                   onAbrir={() => abrirFila(c)}
-                  onCopiar={copiar} onPedir={pedirDetalle}
-                  trayendo={trayendo.has(c.case_id)} ahora={ahora} />
+                  onPedir={pedirDetalle} trayendo={trayendo.has(c.case_id)}
+                  ahora={ahora} supervisor={supervisores[c.service_center]} />
               ))
             )}
           </div>
