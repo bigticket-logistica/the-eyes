@@ -291,12 +291,14 @@ function pct(n, total) {
 
 function TablaEstados({ casos, filtro, onFiltrar }) {
   const total = casos.length;
+  let totalMonto = 0;
   const por = {};
   for (const c of casos) {
     const k = c.sub_estado || "?";
     if (!por[k]) por[k] = { n: 0, monto: 0 };
     por[k].n += 1;
     por[k].monto += Number(c.monto || 0);
+    totalMonto += Number(c.monto || 0);
   }
 
   return (
@@ -341,6 +343,22 @@ function TablaEstados({ casos, filtro, onFiltrar }) {
           </div>
         );
       })}
+
+      {/* Total al pie. Es el número que se contrasta contra el panel de MELI:
+          si los dos dicen lo mismo, el scraper trajo todo. Va acá y no en una
+          tarjeta aparte porque es la suma de la columna que tiene arriba. */}
+      <div style={{ display: "grid", gridTemplateColumns: "210px 62px 92px 58px 1fr", gap: 10,
+        padding: "8px 14px", borderTop: `2px solid ${C.navy}`, background: C.navyTenue }}>
+        <span style={{ fontSize: 12, fontWeight: 700, color: C.navy }}>Total</span>
+        <span style={{ textAlign: "right", fontSize: 13, fontWeight: 700, color: C.navy,
+          fontVariantNumeric: "tabular-nums" }}>{total}</span>
+        <span style={{ textAlign: "right", fontSize: 12, fontWeight: 700, color: C.navy,
+          fontVariantNumeric: "tabular-nums" }}>{dinero(totalMonto)}</span>
+        <span style={{ textAlign: "right", fontSize: 11, color: C.navy }}>100%</span>
+        <span style={{ fontSize: 11, color: "var(--texto-suave)" }}>
+          Debe coincidir con el total de casos del panel de MELI para el periodo
+        </span>
+      </div>
     </div>
   );
 }
