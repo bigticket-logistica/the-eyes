@@ -119,10 +119,25 @@ const COLOR_GRUPO = {
   sinrespaldo: C.ladrillo, cerrado: C.verde,
 };
 
+// El color del chip y del riel sale del ESTADO, no del grupo. Con el color del
+// grupo, "Enviado a Facturación" se pintaba verde por compartir la tarjeta
+// "Cerrados" con "Anulado" — o sea que un caso cobrado se veía igual que uno
+// ganado. El grupo dice dónde buscarlo; el color, cómo terminó.
+const COLOR_ESTADO = {
+  WAITING_RECEIPT:  C.naranja,
+  TO_BILL:          "#b8651c",
+  UPLOADED_RECEIPT: C.navy,
+  ASSIGNED:         C.navy,
+  ON_REVIEW:        C.navy,
+  WITHOUT_RECEIPT:  C.ladrillo,
+  NOT_BILLED:       C.verde,
+  BILLED:           C.ladrillo,
+};
+
 function chipEstado(sub) {
   const e = POR_ESTADO[sub];
   if (!e) return { corto: sub, largo: sub, color: C.gris };
-  return { corto: e.corto, largo: e.etiqueta, color: COLOR_GRUPO[e.grupo] || C.gris };
+  return { corto: e.corto, largo: e.etiqueta, color: COLOR_ESTADO[sub] || C.gris };
 }
 
 // Línea de cumplimiento del caso, en el orden en que debería ocurrir. Las dos
@@ -264,6 +279,19 @@ function Riel({ c, color, terminal, fondo }) {
       }} />
       {HITOS.map((h) => {
         const f = fechaHito(c[h.clave]);
+        // En un caso cerrado, un hito sin cumplir no está "pendiente": no va a
+        // ocurrir nunca. El círculo hueco invita a esperarlo; la raya dice que
+        // esa puerta ya se cerró.
+        if (!f && terminal) {
+          return (
+            <span key={h.clave} title={`${h.titulo}: no ocurrió y ya no puede ocurrir`}
+              style={{ position: "relative", textAlign: "center", lineHeight: 1.15 }}>
+              <span style={{ display: "inline-block", width: 9, height: 0, verticalAlign: "middle",
+                borderTop: "2px solid #c3cad6", boxShadow: `0 0 0 2.5px ${fondo}` }} />
+              <div style={{ fontSize: 8.5, color: "var(--texto-tenue)", marginTop: 1 }}>{"\u00a0"}</div>
+            </span>
+          );
+        }
         return (
           <span key={h.clave} title={f ? `${h.titulo}: ${f}` : `${h.titulo}: pendiente`}
             style={{ position: "relative", textAlign: "center", lineHeight: 1.15, overflow: "hidden" }}>
@@ -335,7 +363,7 @@ function TablaEstados({ casos, filtro, onFiltrar }) {
               opacity: vacia ? 0.45 : 1,
             }}>
             <span style={{ fontSize: 12, fontWeight: activa ? 600 : 500,
-              color: COLOR_GRUPO[e.grupo] || "var(--texto)" }}>
+              color: COLOR_ESTADO[e.clave] || "var(--texto)" }}>
               {e.etiqueta}
             </span>
             <span style={{ textAlign: "right", fontSize: 12, fontWeight: 600, color: "var(--texto)",
@@ -543,7 +571,7 @@ function Fila({ c, abierta, onAbrir, onCopiar, onPedir, trayendo, ahora }) {
           borderRadius: 20, padding: "1px 7px", textAlign: "center", whiteSpace: "nowrap",
           overflow: "hidden", textOverflow: "ellipsis",
         }}>{sub.corto}</span>
-        <Riel c={c} color={g.color} terminal={g.terminal} fondo={fondo} />
+        <Riel c={c} color={COLOR_ESTADO[c.sub_estado] || g.color} terminal={g.terminal} fondo={fondo} />
         <span style={{ textAlign: "right", fontSize: 13, fontWeight: 600, color: "var(--texto)" }}>
           {dinero(c.monto)}
         </span>
@@ -619,6 +647,13 @@ export default function Posventa() {
   }, [delPeriodo]);
 
   const buscando = busqueda.trim().length > 0;
+
+  const subEstadosDelGrupo = useMemo(
+    () => filtro.tipo === "grupo"
+      ? ESTADOS_PNR.filter((e) => e.grupo === filtro.valor)
+      : [],
+    [filtro]
+  );
 
   // La búsqueda ignora periodo y tarjeta a propósito: cuando alguien pega un
   // número de caso quiere ese caso, no "ese caso si además está en la
@@ -776,6 +811,38 @@ export default function Posventa() {
               : filtro.tipo === "todos" ? "Todos"
               : (POR_CLAVE[filtro.valor] || {}).etiqueta || "Casos"}
           </span>
+          {/* Sub-filtros del grupo abierto. "Cerrados" junta anulados y cobrados,
+              y son lo opuesto entre sí: hacía falta poder verlos por separado
+              sin bajar a la tabla. Aparecen solo cuando el grupo tiene más de
+              un estado, así no ensucian los que tienen uno solo. */}
+          {!buscando && filtro.tipo === "grupo" && subEstadosDelGrupo.length > 1 && (
+            <div style={{ display: "flex", gap: 4 }}>
+              {subEstadosDelGrupo.map((e) => (
+                <button key={e.clave}
+                  onClick={() => { setFiltro({ tipo: "estado", valor: e.clave }); setAbiertas(new Set()); }}
+                  style={{
+                    fontSize: 11, padding: "3px 9px", borderRadius: 20, cursor: "pointer",
+                    border: `1px solid ${COLOR_ESTADO[e.clave] || "var(--borde)"}`,
+                    background: "#fff", color: COLOR_ESTADO[e.clave] || "var(--texto-suave)",
+                  }}>
+                  {e.corto}
+                </button>
+              ))}
+            </div>
+          )}
+
+          {/* Al filtrar por un estado puntual, un atajo para volver al grupo. */}
+          {!buscando && filtro.tipo === "estado" && (
+            <button onClick={() => {
+              const g = (POR_ESTADO[filtro.valor] || {}).grupo;
+              setFiltro(g ? { tipo: "grupo", valor: g } : { tipo: "todos", valor: null });
+              setAbiertas(new Set());
+            }} style={{ fontSize: 11, padding: "3px 9px", borderRadius: 20, cursor: "pointer",
+              border: "1px solid var(--borde)", background: "#fff", color: "var(--texto-suave)" }}>
+              ← todo el grupo
+            </button>
+          )}
+
           <button onClick={() => { setBusqueda(""); setFiltro({ tipo: "todos", valor: null }); setAbiertas(new Set()); }}
             style={{
               fontSize: 11.5, padding: "4px 10px", borderRadius: 20, cursor: "pointer",
