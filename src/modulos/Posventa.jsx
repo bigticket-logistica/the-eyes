@@ -93,11 +93,19 @@ const POR_ESTADO = Object.fromEntries(ESTADOS_PNR.map((e) => [e.clave, e]));
 // Un sub_estado que MELI invente mañana cae en "responder": aparece arriba
 // pidiendo que alguien lo mire, en vez de esconderse en el medio.
 function clasificar(c) {
+  // La ventana gana sobre el sub_estado: un caso rescatable puede estar en
+  // cualquier estado abierto, y lo que decide dónde mostrarlo no es cómo lo
+  // clasifica MELI sino que el conductor esté arriba del camión ahora.
+  if (c.rescatable) return "rescatable";
   const e = POR_ESTADO[c.sub_estado];
   return e ? e.grupo : "responder";
 }
 
 const GRUPOS = [
+  // Rescatable no es un estado de MELI, es una ventana de tiempo: el conductor
+  // sigue en calle. Va primera y siempre visible, incluso en cero — el día que
+  // marque uno, el analista ya sabe dónde mirar.
+  { clave: "rescatable",  etiqueta: "En ruta ahora",  nota: "se resuelve hoy",      color: "#c2410c",  tinte: "#fff1e6",       terminal: false, ventana: true },
   { clave: "responder",   etiqueta: "Por responder",  nota: "falta el comprobante", color: C.naranja,  tinte: C.naranjaTenue,  terminal: false },
   // Con Penalidad va aparte y no dentro de "Por responder" porque la acción es
   // otra: acá no se sube una foto, se pide revisión. Mezclarlos hacía que el
@@ -484,6 +492,19 @@ function Detalle({ c, onPedir, trayendo, supervisor }) {
 
   return (
     <div style={{ padding: "12px 16px 14px 44px", background: C.grisTenue, borderTop: "1px solid var(--borde)" }}>
+      {c.rescatable && (
+        <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8,
+          background: "#fff1e6", border: "1px solid #c2410c", borderRadius: 10, padding: "7px 11px" }}>
+          <span style={{ fontSize: 12.5, fontWeight: 600, color: "#c2410c" }}>
+            El conductor está en ruta ahora
+          </span>
+          <span style={{ fontSize: 11.5, color: "#8a3208" }}>
+            Ruta {c.route_code} del {c.fecha_ruta} · {c.estado_ruta}
+            {c.ruta_vista_en ? ` · vista ${fechaHito(c.ruta_vista_en)}` : ""}
+          </span>
+        </div>
+      )}
+
       <div style={{ display: "grid", gridTemplateColumns: "minmax(0,1.7fr) minmax(240px,1fr)", gap: 12 }}>
 
         {/* Izquierda: los hechos del caso */}
@@ -542,7 +563,7 @@ function Detalle({ c, onPedir, trayendo, supervisor }) {
         <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
           <Contacto icono="🚚" rol="Conductor"
             nombre={c.transportista || c.conductor_ruta || c.conductor}
-            telefono={c.telefono}
+            telefono={c.telefono || c.telefono_ruta}
             extra={[c.transportadora, c.patente].filter(Boolean).join(" · ")} />
 
           <Contacto icono="👤" rol="Reclamante"
@@ -645,7 +666,16 @@ function Fila({ c, abierta, onAbrir, onPedir, trayendo, ahora, supervisor }) {
           {c.case_id}
         </span>
         <Reloj c={c} ahora={ahora} />
-        <span style={{ minWidth: 0, fontSize: 13, color: "var(--texto)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+        <span style={{ minWidth: 0, fontSize: 13, color: "var(--texto)", overflow: "hidden",
+          textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+          {c.rescatable && (
+            <span title="La ruta de este caso sigue en calle: el conductor puede resolverlo ahora"
+              style={{ display: "inline-block", fontSize: 9.5, fontWeight: 700, color: "#c2410c",
+                background: "#fff1e6", border: "1px solid #c2410c", borderRadius: 4,
+                padding: "0 5px", marginRight: 6, verticalAlign: "middle" }}>
+              EN RUTA
+            </span>
+          )}
           {c.conductor || "Sin conductor"}
         </span>
         <span style={{ fontSize: 12, color: "var(--texto-suave)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
@@ -775,7 +805,11 @@ export default function Posventa() {
       if (orden.campo === "caso") return Number(c.case_id || 0);
       return c.horas_restantes == null ? 9999 : Number(c.horas_restantes);
     };
+    // Los rescatables van arriba de todo, por encima del orden que elija el
+    // analista. Es lo único de esta pantalla que se pierde por esperar: dentro
+    // de unas horas la ruta cierra y el caso pasa a costar días de gestión.
     return base.slice().sort((a, b) => {
+      if (!!a.rescatable !== !!b.rescatable) return a.rescatable ? -1 : 1;
       const d = valor(a) - valor(b);
       return orden.dir === "asc" ? d : -d;
     });
