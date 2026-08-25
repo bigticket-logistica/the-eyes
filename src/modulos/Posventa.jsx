@@ -473,6 +473,88 @@ function Contacto({ icono, rol, nombre, telefono, extra, alternos }) {
   );
 }
 
+// Las pruebas que subió el supervisor. El analista tiene que poder verlas acá:
+// el paso siguiente es subirlas a MELI, y mandarlo a la bitácora con otra
+// cuenta para mirar una foto rompe el circuito justo donde importa.
+//
+// El bucket es privado, así que cada archivo necesita su URL firmada. Se piden
+// al abrir la fila y duran una hora.
+function Pruebas({ tarea }) {
+  const [urls, setUrls] = useState({});
+  const fotos = (tarea && Array.isArray(tarea.fotos) ? tarea.fotos : []) || [];
+
+  useEffect(() => {
+    let cancelado = false;
+    (async () => {
+      const nuevas = {};
+      for (const ruta of fotos) {
+        if (urls[ruta]) continue;
+        const { data } = await sb.storage.from("pnr-pruebas").createSignedUrl(ruta, 3600);
+        if (data && data.signedUrl) nuevas[ruta] = data.signedUrl;
+      }
+      if (!cancelado && Object.keys(nuevas).length) setUrls((v) => ({ ...v, ...nuevas }));
+    })();
+    return () => { cancelado = true; };
+  }, [tarea && tarea.fotos ? tarea.fotos.join("|") : ""]);
+
+  if (!tarea) return null;
+
+  const esperando = fotos.length === 0 && ["pendiente", "vista"].includes(tarea.estado);
+  const sinPruebas = tarea.estado === "sin_pruebas";
+
+  return (
+    <div style={{ border: `1px solid ${sinPruebas ? C.ladrillo : fotos.length ? C.verde : "var(--borde)"}`,
+      background: sinPruebas ? C.ladrilloTenue : fotos.length ? "#e9f3ef" : "#fff",
+      borderRadius: 10, padding: "9px 11px", marginTop: 8 }}>
+      <div style={{ fontSize: 11, fontWeight: 600, marginBottom: 6,
+        color: sinPruebas ? C.ladrillo : fotos.length ? C.verde : "var(--texto-suave)" }}>
+        {sinPruebas
+          ? "El conductor no tiene pruebas"
+          : fotos.length
+            ? `${fotos.length} ${fotos.length === 1 ? "prueba" : "pruebas"} del conductor`
+            : "Pruebas del conductor"}
+      </div>
+
+      {esperando && (
+        <div style={{ fontSize: 12, color: "var(--texto-tenue)" }}>
+          {tarea.estado === "vista"
+            ? `${tarea.supervisor_nombre || tarea.sc} abrió la tarea y todavía no sube nada.`
+            : `Pedida a ${tarea.supervisor_nombre || tarea.sc}, sin abrir aún.`}
+        </div>
+      )}
+
+      {fotos.length > 0 && (
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: tarea.comentario ? 8 : 0 }}>
+          {fotos.map((ruta) => (
+            <a key={ruta} href={urls[ruta] || "#"} target="_blank" rel="noreferrer"
+              title="Abrir en tamaño completo"
+              style={{ display: "block", width: 84, height: 84, borderRadius: 8, overflow: "hidden",
+                border: "1px solid var(--borde)", background: "#fff" }}>
+              {urls[ruta] && /\.(jpe?g|png|webp|heic)$/i.test(ruta) ? (
+                <img src={urls[ruta]} alt="prueba de entrega"
+                  style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+              ) : (
+                <span style={{ fontSize: 10, color: "var(--texto-tenue)", padding: 5, display: "block" }}>
+                  {urls[ruta] ? "archivo" : "cargando…"}
+                </span>
+              )}
+            </a>
+          ))}
+        </div>
+      )}
+
+      {tarea.comentario && (
+        <div style={{ fontSize: 12.5, color: "var(--texto)", lineHeight: 1.4 }}>
+          <span style={{ color: "var(--texto-tenue)" }}>
+            {tarea.supervisor_nombre || "El supervisor"} ·{" "}
+          </span>
+          “{tarea.comentario}”
+        </div>
+      )}
+    </div>
+  );
+}
+
 function Detalle({ c, onPedir, trayendo, supervisor, tarea, onTareaCreada }) {
   const [panel, setPanel] = useState(false);
   const [creando, setCreando] = useState(false);
@@ -588,6 +670,8 @@ function Detalle({ c, onPedir, trayendo, supervisor, tarea, onTareaCreada }) {
               <Dato etiqueta="Distancia" valor={c.distancia_texto} />
             </div>
           </div>
+
+          <Pruebas tarea={tarea} />
         </div>
 
         {/* Derecha: a quién llamar y el botón que lo dispara */}
@@ -805,6 +889,46 @@ export default function Posventa() {
     }
     setCargando(false);
   }
+
+  // Realtime sobre pnr_tareas_mx. Sin esto el analista tenía que apretar
+  // Actualizar para saber que el supervisor ya subió la foto, y en la práctica
+  // no lo aprieta: se entera al rato o no se entera.
+  //
+  // El hito pruebas_recibidas_en lo escribe un trigger sobre pnr_casos_mx, que
+  // no se publica por Realtime — el scraper la reescribe entera cada 5 minutos
+  // y mandaría cien eventos por ciclo. Así que cuando llega el evento de la
+  // tarea, se relee ese único caso.
+  useEffect(() => {
+    const canal = sb.channel("pnr-tareas-posventa")
+      .on("postgres_changes",
+        { event: "*", schema: "public", table: "pnr_tareas_mx" },
+        async (payload) => {
+          const fila = payload.new && payload.new.case_id ? payload.new : payload.old;
+          if (!fila || !fila.case_id) return;
+
+          if (payload.eventType === "DELETE") {
+            setTareas((prev) => {
+              const n = { ...prev };
+              delete n[fila.case_id];
+              return n;
+            });
+          } else {
+            setTareas((prev) => ({ ...prev, [fila.case_id]: fila }));
+          }
+
+          const { data } = await sb.from("vw_pnr_detalle")
+            .select("case_id, pruebas_recibidas_en, sub_estado")
+            .eq("case_id", fila.case_id)
+            .maybeSingle();
+          if (data) {
+            setCasos((prev) => prev.map((x) => x.case_id === data.case_id
+              ? { ...x, pruebas_recibidas_en: data.pruebas_recibidas_en, sub_estado: data.sub_estado }
+              : x));
+          }
+        })
+      .subscribe();
+    return () => { sb.removeChannel(canal); };
+  }, []);
 
   // Un tick por minuto mueve todos los relojes sin volver a consultar la base.
   useEffect(() => {
