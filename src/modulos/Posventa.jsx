@@ -422,14 +422,22 @@ function TablaEstados({ casos, filtro, historial, dia, onDia, onFiltrar, onFiltr
     totalMonto += Number(c.monto || 0);
   }
 
-  // Movimientos del día elegido, contando el destino: la pregunta es "cuántos
-  // pasaron A anulado", no cuántos salieron de ahí.
+  // Movimientos del día elegido, contando el destino: la pregunta habitual es
+  // "cuántos pasaron A anulado", no cuántos salieron de ahí.
+  //
+  // Y guardando además de dónde venían, porque el par dice cosas que el total
+  // esconde: "Sin comprobante → Anulado" es un caso que se ganó sin subir nada,
+  // y "Comprobante cargado → Enviado a facturación" es uno que se perdió
+  // habiendo subido la foto. Los dos son señales fuertes.
   const movidos = {};
+  const origenes = {};
   let movidosTotal = 0;
   for (const lista of Object.values(historial || {})) {
     for (const m of lista) {
       if (diaMX(m.creado_en) !== dia) continue;
       movidos[m.sub_a] = (movidos[m.sub_a] || 0) + 1;
+      if (!origenes[m.sub_a]) origenes[m.sub_a] = {};
+      origenes[m.sub_a][m.sub_de] = (origenes[m.sub_a][m.sub_de] || 0) + 1;
       movidosTotal += 1;
     }
   }
@@ -495,20 +503,37 @@ function TablaEstados({ casos, filtro, historial, dia, onDia, onFiltrar, onFiltr
         {ESTADOS_PNR.map((e) => {
           const n = movidos[e.clave] || 0;
           const activa = filtro.tipo === "movidos_estado" && filtro.valor === e.clave;
+          const desde = Object.entries(origenes[e.clave] || {}).sort((a, b) => b[1] - a[1]);
           return (
-            <div key={e.clave} onClick={() => n && onFiltrarMovidos(e.clave)}
-              title={n ? `Ver los ${n} que pasaron a ${e.etiqueta}` : ""}
-              style={{ display: "grid", gridTemplateColumns: GRID_B, gap: 8, padding: "6px 14px",
-                borderTop: "1px solid var(--borde)", cursor: n ? "pointer" : "default",
-                background: activa ? C.naranjaTenue : "#fff", opacity: n ? 1 : 0.45 }}>
-              <span style={{ fontSize: 12, fontWeight: activa ? 600 : 500,
-                color: COLOR_ESTADO[e.clave] || "var(--texto)", overflow: "hidden",
-                textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{e.etiqueta}</span>
-              <span style={{ textAlign: "right", fontSize: 12, fontVariantNumeric: "tabular-nums",
-                fontWeight: n ? 700 : 400, color: n ? C.naranja : "var(--texto-tenue)" }}>
-                {n || "\u2014"}
-              </span>
-            </div>
+            <Fragment key={e.clave}>
+              <div onClick={() => n && onFiltrarMovidos(e.clave)}
+                title={n ? `Ver los ${n} que pasaron a ${e.etiqueta}` : ""}
+                style={{ display: "grid", gridTemplateColumns: GRID_B, gap: 8, padding: "6px 14px",
+                  borderTop: "1px solid var(--borde)", cursor: n ? "pointer" : "default",
+                  background: activa ? C.naranjaTenue : "#fff", opacity: n ? 1 : 0.45 }}>
+                <span style={{ fontSize: 12, fontWeight: activa ? 600 : 500,
+                  color: COLOR_ESTADO[e.clave] || "var(--texto)", overflow: "hidden",
+                  textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{e.etiqueta}</span>
+                <span style={{ textAlign: "right", fontSize: 12, fontVariantNumeric: "tabular-nums",
+                  fontWeight: n ? 700 : 400, color: n ? C.naranja : "var(--texto-tenue)" }}>
+                  {n || "\u2014"}
+                </span>
+              </div>
+              {/* De dónde venían, solo cuando la fila está elegida: el desglose
+                  es la pregunta siguiente, no la primera, y mostrarlo siempre
+                  alarga el cuadro todos los días para nada. */}
+              {activa && desde.map(([sub, cuantos]) => (
+                <div key={sub} style={{ display: "grid", gridTemplateColumns: GRID_B, gap: 8,
+                  padding: "3px 14px 3px 26px", background: C.naranjaTenue }}>
+                  <span style={{ fontSize: 11, color: "var(--texto-suave)", overflow: "hidden",
+                    textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                    desde {(POR_ESTADO[sub] || {}).etiqueta || sub}
+                  </span>
+                  <span style={{ textAlign: "right", fontSize: 11, color: "var(--texto-suave)",
+                    fontVariantNumeric: "tabular-nums" }}>{cuantos}</span>
+                </div>
+              ))}
+            </Fragment>
           );
         })}
         <div style={{ display: "grid", gridTemplateColumns: GRID_B, gap: 8, padding: "7px 14px",
