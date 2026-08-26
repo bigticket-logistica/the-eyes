@@ -59,6 +59,32 @@ function soloDetalle(d) {
   return out;
 }
 
+// Casos abiertos que ningún analista ha desplegado. El Topbar lo usa para el
+// badge de la pestaña; acá se usa para la marca de la fila. Vive en su propio
+// hook para que el Topbar no tenga que montar todo el módulo.
+export function usePnrSinVer() {
+  const [n, setN] = useState(0);
+
+  useEffect(() => {
+    let vivo = true;
+    const contar = async () => {
+      const { count } = await sb.from("vw_pnr_sin_ver")
+        .select("case_id", { count: "exact", head: true });
+      if (vivo) setN(count || 0);
+    };
+    contar();
+    const t = setInterval(() => { if (!document.hidden) contar(); }, 60000);
+    // Cuando otro analista abre un caso, el badge baja acá también sin esperar
+    // el minuto del intervalo.
+    const canal = sb.channel("pnr-vistos-badge")
+      .on("postgres_changes", { event: "INSERT", schema: "public", table: "pnr_vistos_mx" }, contar)
+      .subscribe();
+    return () => { vivo = false; clearInterval(t); sb.removeChannel(canal); };
+  }, []);
+
+  return n;
+}
+
 const VISTAS = [
   { clave: "pnr",          etiqueta: "PNR",          activa: true  },
   { clave: "devoluciones", etiqueta: "Devoluciones", activa: false },
@@ -1138,7 +1164,7 @@ function Detalle({ c, onPedir, trayendo, supervisor, tarea, vueltas, movimientos
   );
 }
 
-function Fila({ c, abierta, onAbrir, onPedir, trayendo, ahora, supervisor, tarea, vueltas, movimientos, onTareaCreada, onRepedir, onNotificar }) {
+function Fila({ c, abierta, onAbrir, onPedir, trayendo, ahora, supervisor, tarea, vueltas, movimientos, sinVer, onTareaCreada, onRepedir, onNotificar }) {
   const g = POR_CLAVE[clasificar(c)];
   const fondo = abierta ? C.grisTenue : "#fff";
   const sub = chipEstado(c.sub_estado);
@@ -1154,6 +1180,13 @@ function Fila({ c, abierta, onAbrir, onPedir, trayendo, ahora, supervisor, tarea
       }}>
         <span style={{ color: "var(--texto-tenue)", fontSize: 10 }}>{abierta ? "▾" : "▸"}</span>
         <span style={{ fontSize: 11.5, color: "var(--texto-suave)", fontVariantNumeric: "tabular-nums" }}>
+          {/* Punto naranja en los que nadie abrió todavía. Desaparece al
+              desplegar la fila, igual que un mensaje sin leer. */}
+          {sinVer && (
+            <span title="Nadie ha abierto este caso"
+              style={{ display: "inline-block", width: 6, height: 6, borderRadius: "50%",
+                background: C.naranja, marginRight: 5, verticalAlign: "middle" }} />
+          )}
           {c.case_id}
         </span>
         <Reloj c={c} ahora={ahora} />
@@ -1218,6 +1251,7 @@ export default function Posventa() {
   const [vueltas, setVueltas] = useState({});
   const [historial, setHistorial] = useState({});
   const [diaMov, setDiaMov] = useState(() => hoyMX());
+  const [vistos, setVistos] = useState(() => new Set());
 
   async function cargar() {
     setError(null);
@@ -1237,6 +1271,9 @@ export default function Posventa() {
         .limit(5000),
       sb.from("pnr_tareas_vueltas").select("*").order("vuelta").limit(5000),
     ]);
+
+    const vis = await sb.from("pnr_vistos_mx").select("case_id").limit(10000);
+    if (!vis.error && vis.data) setVistos(new Set(vis.data.map((x) => x.case_id)));
 
     // Últimos treinta días de movimientos, para que el selector de fecha sirva
     // de algo. Son unos 25 cambios diarios, así que el volumen es trivial.
@@ -1545,8 +1582,20 @@ export default function Posventa() {
     if (t) setTareas((prev) => ({ ...prev, [t.case_id]: t }));
   }
 
+  // Al desplegar se marca como visto. El insert va sin await para que la fila
+  // se abra de inmediato: si falla, el peor caso es que el badge no baje, y eso
+  // se corrige en la próxima carga.
+  function marcarVisto(caseId) {
+    if (vistos.has(caseId)) return;
+    setVistos((prev) => new Set(prev).add(caseId));
+    sb.from("pnr_vistos_mx")
+      .insert({ case_id: caseId, analista: "posventa" })
+      .then(() => {});
+  }
+
   function abrirFila(c) {
     const estaba = abiertas.has(c.case_id);
+    if (!estaba) marcarVisto(c.case_id);
     setAbiertas((prev) => {
       const n = new Set(prev);
       if (estaba) n.delete(c.case_id); else n.add(c.case_id);
@@ -1729,7 +1778,8 @@ export default function Posventa() {
                   ahora={ahora} supervisor={supervisores[c.service_center]}
                   tarea={tareas[c.case_id]} vueltas={vueltas[c.case_id]}
                   onTareaCreada={agregarTarea} onRepedir={repedirPruebas}
-                  movimientos={historial[c.case_id]} onNotificar={notificar} />
+                  movimientos={historial[c.case_id]} sinVer={!vistos.has(c.case_id)}
+                  onNotificar={notificar} />
               ))
             )}
           </div>
