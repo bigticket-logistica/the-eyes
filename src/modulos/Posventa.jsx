@@ -24,6 +24,13 @@ const FRESCURA_MS = 12 * 3600 * 1000;
 const WEBHOOK_NOTIFICAR = import.meta.env.VITE_PNR_WEBHOOK || "";
 const WEBHOOK_SECRETO = import.meta.env.VITE_PNR_WEBHOOK_SECRET || "";
 
+// Reemplazos para probar sin tocar supervisores_bt, que es la tabla con la que
+// los supervisores entran a su propia bitácora: cambiarle el correo a Juan
+// Mancilla lo dejaría sin acceso. Con las dos cadenas vacías, el envío usa los
+// datos reales y no hay nada que revertir.
+const PRUEBA_TEL_SUPERVISOR   = "+56957730804";
+const PRUEBA_EMAIL_SUPERVISOR = "camilo.naranjo@fullmotos.cl";
+
 function detalleFresco(c) {
   if (!c || !c.detalle_capturado_en) return false;
   return Date.now() - new Date(c.detalle_capturado_en).getTime() < FRESCURA_MS;
@@ -706,8 +713,10 @@ function Detalle({ c, onPedir, trayendo, supervisor, tarea, vueltas, onTareaCrea
       conductor: c.transportista || c.conductor_ruta || c.conductor,
       telefono_conductor: c.telefono || c.telefono_ruta,
       supervisor_nombre: supervisor ? supervisor.supervisor_nombre : null,
-      supervisor_telefono: supervisor ? supervisor.supervisor_telefono : null,
-      supervisor_email: supervisor ? supervisor.supervisor_email : null,
+      supervisor_telefono: PRUEBA_TEL_SUPERVISOR
+        || (supervisor ? supervisor.supervisor_telefono : null),
+      supervisor_email: PRUEBA_EMAIL_SUPERVISOR
+        || (supervisor ? supervisor.supervisor_email : null),
       route_id: c.route_id,
       fecha_ruta: c.fecha_ruta,
       shipment_id: c.shipment_id,
@@ -929,6 +938,11 @@ function Detalle({ c, onPedir, trayendo, supervisor, tarea, vueltas, onTareaCrea
                         Correo {envio.correo || "—"}
                         {envio.modo_prueba ? " · modo prueba" : ""}
                       </div>
+                      {envio.marcado === false && (
+                        <div style={{ color: C.ladrillo, marginTop: 3 }}>
+                          No se pudo marcar el hito Aviso 1: {envio.error_marca}
+                        </div>
+                      )}
                     </Fragment>
                   ) : (
                     <Fragment>
@@ -1276,10 +1290,23 @@ export default function Posventa() {
         throw new Error("n8n rechazó la llamada: revisa VITE_PNR_WEBHOOK_SECRET");
       }
       if (!r.ok || j.ok === false) throw new Error(j.error || `n8n respondió ${r.status}`);
+      // El hito se marca acá y no en n8n: así solo se enciende si el envío
+      // salió bien. El permiso está acotado por columna, así que desde el
+      // navegador solo se pueden escribir las tres fechas de aviso.
+      const ahoraIso = new Date().toISOString();
+      const { error: errMarca } = await sb.from("pnr_casos_mx")
+        .update({ avisado_inicial_en: ahoraIso })
+        .eq("case_id", datos.case_id)
+        .is("avisado_inicial_en", null);
+      if (!errMarca) {
+        setCasos((prev) => prev.map((x) => x.case_id === datos.case_id
+          ? { ...x, avisado_inicial_en: x.avisado_inicial_en || ahoraIso } : x));
+      }
+
       // n8n devuelve los destinos que usó de verdad. Mostrarlos es lo único que
       // le dice al analista a qué número salió, que es la primera pregunta
       // cuando el conductor no responde.
-      return { ok: true, ...j };
+      return { ok: true, ...j, marcado: !errMarca, error_marca: errMarca ? errMarca.message : null };
     } catch (e) {
       return { ok: false, error: String(e.message || e) };
     }
