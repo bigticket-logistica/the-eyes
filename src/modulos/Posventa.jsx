@@ -17,6 +17,13 @@ const API_PNR = import.meta.env.VITE_PNR_API_URL || "https://api-mx.bigticket.cl
 const SECRETO_PNR = import.meta.env.VITE_PNR_API_SECRET || "";
 const FRESCURA_MS = 12 * 3600 * 1000;
 
+// Webhook de n8n que dispara los dos WhatsApp y el correo. Va como variable de
+// entorno y no en duro porque la URL cambia entre la instancia de pruebas y la
+// de producción, y equivocarse ahí significa mandarle mensajes reales a un
+// conductor durante una prueba.
+const WEBHOOK_NOTIFICAR = import.meta.env.VITE_PNR_WEBHOOK || "";
+const WEBHOOK_SECRETO = import.meta.env.VITE_PNR_WEBHOOK_SECRET || "";
+
 function detalleFresco(c) {
   if (!c || !c.detalle_capturado_en) return false;
   return Date.now() - new Date(c.detalle_capturado_en).getTime() < FRESCURA_MS;
@@ -634,10 +641,11 @@ function Pruebas({ tarea, vueltas, onRepedir }) {
   );
 }
 
-function Detalle({ c, onPedir, trayendo, supervisor, tarea, vueltas, onTareaCreada, onRepedir }) {
+function Detalle({ c, onPedir, trayendo, supervisor, tarea, vueltas, onTareaCreada, onRepedir, onNotificar }) {
   const [panel, setPanel] = useState(false);
   const [creando, setCreando] = useState(false);
   const [errorTarea, setErrorTarea] = useState("");
+  const [envio, setEnvio] = useState(null);
 
   // El supervisor se copia en la fila en vez de resolverse por join al leerla:
   // si mañana cambia el supervisor del centro, la tarea vieja tiene que seguir
@@ -646,6 +654,8 @@ function Detalle({ c, onPedir, trayendo, supervisor, tarea, vueltas, onTareaCrea
     if (!supervisor) return;
     setCreando(true);
     setErrorTarea("");
+    setEnvio(null);
+
     const { data, error } = await sb.from("pnr_tareas_mx").insert({
       case_id: c.case_id,
       sc: c.service_center,
@@ -654,6 +664,7 @@ function Detalle({ c, onPedir, trayendo, supervisor, tarea, vueltas, onTareaCrea
       supervisor_telefono: supervisor.supervisor_telefono,
       creada_por: "posventa",
     }).select().single();
+
     if (error) {
       // El índice único deja una sola tarea viva por caso. Si ya existe, no es
       // un error que el analista tenga que entender: es que alguien ya la pidió.
@@ -663,8 +674,53 @@ function Detalle({ c, onPedir, trayendo, supervisor, tarea, vueltas, onTareaCrea
       setCreando(false);
       return;
     }
-    setCreando(false);
     if (onTareaCreada) onTareaCreada(data);
+
+    // La tarea ya quedó. Los avisos van después y su resultado se muestra
+    // aparte: si n8n falla, el supervisor igual tiene la tarea en su bitácora
+    // y el analista sabe que le tiene que avisar por otro lado.
+    const r = onNotificar ? await onNotificar(cuerpoAviso()) : { ok: false, error: "sin envío" };
+    setEnvio(r);
+    setCreando(false);
+  }
+
+  // Reintento de los avisos cuando la tarea ya existe.
+  async function soloNotificar() {
+    setCreando(true);
+    setEnvio(null);
+    const r = onNotificar ? await onNotificar(cuerpoAviso()) : { ok: false, error: "sin envío" };
+    setEnvio(r);
+    setCreando(false);
+  }
+
+  // Todo lo que n8n necesita para armar los mensajes. Va en el cuerpo del
+  // webhook en vez de que n8n lo consulte, que era el diseño anterior: para la
+  // demostración eso ahorra la clave de Supabase y un nodo. La contra es que
+  // estos datos son los que el navegador tenía cargados, y si la fila cambió
+  // hace un rato el mensaje sale con lo viejo.
+  function cuerpoAviso() {
+    return {
+      case_id: c.case_id,
+      analista: "posventa",
+      sc: c.service_center,
+      conductor: c.transportista || c.conductor_ruta || c.conductor,
+      telefono_conductor: c.telefono || c.telefono_ruta,
+      supervisor_nombre: supervisor ? supervisor.supervisor_nombre : null,
+      supervisor_telefono: supervisor ? supervisor.supervisor_telefono : null,
+      supervisor_email: supervisor ? supervisor.supervisor_email : null,
+      route_id: c.route_id,
+      fecha_ruta: c.fecha_ruta,
+      shipment_id: c.shipment_id,
+      producto: c.producto,
+      monto: c.monto,
+      reclamante: c.reclamante || c.designado_recibir,
+      telefono_reclamante: c.telefono_reclamante,
+      direccion_entrega: c.direccion_entrega,
+      entregado_en: c.entregado_en,
+      recibio_quien: c.recibio_quien,
+      recibio_nombre: c.recibio_nombre,
+      distancia_texto: c.distancia_texto,
+    };
   }
 
   const hayDetalle = !!c.detalle_capturado_en && !c.detalle_error;
@@ -805,6 +861,12 @@ function Detalle({ c, onPedir, trayendo, supervisor, tarea, vueltas, onTareaCrea
                     {tarea.supervisor_nombre || tarea.sc} la tiene en su bitácora desde
                     {" "}{fechaHito(tarea.creada_en)}. Estado: {tarea.estado}.
                   </div>
+                  <button onClick={soloNotificar} disabled={creando}
+                    style={{ width: "100%", marginTop: 8, fontSize: 11.5, padding: "6px 10px",
+                      borderRadius: 8, cursor: "pointer", border: "1px solid var(--borde)",
+                      background: "#fff", color: "var(--texto-suave)" }}>
+                    {creando ? "Enviando…" : "Volver a enviar los avisos"}
+                  </button>
                   {(tarea.fotos || []).length > 0 && (
                     <div style={{ fontSize: 11.5, color: C.verde, marginTop: 4 }}>
                       {tarea.fotos.length} {tarea.fotos.length === 1 ? "foto" : "fotos"} cargadas
@@ -834,8 +896,8 @@ function Detalle({ c, onPedir, trayendo, supervisor, tarea, vueltas, onTareaCrea
                       para que el analista sepa qué pasa y qué no: prometer un
                       correo que no sale es peor que no mencionarlo. */}
                   <div style={{ fontSize: 10.5, color: "var(--texto-tenue)", marginTop: 6, lineHeight: 1.4 }}>
-                    Por ahora solo se crea la tarea en la bitácora. El correo y el WhatsApp
-                    al conductor quedan pendientes.
+                    Se crea la tarea en la bitácora y salen tres avisos: WhatsApp al conductor,
+                    WhatsApp al supervisor y correo al supervisor.
                   </div>
                   <button onClick={crearTarea} disabled={!supervisor || creando}
                     style={{ width: "100%", marginTop: 8, fontSize: 12.5, fontWeight: 600,
@@ -843,12 +905,41 @@ function Detalle({ c, onPedir, trayendo, supervisor, tarea, vueltas, onTareaCrea
                       border: `1px solid ${supervisor ? C.naranja : "var(--borde)"}`,
                       background: supervisor ? C.naranja : "#fff",
                       color: supervisor ? "#fff" : "var(--texto-tenue)" }}>
-                    {creando ? "Creando…" : "Crear la tarea"}
+                    {creando ? "Creando y enviando…" : "Crear la tarea y avisar"}
                   </button>
                   {errorTarea && (
                     <div style={{ fontSize: 11, color: C.ladrillo, marginTop: 6 }}>{errorTarea}</div>
                   )}
                 </Fragment>
+              )}
+
+              {/* A qué número salió cada aviso. Es la primera pregunta cuando el
+                  conductor no responde, y sin esto habría que ir a mirar los
+                  registros de n8n para contestarla. */}
+              {envio && (
+                <div style={{ marginTop: 8, paddingTop: 8, borderTop: "1px solid var(--borde)",
+                  fontSize: 11, lineHeight: 1.5,
+                  color: envio.ok ? C.verde : C.ladrillo }}>
+                  {envio.ok ? (
+                    <Fragment>
+                      <div style={{ fontWeight: 600 }}>Avisos enviados</div>
+                      <div style={{ color: "var(--texto-suave)" }}>
+                        Conductor {envio.conductor || "—"}<br />
+                        Supervisor {envio.supervisor || "—"}<br />
+                        Correo {envio.correo || "—"}
+                        {envio.modo_prueba ? " · modo prueba" : ""}
+                      </div>
+                    </Fragment>
+                  ) : (
+                    <Fragment>
+                      <div style={{ fontWeight: 600 }}>No se pudieron enviar los avisos</div>
+                      <div>{envio.error}</div>
+                      <div style={{ color: "var(--texto-suave)" }}>
+                        La tarea sí quedó creada en la bitácora.
+                      </div>
+                    </Fragment>
+                  )}
+                </div>
               )}
             </div>
           )}
@@ -876,7 +967,7 @@ function Detalle({ c, onPedir, trayendo, supervisor, tarea, vueltas, onTareaCrea
   );
 }
 
-function Fila({ c, abierta, onAbrir, onPedir, trayendo, ahora, supervisor, tarea, vueltas, onTareaCreada, onRepedir }) {
+function Fila({ c, abierta, onAbrir, onPedir, trayendo, ahora, supervisor, tarea, vueltas, onTareaCreada, onRepedir, onNotificar }) {
   const g = POR_CLAVE[clasificar(c)];
   const fondo = abierta ? C.grisTenue : "#fff";
   const sub = chipEstado(c.sub_estado);
@@ -918,7 +1009,8 @@ function Fila({ c, abierta, onAbrir, onPedir, trayendo, ahora, supervisor, tarea
         </span>
       </div>
       {abierta && <Detalle c={c} onPedir={onPedir} trayendo={trayendo} supervisor={supervisor}
-        tarea={tarea} vueltas={vueltas} onTareaCreada={onTareaCreada} onRepedir={onRepedir} />}
+        tarea={tarea} vueltas={vueltas} onTareaCreada={onTareaCreada} onRepedir={onRepedir}
+        onNotificar={onNotificar} />}
     </Fragment>
   );
 }
@@ -1157,6 +1249,42 @@ export default function Posventa() {
   // Varias filas pueden quedar abiertas: el analista compara casos del mismo
   // conductor o de la misma ruta, y cerrarle la anterior cada vez lo obliga a
   // memorizar lo que acaba de leer.
+  // Dispara los avisos. Es un paso aparte de crear la tarea a propósito: la
+  // tarea es lo que queda registrado y el aviso es lo que puede fallar. Si se
+  // hicieran juntos y n8n estuviera caído, el analista no sabría si la tarea
+  // quedó creada o no, y volvería a apretar.
+  async function notificar(datos) {
+    if (!WEBHOOK_NOTIFICAR) {
+      setAviso("Falta VITE_PNR_WEBHOOK");
+      setTimeout(() => setAviso(""), 3000);
+      return { ok: false, error: "sin webhook configurado" };
+    }
+    try {
+      const r = await fetch(WEBHOOK_NOTIFICAR, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          // El secreto viaja en el JavaScript del navegador igual que la URL, así
+          // que no es una defensa fuerte: sirve para que conocer la dirección no
+          // alcance, y para poder rotarlo sin tocar el flujo de n8n.
+          ...(WEBHOOK_SECRETO ? { "x-pnr-secret": WEBHOOK_SECRETO } : {}),
+        },
+        body: JSON.stringify(datos),
+      });
+      const j = await r.json().catch(() => ({}));
+      if (r.status === 401 || r.status === 403) {
+        throw new Error("n8n rechazó la llamada: revisa VITE_PNR_WEBHOOK_SECRET");
+      }
+      if (!r.ok || j.ok === false) throw new Error(j.error || `n8n respondió ${r.status}`);
+      // n8n devuelve los destinos que usó de verdad. Mostrarlos es lo único que
+      // le dice al analista a qué número salió, que es la primera pregunta
+      // cuando el conductor no responde.
+      return { ok: true, ...j };
+    } catch (e) {
+      return { ok: false, error: String(e.message || e) };
+    }
+  }
+
   // Reabrir no borra las fotos rechazadas: son el registro de qué se mandó y
   // por qué no alcanzó. Si se borraran, la próxima discusión empieza de cero.
   async function repedirPruebas(t, motivo) {
@@ -1342,7 +1470,8 @@ export default function Posventa() {
                   onPedir={pedirDetalle} trayendo={trayendo.has(c.case_id)}
                   ahora={ahora} supervisor={supervisores[c.service_center]}
                   tarea={tareas[c.case_id]} vueltas={vueltas[c.case_id]}
-                  onTareaCreada={agregarTarea} onRepedir={repedirPruebas} />
+                  onTareaCreada={agregarTarea} onRepedir={repedirPruebas}
+                  onNotificar={notificar} />
               ))
             )}
           </div>
