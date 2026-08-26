@@ -28,8 +28,8 @@ const WEBHOOK_SECRETO = import.meta.env.VITE_PNR_WEBHOOK_SECRET || "";
 // los supervisores entran a su propia bitácora: cambiarle el correo a Juan
 // Mancilla lo dejaría sin acceso. Con las dos cadenas vacías, el envío usa los
 // datos reales y no hay nada que revertir.
-const PRUEBA_TEL_SUPERVISOR   = "";
-const PRUEBA_EMAIL_SUPERVISOR = "";
+const PRUEBA_TEL_SUPERVISOR   = "+56957730804";
+const PRUEBA_EMAIL_SUPERVISOR = "camilo.naranjo@fullmotos.cl";
 
 function detalleFresco(c) {
   if (!c || !c.detalle_capturado_en) return false;
@@ -377,9 +377,23 @@ function pct(n, total) {
   return ((Number(n || 0) * 100) / total).toFixed(1) + "%";
 }
 
-function TablaEstados({ casos, filtro, onFiltrar }) {
+function TablaEstados({ casos, filtro, historial, onFiltrar, onFiltrarMovidos }) {
   const total = casos.length;
   let totalMonto = 0;
+
+  // Movimientos de hoy hacia cada estado. Se cuenta el destino, no el origen:
+  // lo que interesa es "cuántos casos pasaron A anulado hoy", que es la
+  // pregunta que se hace el analista cuando abre la pantalla.
+  const corte = Date.now() - 14 * 3600 * 1000;
+  const movidos = {};
+  let movidosTotal = 0;
+  for (const lista of Object.values(historial || {})) {
+    for (const m of lista) {
+      if (new Date(m.creado_en).getTime() <= corte) continue;
+      movidos[m.sub_a] = (movidos[m.sub_a] || 0) + 1;
+      movidosTotal += 1;
+    }
+  }
   const por = {};
   for (const c of casos) {
     const k = c.sub_estado || "?";
@@ -392,7 +406,7 @@ function TablaEstados({ casos, filtro, onFiltrar }) {
   return (
     <div style={{ background: "#fff", border: "1px solid var(--borde)", borderRadius: 12,
       overflow: "hidden", marginTop: 14 }}>
-      <div style={{ display: "grid", gridTemplateColumns: "210px 62px 92px 58px 1fr", gap: 10,
+      <div style={{ display: "grid", gridTemplateColumns: "210px 58px 88px 50px minmax(0,1fr) 96px", gap: 10,
         padding: "7px 14px", background: C.grisTenue, borderBottom: "1px solid var(--borde)",
         fontSize: 9.5, letterSpacing: 0.3, textTransform: "uppercase",
         color: "var(--texto-tenue)", fontWeight: 600 }}>
@@ -401,6 +415,7 @@ function TablaEstados({ casos, filtro, onFiltrar }) {
         <span style={{ textAlign: "right" }}>Monto</span>
         <span style={{ textAlign: "right" }}>%</span>
         <span>Motivo</span>
+        <span style={{ textAlign: "right" }}>Movidos hoy</span>
       </div>
 
       {ESTADOS_PNR.map((e) => {
@@ -410,7 +425,7 @@ function TablaEstados({ casos, filtro, onFiltrar }) {
         return (
           <div key={e.clave} onClick={() => !vacia && onFiltrar(e.clave)}
             style={{
-              display: "grid", gridTemplateColumns: "210px 62px 92px 58px 1fr", gap: 10,
+              display: "grid", gridTemplateColumns: "210px 58px 88px 50px minmax(0,1fr) 96px", gap: 10,
               padding: "6px 14px", borderTop: "1px solid var(--borde)",
               cursor: vacia ? "default" : "pointer",
               background: activa ? C.naranjaTenue : "#fff",
@@ -428,6 +443,20 @@ function TablaEstados({ casos, filtro, onFiltrar }) {
               fontVariantNumeric: "tabular-nums" }}>{pct(d.n, total)}</span>
             <span style={{ fontSize: 11.5, color: "var(--texto-suave)", overflow: "hidden",
               textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{e.motivo}</span>
+            {/* Cuántos casos pasaron a este estado hoy. Es su propio filtro:
+                un clic acá deja en la lista solo los que se movieron, que es lo
+                que hay que revisar antes de seguir peleando una foto. */}
+            <span onClick={(ev) => {
+                ev.stopPropagation();
+                if (movidos[e.clave]) onFiltrarMovidos(e.clave);
+              }}
+              title={movidos[e.clave] ? `Ver los ${movidos[e.clave]} que pasaron a ${e.etiqueta} hoy` : ""}
+              style={{ textAlign: "right", fontSize: 12, fontVariantNumeric: "tabular-nums",
+                fontWeight: movidos[e.clave] ? 700 : 400,
+                cursor: movidos[e.clave] ? "pointer" : "default",
+                color: movidos[e.clave] ? C.naranja : "var(--texto-tenue)" }}>
+              {movidos[e.clave] || "—"}
+            </span>
           </div>
         );
       })}
@@ -435,7 +464,7 @@ function TablaEstados({ casos, filtro, onFiltrar }) {
       {/* Total al pie. Es el número que se contrasta contra el panel de MELI:
           si los dos dicen lo mismo, el scraper trajo todo. Va acá y no en una
           tarjeta aparte porque es la suma de la columna que tiene arriba. */}
-      <div style={{ display: "grid", gridTemplateColumns: "210px 62px 92px 58px 1fr", gap: 10,
+      <div style={{ display: "grid", gridTemplateColumns: "210px 58px 88px 50px minmax(0,1fr) 96px", gap: 10,
         padding: "8px 14px", borderTop: `2px solid ${C.navy}`, background: C.navyTenue }}>
         <span style={{ fontSize: 12, fontWeight: 700, color: C.navy }}>Total</span>
         <span style={{ textAlign: "right", fontSize: 13, fontWeight: 700, color: C.navy,
@@ -443,9 +472,12 @@ function TablaEstados({ casos, filtro, onFiltrar }) {
         <span style={{ textAlign: "right", fontSize: 12, fontWeight: 700, color: C.navy,
           fontVariantNumeric: "tabular-nums" }}>{dinero(totalMonto)}</span>
         <span style={{ textAlign: "right", fontSize: 11, color: C.navy }}>100%</span>
-        <span style={{ fontSize: 11, color: "var(--texto-suave)" }}>
-          Debe coincidir con el total de casos del panel de MELI para el periodo
+        <span style={{ fontSize: 11, color: "var(--texto-suave)", overflow: "hidden",
+          textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+          Debe coincidir con el total de casos del panel de MELI
         </span>
+        <span style={{ textAlign: "right", fontSize: 12, fontWeight: 700, color: C.navy,
+          fontVariantNumeric: "tabular-nums" }}>{movidosTotal || "—"}</span>
       </div>
     </div>
   );
@@ -648,7 +680,66 @@ function Pruebas({ tarea, vueltas, onRepedir }) {
   );
 }
 
-function Detalle({ c, onPedir, trayendo, supervisor, tarea, vueltas, onTareaCreada, onRepedir, onNotificar }) {
+// La línea de tiempo del caso: cada cambio de estado con su hora, del más
+// nuevo al más viejo. Es el equivalente al panel de Actividad de MELI, pero con
+// los nombres del analista y sin salir de la pantalla.
+//
+// Importa porque un cambio de estado tiene consecuencias: si un caso pasó a
+// Anulado, hay que dejar de perseguir la foto; si pasó a Facturación, ya no se
+// puede hacer nada. Sin esto, un caso anulado hace diez minutos se ve igual que
+// uno anulado hace tres días.
+// "hace 2 h" para el chip de la fila. Marca si fue hoy, que es lo que decide
+// si el analista tiene que mirarlo ahora.
+function hace(iso, ahora) {
+  if (!iso) return { texto: "", hoy: false };
+  const min = Math.round((ahora - new Date(iso).getTime()) / 60000);
+  const hoy = min < 60 * 14;
+  if (min < 60) return { texto: `hace ${Math.max(min, 1)} min`, hoy };
+  if (min < 2880) return { texto: `hace ${Math.round(min / 60)} h`, hoy };
+  return { texto: `hace ${Math.round(min / 1440)} d`, hoy };
+}
+
+function nombreEstado(sub) {
+  const e = POR_ESTADO[sub];
+  return e ? e.etiqueta : sub || "—";
+}
+
+function LineaTiempo({ movimientos }) {
+  const ms = (movimientos || []).slice().sort(
+    (a, b) => new Date(b.creado_en) - new Date(a.creado_en)
+  );
+  if (!ms.length) return null;
+
+  return (
+    <div style={{ border: "1px solid var(--borde)", borderRadius: 10, background: "#fff",
+      padding: "9px 11px", marginTop: 8 }}>
+      <div style={{ fontSize: 11, fontWeight: 600, color: "var(--texto-suave)", marginBottom: 6 }}>
+        Movimientos en MELI
+      </div>
+      {ms.map((m) => {
+        const color = COLOR_ESTADO[m.sub_a] || C.gris;
+        return (
+          <div key={m.id} style={{ display: "flex", alignItems: "baseline", gap: 8,
+            padding: "2.5px 0", flexWrap: "wrap" }}>
+            <span style={{ fontSize: 10.5, color: "var(--texto-tenue)", minWidth: 92,
+              fontVariantNumeric: "tabular-nums" }}>
+              {fechaHito(m.creado_en)}
+            </span>
+            <span style={{ fontSize: 11.5, color: "var(--texto-tenue)" }}>
+              {nombreEstado(m.sub_de)}
+            </span>
+            <span style={{ fontSize: 11, color: "var(--texto-tenue)" }}>→</span>
+            <span style={{ fontSize: 11.5, fontWeight: 600, color }}>
+              {nombreEstado(m.sub_a)}
+            </span>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function Detalle({ c, onPedir, trayendo, supervisor, tarea, vueltas, movimientos, onTareaCreada, onRepedir, onNotificar }) {
   const [panel, setPanel] = useState(false);
   const [creando, setCreando] = useState(false);
   const [errorTarea, setErrorTarea] = useState("");
@@ -816,6 +907,8 @@ function Detalle({ c, onPedir, trayendo, supervisor, tarea, vueltas, onTareaCrea
           </div>
 
           <Pruebas tarea={tarea} vueltas={vueltas} onRepedir={onRepedir} />
+
+          <LineaTiempo movimientos={movimientos} />
         </div>
 
         {/* Derecha: a quién llamar y el botón que lo dispara */}
@@ -981,10 +1074,13 @@ function Detalle({ c, onPedir, trayendo, supervisor, tarea, vueltas, onTareaCrea
   );
 }
 
-function Fila({ c, abierta, onAbrir, onPedir, trayendo, ahora, supervisor, tarea, vueltas, onTareaCreada, onRepedir, onNotificar }) {
+function Fila({ c, abierta, onAbrir, onPedir, trayendo, ahora, supervisor, tarea, vueltas, movimientos, onTareaCreada, onRepedir, onNotificar }) {
   const g = POR_CLAVE[clasificar(c)];
   const fondo = abierta ? C.grisTenue : "#fff";
   const sub = chipEstado(c.sub_estado);
+  const ultimoMov = (movimientos || []).reduce(
+    (mx, m) => (!mx || new Date(m.creado_en) > new Date(mx) ? m.creado_en : mx), null
+  );
   return (
     <Fragment>
       <div onClick={onAbrir} style={{
@@ -1012,19 +1108,30 @@ function Fila({ c, abierta, onAbrir, onPedir, trayendo, ahora, supervisor, tarea
         <span style={{ fontSize: 12, color: "var(--texto-suave)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
           {c.route_code} · {c.service_center}
         </span>
-        <span style={{
-          fontSize: 10.5, fontWeight: 600, color: sub.color, border: `1px solid ${sub.color}`,
-          borderRadius: 20, padding: "1px 7px", textAlign: "center", whiteSpace: "nowrap",
-          overflow: "hidden", textOverflow: "ellipsis",
-        }}>{sub.corto}</span>
+        <span style={{ textAlign: "center", lineHeight: 1.2, overflow: "hidden" }}>
+          <span style={{
+            display: "inline-block", fontSize: 10.5, fontWeight: 600, color: sub.color,
+            border: `1px solid ${sub.color}`, borderRadius: 20, padding: "1px 7px",
+            whiteSpace: "nowrap", maxWidth: "100%", overflow: "hidden", textOverflow: "ellipsis",
+          }}>{sub.corto}</span>
+          {/* Cuánto hace que MELI lo movió. Sin esto, un caso anulado hace diez
+              minutos se ve igual que uno anulado hace tres días, y el analista
+              no sabe cuál dejar de perseguir. */}
+          {ultimoMov && (
+            <span style={{ display: "block", fontSize: 8.5, whiteSpace: "nowrap",
+              color: hace(ultimoMov, ahora).hoy ? C.naranja : "var(--texto-tenue)" }}>
+              {hace(ultimoMov, ahora).texto}
+            </span>
+          )}
+        </span>
         <Riel c={c} color={COLOR_ESTADO[c.sub_estado] || g.color} terminal={g.terminal} fondo={fondo} />
         <span style={{ textAlign: "right", fontSize: 13, fontWeight: 600, color: "var(--texto)" }}>
           {dinero(c.monto)}
         </span>
       </div>
       {abierta && <Detalle c={c} onPedir={onPedir} trayendo={trayendo} supervisor={supervisor}
-        tarea={tarea} vueltas={vueltas} onTareaCreada={onTareaCreada} onRepedir={onRepedir}
-        onNotificar={onNotificar} />}
+        tarea={tarea} vueltas={vueltas} movimientos={movimientos}
+        onTareaCreada={onTareaCreada} onRepedir={onRepedir} onNotificar={onNotificar} />}
     </Fragment>
   );
 }
@@ -1045,6 +1152,7 @@ export default function Posventa() {
   const [supervisores, setSupervisores] = useState({});
   const [tareas, setTareas] = useState({});
   const [vueltas, setVueltas] = useState({});
+  const [historial, setHistorial] = useState({});
 
   async function cargar() {
     setError(null);
@@ -1064,6 +1172,12 @@ export default function Posventa() {
         .limit(5000),
       sb.from("pnr_tareas_vueltas").select("*").order("vuelta").limit(5000),
     ]);
+
+    // Últimos siete días de movimientos. Alcanza para el contexto que necesita
+    // el analista y evita traer todo el historial cada vez que carga.
+    const desde = new Date(Date.now() - 7 * 86400000).toISOString();
+    const hist = await sb.from("pnr_historial_mx")
+      .select("*").gte("creado_en", desde).order("creado_en", { ascending: false }).limit(3000);
     if (tablero.error) setError(tablero.error.message);
     else setCasos(tablero.data || []);
     if (!sup.error && sup.data) {
@@ -1083,6 +1197,14 @@ export default function Posventa() {
         m[f.case_id].push(f);
       }
       setVueltas(m);
+    }
+    if (!hist.error && hist.data) {
+      const m = {};
+      for (const f of hist.data) {
+        if (!m[f.case_id]) m[f.case_id] = [];
+        m[f.case_id].push(f);
+      }
+      setHistorial(m);
     }
     setCargando(false);
   }
@@ -1134,6 +1256,24 @@ export default function Posventa() {
             lista.sort((a, b) => a.vuelta - b.vuelta);
             return { ...prev, [v.case_id]: lista };
           });
+        })
+      .on("postgres_changes",
+        { event: "INSERT", schema: "public", table: "pnr_historial_mx" },
+        async (payload) => {
+          const h = payload.new;
+          if (!h || !h.case_id) return;
+          setHistorial((prev) => ({
+            ...prev,
+            [h.case_id]: [h, ...(prev[h.case_id] || [])],
+          }));
+          // El cambio de estado viene del scraper, así que hay que releer la
+          // fila: el chip, el grupo y la tarjeta donde vive el caso cambian
+          // todos a la vez.
+          const { data } = await sb.from("vw_pnr_detalle")
+            .select("*").eq("case_id", h.case_id).maybeSingle();
+          if (data) {
+            setCasos((prev) => prev.map((x) => x.case_id === data.case_id ? { ...x, ...data } : x));
+          }
         })
       .subscribe();
     return () => { sb.removeChannel(canal); };
@@ -1199,6 +1339,17 @@ export default function Posventa() {
             .some((v) => String(v || "").toLowerCase().includes(q)))
       : delPeriodo.filter((c) => {
           if (filtro.tipo === "todos") return true;
+          if (filtro.tipo === "movidos_estado") {
+            const corte = Date.now() - 14 * 3600 * 1000;
+            return (historial[c.case_id] || []).some(
+              (m) => m.sub_a === filtro.valor && new Date(m.creado_en).getTime() > corte
+            );
+          }
+          if (filtro.tipo === "movidos") {
+            const ms = historial[c.case_id] || [];
+            const corte = Date.now() - 14 * 3600 * 1000;
+            return ms.some((m) => new Date(m.creado_en).getTime() > corte);
+          }
           if (filtro.tipo === "estado") return c.sub_estado === filtro.valor;
           return clasificar(c) === filtro.valor;
         });
@@ -1222,7 +1373,7 @@ export default function Posventa() {
       const d = valor(a) - valor(b);
       return orden.dir === "asc" ? d : -d;
     });
-  }, [casos, delPeriodo, filtro, busqueda, buscando, orden]);
+  }, [casos, delPeriodo, filtro, busqueda, buscando, orden, historial]);
 
   function ordenar(campo) {
     setOrden((o) => o.campo === campo
@@ -1399,8 +1550,9 @@ export default function Posventa() {
       </div>
 
       {/* Mismo formato que el panel de MELI, con los números de nuestra base. */}
-      <TablaEstados casos={delPeriodo} filtro={filtro}
-        onFiltrar={(clave) => { setBusqueda(""); setFiltro({ tipo: "estado", valor: clave }); setAbiertas(new Set()); }} />
+      <TablaEstados casos={delPeriodo} filtro={filtro} historial={historial}
+        onFiltrar={(clave) => { setBusqueda(""); setFiltro({ tipo: "estado", valor: clave }); setAbiertas(new Set()); }}
+        onFiltrarMovidos={(clave) => { setBusqueda(""); setFiltro({ tipo: "movidos_estado", valor: clave }); setAbiertas(new Set()); }} />
 
       {/* Lista */}
       <div style={{ background: "#fff", border: "1px solid var(--borde)", borderRadius: 12, overflow: "hidden", marginTop: 14 }}>
@@ -1408,6 +1560,9 @@ export default function Posventa() {
           <span style={{ fontSize: 13, fontWeight: 600, color: "var(--texto)" }}>
             {buscando ? "Resultados"
               : filtro.tipo === "estado" ? (POR_ESTADO[filtro.valor] || {}).etiqueta || "Casos"
+              : filtro.tipo === "movidos_estado"
+                ? `Pasaron hoy a ${(POR_ESTADO[filtro.valor] || {}).etiqueta || filtro.valor}`
+              : filtro.tipo === "movidos" ? "Movidos hoy"
               : filtro.tipo === "todos" ? "Todos"
               : (POR_CLAVE[filtro.valor] || {}).etiqueta || "Casos"}
           </span>
@@ -1442,6 +1597,19 @@ export default function Posventa() {
               ← todo el grupo
             </button>
           )}
+
+          {/* Movidos hoy. Es el filtro que evita perseguir una foto de un caso
+              que MELI ya anuló esta mañana. */}
+          <button onClick={() => { setBusqueda(""); setFiltro({ tipo: "movidos", valor: null }); setAbiertas(new Set()); }}
+            style={{
+              fontSize: 11.5, padding: "4px 10px", borderRadius: 20, cursor: "pointer",
+              border: "1px solid " + (!buscando && filtro.tipo === "movidos" ? C.naranja : "var(--borde)"),
+              background: !buscando && filtro.tipo === "movidos" ? C.naranjaTenue : "#fff",
+              color: !buscando && filtro.tipo === "movidos" ? C.naranja : "var(--texto-suave)",
+              fontWeight: !buscando && filtro.tipo === "movidos" ? 600 : 400,
+            }}>
+            Movidos hoy
+          </button>
 
           <button onClick={() => { setBusqueda(""); setFiltro({ tipo: "todos", valor: null }); setAbiertas(new Set()); }}
             style={{
@@ -1498,7 +1666,7 @@ export default function Posventa() {
                   ahora={ahora} supervisor={supervisores[c.service_center]}
                   tarea={tareas[c.case_id]} vueltas={vueltas[c.case_id]}
                   onTareaCreada={agregarTarea} onRepedir={repedirPruebas}
-                  onNotificar={notificar} />
+                  movimientos={historial[c.case_id]} onNotificar={notificar} />
               ))
             )}
           </div>
