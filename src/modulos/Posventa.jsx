@@ -28,8 +28,8 @@ const WEBHOOK_SECRETO = import.meta.env.VITE_PNR_WEBHOOK_SECRET || "";
 // los supervisores entran a su propia bitácora: cambiarle el correo a Juan
 // Mancilla lo dejaría sin acceso. Con las dos cadenas vacías, el envío usa los
 // datos reales y no hay nada que revertir.
-const PRUEBA_TEL_SUPERVISOR   = "+56957730804";
-const PRUEBA_EMAIL_SUPERVISOR = "camilo.naranjo@fullmotos.cl";
+const PRUEBA_TEL_SUPERVISOR   = "";
+const PRUEBA_EMAIL_SUPERVISOR = "";
 
 function detalleFresco(c) {
   if (!c || !c.detalle_capturado_en) return false;
