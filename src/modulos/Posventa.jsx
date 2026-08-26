@@ -145,13 +145,13 @@ const GRUPOS = [
   // Rescatable no es un estado de MELI, es una ventana de tiempo: el conductor
   // sigue en calle. Va primera y siempre visible, incluso en cero — el día que
   // marque uno, el analista ya sabe dónde mirar.
-  { clave: "rescatable",  etiqueta: "En ruta ahora",  nota: "se resuelve hoy",      color: "#c2410c",  tinte: "#fff1e6",       terminal: false, ventana: true },
-  { clave: "responder",   etiqueta: "Por responder",  nota: "falta el comprobante", color: C.naranja,  tinte: C.naranjaTenue,  terminal: false },
+  { clave: "rescatable",  etiqueta: "En ruta ahora",  nota: "se resuelve hoy",      color: "#c2410c",  tinte: "#fff1e6",       terminal: false, ventana: true, reloj: true },
+  { clave: "responder",   etiqueta: "Por responder",  nota: "falta el comprobante", color: C.naranja,  tinte: C.naranjaTenue,  terminal: false, reloj: true },
   // Con Penalidad va aparte y no dentro de "Por responder" porque la acción es
   // otra: acá no se sube una foto, se pide revisión. Mezclarlos hacía que el
   // analista abriera el caso esperando cargar el comprobante y se encontrara
   // con un botón distinto.
-  { clave: "penalidad",   etiqueta: "Con penalidad",  nota: "pedir revisión",       color: "#b8651c",  tinte: "#fdf3e8",       terminal: false },
+  { clave: "penalidad",   etiqueta: "Con penalidad",  nota: "pedir revisión",       color: "#b8651c",  tinte: "#fdf3e8",       terminal: false, reloj: true },
   { clave: "meli",        etiqueta: "Con respaldo",   nota: "Mercado Libre revisa", color: C.navy,     tinte: C.navyTenue,     terminal: false },
   { clave: "sinrespaldo", etiqueta: "Sin respaldo",   nota: "respondido sin foto",  color: C.ladrillo, tinte: C.ladrilloTenue, terminal: true  },
   { clave: "cerrado",     etiqueta: "Cerrados",       nota: "anulados y cobrados",  color: C.verde,    tinte: "#e9f3ef",       terminal: true  },
@@ -242,10 +242,23 @@ const SLA_H = 48;
 
 function Reloj({ c, ahora }) {
   const g = POR_CLAVE[clasificar(c)];
-  if (g && g.terminal) {
+
+  // El contador corre solo donde nuestra gestión puede cambiar el resultado.
+  // Con el comprobante cargado, en revisión o ya sentenciado, lo que quede de
+  // las 48 horas dejó de importar: el reloj solo competiría por la atención de
+  // los casos que sí hay que atender.
+  //
+  // En su lugar va la fecha del último movimiento, que ahí sí informa — cuánto
+  // lleva esperando a MELI, o cuándo se decidió.
+  if (!g || !g.reloj) {
     return (
-      <span title="Resuelto: el SLA dejó de correr"
-        style={{ fontSize: 12, color: C.gris }}>—</span>
+      <span title="No corre: el resultado ya no depende de nosotros"
+        style={{ display: "block", lineHeight: 1.25 }}>
+        <span style={{ fontSize: 11, color: C.gris }}>sin plazo</span>
+        <span style={{ display: "block", fontSize: 9, color: "var(--texto-tenue)", whiteSpace: "nowrap" }}>
+          {c.cuando_mx || "—"}
+        </span>
+      </span>
     );
   }
 
@@ -1459,8 +1472,14 @@ export default function Posventa() {
     // caso de $1.655 con 145 horas debajo de uno de $69 con media hora. Un
     // caso vencido sigue abierto en MELI y sigue siendo plata que se puede
     // pelear; que el reloj se haya pasado no lo vuelve menos urgente.
+    // Cuando el grupo no lleva reloj, ordenar por horas restantes ordena por un
+    // número que no se ve en pantalla. Ahí manda el monto, que es lo único que
+    // distingue un caso de otro cuando ya no hay plazo.
+    const conReloj = (POR_CLAVE[filtro.tipo === "grupo" ? filtro.valor : ""] || {}).reloj;
+    const porMonto = orden.campo === "sla" && filtro.tipo === "grupo" && !conReloj;
+
     const valor = (c) => {
-      if (orden.campo === "monto") return Number(c.monto || 0);
+      if (orden.campo === "monto" || porMonto) return -Number(c.monto || 0);
       if (orden.campo === "caso") return Number(c.case_id || 0);
       return c.horas_restantes == null ? 9999 : Number(c.horas_restantes);
     };
