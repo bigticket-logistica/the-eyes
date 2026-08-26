@@ -473,23 +473,26 @@ function Contacto({ icono, rol, nombre, telefono, extra, alternos }) {
   );
 }
 
-// Las pruebas que subió el supervisor. El analista tiene que poder verlas acá:
-// el paso siguiente es subirlas a MELI, y mandarlo a la bitácora con otra
-// cuenta para mirar una foto rompe el circuito justo donde importa.
+// Las pruebas que subió el supervisor, agrupadas por vuelta. El analista tiene
+// que poder verlas acá: el paso siguiente es subirlas a MELI, y mandarlo a la
+// bitácora con otra cuenta para mirar una foto rompe el circuito justo donde
+// importa.
 //
-// El bucket es privado, así que cada archivo necesita su URL firmada. Se piden
-// al abrir la fila y duran una hora.
-function Pruebas({ tarea, onRepedir }) {
+// Por vuelta y no todas juntas porque si no, seis miniaturas seguidas no dicen
+// cuál fue rechazada y cuál es la respuesta al rechazo. Y el motivo de cada
+// rechazo queda pegado a la vuelta que lo provocó, en vez de sobrescribirse.
+//
+// El bucket es privado, así que cada archivo necesita su URL firmada, que dura
+// una hora.
+function Miniaturas({ fotos }) {
   const [urls, setUrls] = useState({});
-  const [pidiendo, setPidiendo] = useState(false);
-  const [motivo, setMotivo] = useState("");
-  const fotos = (tarea && Array.isArray(tarea.fotos) ? tarea.fotos : []) || [];
+  const lista = Array.isArray(fotos) ? fotos : [];
 
   useEffect(() => {
     let cancelado = false;
     (async () => {
       const nuevas = {};
-      for (const ruta of fotos) {
+      for (const ruta of lista) {
         if (urls[ruta]) continue;
         const { data } = await sb.storage.from("pnr-pruebas").createSignedUrl(ruta, 3600);
         if (data && data.signedUrl) nuevas[ruta] = data.signedUrl;
@@ -497,24 +500,55 @@ function Pruebas({ tarea, onRepedir }) {
       if (!cancelado && Object.keys(nuevas).length) setUrls((v) => ({ ...v, ...nuevas }));
     })();
     return () => { cancelado = true; };
-  }, [tarea && tarea.fotos ? tarea.fotos.join("|") : ""]);
+  }, [lista.join("|")]);
 
+  if (!lista.length) return null;
+  return (
+    <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+      {lista.map((ruta) => (
+        <a key={ruta} href={urls[ruta] || "#"} target="_blank" rel="noreferrer"
+          title="Abrir en tamaño completo"
+          style={{ display: "block", width: 84, height: 84, borderRadius: 8, overflow: "hidden",
+            border: "1px solid var(--borde)", background: "#fff" }}>
+          {urls[ruta] && /\.(jpe?g|png|webp|heic)$/i.test(ruta) ? (
+            <img src={urls[ruta]} alt="prueba de entrega"
+              style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+          ) : (
+            <span style={{ fontSize: 10, color: "var(--texto-tenue)", padding: 5, display: "block" }}>
+              {urls[ruta] ? "archivo" : "cargando…"}
+            </span>
+          )}
+        </a>
+      ))}
+    </div>
+  );
+}
+
+function Pruebas({ tarea, vueltas, onRepedir }) {
+  const [pidiendo, setPidiendo] = useState(false);
+  const [motivo, setMotivo] = useState("");
   if (!tarea) return null;
 
-  const esperando = fotos.length === 0 && ["pendiente", "vista"].includes(tarea.estado);
+  const vs = (vueltas || []).slice().sort((a, b) => a.vuelta - b.vuelta);
+  const hayAlgo = vs.some((v) => (v.fotos || []).length > 0);
   const sinPruebas = tarea.estado === "sin_pruebas";
+  const esperando = !hayAlgo && ["pendiente", "vista"].includes(tarea.estado);
 
   return (
-    <div style={{ border: `1px solid ${sinPruebas ? C.ladrillo : fotos.length ? C.verde : "var(--borde)"}`,
-      background: sinPruebas ? C.ladrilloTenue : fotos.length ? "#e9f3ef" : "#fff",
+    <div style={{ border: `1px solid ${sinPruebas ? C.ladrillo : hayAlgo ? C.verde : "var(--borde)"}`,
+      background: sinPruebas ? C.ladrilloTenue : hayAlgo ? "#e9f3ef" : "#fff",
       borderRadius: 10, padding: "9px 11px", marginTop: 8 }}>
-      <div style={{ fontSize: 11, fontWeight: 600, marginBottom: 6,
-        color: sinPruebas ? C.ladrillo : fotos.length ? C.verde : "var(--texto-suave)" }}>
-        {sinPruebas
-          ? "El conductor no tiene pruebas"
-          : fotos.length
-            ? `${fotos.length} ${fotos.length === 1 ? "prueba" : "pruebas"} del conductor`
-            : "Pruebas del conductor"}
+      <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between",
+        gap: 8, marginBottom: 6 }}>
+        <span style={{ fontSize: 11, fontWeight: 600,
+          color: sinPruebas ? C.ladrillo : hayAlgo ? C.verde : "var(--texto-suave)" }}>
+          {sinPruebas ? "El conductor no tiene pruebas" : "Pruebas del conductor"}
+        </span>
+        {tarea.veces_pedida > 1 && (
+          <span style={{ fontSize: 10.5, color: C.ladrillo }}>
+            pedida {tarea.veces_pedida} veces
+          </span>
+        )}
       </div>
 
       {esperando && (
@@ -525,46 +559,45 @@ function Pruebas({ tarea, onRepedir }) {
         </div>
       )}
 
-      {fotos.length > 0 && (
-        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: tarea.comentario ? 8 : 0 }}>
-          {fotos.map((ruta) => (
-            <a key={ruta} href={urls[ruta] || "#"} target="_blank" rel="noreferrer"
-              title="Abrir en tamaño completo"
-              style={{ display: "block", width: 84, height: 84, borderRadius: 8, overflow: "hidden",
-                border: "1px solid var(--borde)", background: "#fff" }}>
-              {urls[ruta] && /\.(jpe?g|png|webp|heic)$/i.test(ruta) ? (
-                <img src={urls[ruta]} alt="prueba de entrega"
-                  style={{ width: "100%", height: "100%", objectFit: "cover" }} />
-              ) : (
-                <span style={{ fontSize: 10, color: "var(--texto-tenue)", padding: 5, display: "block" }}>
-                  {urls[ruta] ? "archivo" : "cargando…"}
-                </span>
-              )}
-            </a>
-          ))}
+      {vs.map((v) => (
+        <div key={v.vuelta} style={{
+          borderTop: v.vuelta > 1 ? "1px solid var(--borde)" : "none",
+          paddingTop: v.vuelta > 1 ? 8 : 0, marginTop: v.vuelta > 1 ? 8 : 0,
+        }}>
+          <div style={{ display: "flex", alignItems: "baseline", gap: 8, marginBottom: 5, flexWrap: "wrap" }}>
+            <span style={{ fontSize: 10.5, fontWeight: 600, color: "var(--texto-suave)" }}>
+              Vuelta {v.vuelta}
+            </span>
+            <span style={{ fontSize: 10, color: "var(--texto-tenue)" }}>
+              {fechaHito(v.entregado_en) || "sin entrega"}
+            </span>
+            {v.vision_puntaje != null && (
+              <span title={v.vision_nota || ""}
+                style={{ fontSize: 10, fontWeight: 600, borderRadius: 20, padding: "0 7px",
+                  color: v.vision_puntaje >= 70 ? C.verde : v.vision_puntaje >= 40 ? C.naranja : C.ladrillo,
+                  border: `1px solid ${v.vision_puntaje >= 70 ? C.verde : v.vision_puntaje >= 40 ? C.naranja : C.ladrillo}` }}>
+                Vision {v.vision_puntaje}
+              </span>
+            )}
+            {v.rechazada_en && (
+              <span style={{ fontSize: 10, color: C.ladrillo }}>
+                rechazada · {v.motivo_rechazo}
+              </span>
+            )}
+          </div>
+          <Miniaturas fotos={v.fotos} />
+          {v.comentario && (
+            <div style={{ fontSize: 12, color: "var(--texto)", lineHeight: 1.4, marginTop: 5 }}>
+              “{v.comentario}”
+            </div>
+          )}
         </div>
-      )}
-
-      {tarea.comentario && (
-        <div style={{ fontSize: 12.5, color: "var(--texto)", lineHeight: 1.4 }}>
-          <span style={{ color: "var(--texto-tenue)" }}>
-            {tarea.supervisor_nombre || "El supervisor"} ·{" "}
-          </span>
-          “{tarea.comentario}”
-        </div>
-      )}
-
-      {tarea.veces_pedida > 1 && (
-        <div style={{ fontSize: 10.5, color: "var(--texto-tenue)", marginTop: 4 }}>
-          Pedida {tarea.veces_pedida} veces
-          {tarea.motivo_reabrir ? ` · último rechazo: ${tarea.motivo_reabrir}` : ""}
-        </div>
-      )}
+      ))}
 
       {/* Volver a pedir. El motivo es obligatorio: "manda otra" sin decir qué
           falta hace que el supervisor mande lo mismo, y se pierde otro turno
           del reloj. */}
-      {(fotos.length > 0 || sinPruebas) && (
+      {(hayAlgo || sinPruebas) && (
         pidiendo ? (
           <div style={{ marginTop: 8 }}>
             <input value={motivo} onChange={(e) => setMotivo(e.target.value)}
@@ -601,7 +634,7 @@ function Pruebas({ tarea, onRepedir }) {
   );
 }
 
-function Detalle({ c, onPedir, trayendo, supervisor, tarea, onTareaCreada, onRepedir }) {
+function Detalle({ c, onPedir, trayendo, supervisor, tarea, vueltas, onTareaCreada, onRepedir }) {
   const [panel, setPanel] = useState(false);
   const [creando, setCreando] = useState(false);
   const [errorTarea, setErrorTarea] = useState("");
@@ -717,7 +750,7 @@ function Detalle({ c, onPedir, trayendo, supervisor, tarea, onTareaCreada, onRep
             </div>
           </div>
 
-          <Pruebas tarea={tarea} onRepedir={onRepedir} />
+          <Pruebas tarea={tarea} vueltas={vueltas} onRepedir={onRepedir} />
         </div>
 
         {/* Derecha: a quién llamar y el botón que lo dispara */}
@@ -843,7 +876,7 @@ function Detalle({ c, onPedir, trayendo, supervisor, tarea, onTareaCreada, onRep
   );
 }
 
-function Fila({ c, abierta, onAbrir, onPedir, trayendo, ahora, supervisor, tarea, onTareaCreada, onRepedir }) {
+function Fila({ c, abierta, onAbrir, onPedir, trayendo, ahora, supervisor, tarea, vueltas, onTareaCreada, onRepedir }) {
   const g = POR_CLAVE[clasificar(c)];
   const fondo = abierta ? C.grisTenue : "#fff";
   const sub = chipEstado(c.sub_estado);
@@ -885,7 +918,7 @@ function Fila({ c, abierta, onAbrir, onPedir, trayendo, ahora, supervisor, tarea
         </span>
       </div>
       {abierta && <Detalle c={c} onPedir={onPedir} trayendo={trayendo} supervisor={supervisor}
-        tarea={tarea} onTareaCreada={onTareaCreada} onRepedir={onRepedir} />}
+        tarea={tarea} vueltas={vueltas} onTareaCreada={onTareaCreada} onRepedir={onRepedir} />}
     </Fragment>
   );
 }
@@ -905,6 +938,7 @@ export default function Posventa() {
   const [orden, setOrden] = useState({ campo: "sla", dir: "asc" });
   const [supervisores, setSupervisores] = useState({});
   const [tareas, setTareas] = useState({});
+  const [vueltas, setVueltas] = useState({});
 
   async function cargar() {
     setError(null);
@@ -917,10 +951,13 @@ export default function Posventa() {
     ]);
     // Las tareas vivas del periodo, para que el panel muestre si ya se pidió la
     // foto y en qué quedó, en vez de ofrecer crearla otra vez.
-    const tar = await sb.from("pnr_tareas_mx")
-      .select("id, case_id, sc, estado, supervisor_nombre, creada_en, fotos, comentario")
-      .in("estado", ["pendiente", "vista", "completada", "sin_pruebas"])
-      .limit(5000);
+    const [tar, vlt] = await Promise.all([
+      sb.from("pnr_tareas_mx")
+        .select("id, case_id, sc, estado, supervisor_nombre, creada_en, fotos, comentario, veces_pedida, motivo_reabrir")
+        .in("estado", ["pendiente", "vista", "completada", "sin_pruebas"])
+        .limit(5000),
+      sb.from("pnr_tareas_vueltas").select("*").order("vuelta").limit(5000),
+    ]);
     if (tablero.error) setError(tablero.error.message);
     else setCasos(tablero.data || []);
     if (!sup.error && sup.data) {
@@ -932,6 +969,14 @@ export default function Posventa() {
       const m = {};
       for (const f of tar.data) m[f.case_id] = f;
       setTareas(m);
+    }
+    if (!vlt.error && vlt.data) {
+      const m = {};
+      for (const f of vlt.data) {
+        if (!m[f.case_id]) m[f.case_id] = [];
+        m[f.case_id].push(f);
+      }
+      setVueltas(m);
     }
     setCargando(false);
   }
@@ -971,6 +1016,18 @@ export default function Posventa() {
               ? { ...x, pruebas_recibidas_en: data.pruebas_recibidas_en, sub_estado: data.sub_estado }
               : x));
           }
+        })
+      .on("postgres_changes",
+        { event: "*", schema: "public", table: "pnr_tareas_vueltas" },
+        (payload) => {
+          const v = payload.new && payload.new.case_id ? payload.new : payload.old;
+          if (!v || !v.case_id) return;
+          setVueltas((prev) => {
+            const lista = (prev[v.case_id] || []).filter((x) => x.id !== v.id);
+            if (payload.eventType !== "DELETE") lista.push(v);
+            lista.sort((a, b) => a.vuelta - b.vuelta);
+            return { ...prev, [v.case_id]: lista };
+          });
         })
       .subscribe();
     return () => { sb.removeChannel(canal); };
@@ -1284,7 +1341,8 @@ export default function Posventa() {
                   onAbrir={() => abrirFila(c)}
                   onPedir={pedirDetalle} trayendo={trayendo.has(c.case_id)}
                   ahora={ahora} supervisor={supervisores[c.service_center]}
-                  tarea={tareas[c.case_id]} onTareaCreada={agregarTarea} onRepedir={repedirPruebas} />
+                  tarea={tareas[c.case_id]} vueltas={vueltas[c.case_id]}
+                  onTareaCreada={agregarTarea} onRepedir={repedirPruebas} />
               ))
             )}
           </div>
