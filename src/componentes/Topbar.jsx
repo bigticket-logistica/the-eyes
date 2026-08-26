@@ -3,6 +3,7 @@ import { useAuth } from "../shared/auth.jsx";
 import { NavLink } from "react-router-dom";
 import { useAlertas } from "../shared/alertas.jsx";
 import { useChatNoLeidos } from "../modulos/Mensajes.jsx";
+import { usePnrSinVer } from "../modulos/Posventa.jsx";
 
 function iniciales(nombre) {
   if (!nombre) return "··";
@@ -113,6 +114,7 @@ export default function Topbar() {
   const { noLeidos, correosNoLeidos, sonidoActivo, setSonidoActivo,
           nivelSonido, setNivelSonido, probarSonido } = useAlertas();
   const chatNoLeidos = useChatNoLeidos();
+  const pnrSinVer = usePnrSinVer();
 
   return (
     <header style={{
@@ -156,7 +158,7 @@ export default function Topbar() {
               vivo. El contador de casos por vencer se cablea cuando exista el
               hook; hoy la pestaña entra sin badge para no pedir una consulta
               más en cada carga de la torre. */}
-          <Tab to="/posventa">Posventa</Tab>
+          <Tab to="/posventa" badge={pnrSinVer}>Posventa</Tab>
           {/* Salud es una pantalla de infraestructura, no de operación: se
               muestra solo a quien la mantiene. La lista está acá y no en la base
               porque cambia poco y así no hay una consulta más en cada carga. */}
