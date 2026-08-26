@@ -372,28 +372,47 @@ function Riel({ c, color, terminal, fondo }) {
 //
 // Cada fila filtra la lista. Las tarjetas de arriba sirven para entrar por
 // grupo; esta tabla, para entrar por estado puntual.
+// Día en hora de México, formato YYYY-MM-DD. La ventana de 14 horas que había
+// antes era imposible de explicar: el analista pregunta "qué se movió hoy", no
+// "qué se movió en las últimas catorce horas".
+function diaMX(iso) {
+  if (!iso) return "";
+  return new Date(iso).toLocaleDateString("en-CA", { timeZone: "America/Mexico_City" });
+}
+
+function hoyMX() {
+  return new Date().toLocaleDateString("en-CA", { timeZone: "America/Mexico_City" });
+}
+
 function pct(n, total) {
   if (!total) return "0%";
   return ((Number(n || 0) * 100) / total).toFixed(1) + "%";
 }
 
-function TablaEstados({ casos, filtro, historial, onFiltrar, onFiltrarMovidos }) {
+function Cuadro({ titulo, extra, children }) {
+  return (
+    <div style={{ flex: 1, minWidth: 320, background: "#fff", border: "1px solid var(--borde)",
+      borderRadius: 12, overflow: "hidden" }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 14px",
+        borderBottom: "1px solid var(--borde)", background: C.grisTenue }}>
+        <span style={{ fontSize: 11.5, fontWeight: 600, color: "var(--texto)" }}>{titulo}</span>
+        <span style={{ marginLeft: "auto" }}>{extra}</span>
+      </div>
+      {children}
+    </div>
+  );
+}
+
+// Dos cuadros separados: el de la izquierda es la foto del periodo, el de la
+// derecha es lo que se movió en un día. Son preguntas distintas y mezclarlas en
+// una sola tabla obligaba a leer seis columnas para contestar cualquiera.
+//
+// El motivo de cada estado pasó a ser el tooltip del nombre. Es el texto de la
+// planilla del analista y vale tenerlo, pero ocupaba media tabla para decir algo
+// que ya se sabe de memoria después de la primera semana.
+function TablaEstados({ casos, filtro, historial, dia, onDia, onFiltrar, onFiltrarMovidos }) {
   const total = casos.length;
   let totalMonto = 0;
-
-  // Movimientos de hoy hacia cada estado. Se cuenta el destino, no el origen:
-  // lo que interesa es "cuántos casos pasaron A anulado hoy", que es la
-  // pregunta que se hace el analista cuando abre la pantalla.
-  const corte = Date.now() - 14 * 3600 * 1000;
-  const movidos = {};
-  let movidosTotal = 0;
-  for (const lista of Object.values(historial || {})) {
-    for (const m of lista) {
-      if (new Date(m.creado_en).getTime() <= corte) continue;
-      movidos[m.sub_a] = (movidos[m.sub_a] || 0) + 1;
-      movidosTotal += 1;
-    }
-  }
   const por = {};
   for (const c of casos) {
     const k = c.sub_estado || "?";
@@ -403,82 +422,102 @@ function TablaEstados({ casos, filtro, historial, onFiltrar, onFiltrarMovidos })
     totalMonto += Number(c.monto || 0);
   }
 
+  // Movimientos del día elegido, contando el destino: la pregunta es "cuántos
+  // pasaron A anulado", no cuántos salieron de ahí.
+  const movidos = {};
+  let movidosTotal = 0;
+  for (const lista of Object.values(historial || {})) {
+    for (const m of lista) {
+      if (diaMX(m.creado_en) !== dia) continue;
+      movidos[m.sub_a] = (movidos[m.sub_a] || 0) + 1;
+      movidosTotal += 1;
+    }
+  }
+
+  const GRID_A = "1fr 54px 84px 48px";
+  const GRID_B = "1fr 64px";
+
   return (
-    <div style={{ background: "#fff", border: "1px solid var(--borde)", borderRadius: 12,
-      overflow: "hidden", marginTop: 14 }}>
-      <div style={{ display: "grid", gridTemplateColumns: "210px 58px 88px 50px minmax(0,1fr) 96px", gap: 10,
-        padding: "7px 14px", background: C.grisTenue, borderBottom: "1px solid var(--borde)",
-        fontSize: 9.5, letterSpacing: 0.3, textTransform: "uppercase",
-        color: "var(--texto-tenue)", fontWeight: 600 }}>
-        <span>Estado</span>
-        <span style={{ textAlign: "right" }}>Casos</span>
-        <span style={{ textAlign: "right" }}>Monto</span>
-        <span style={{ textAlign: "right" }}>%</span>
-        <span>Motivo</span>
-        <span style={{ textAlign: "right" }}>Movidos hoy</span>
-      </div>
+    <div style={{ display: "flex", gap: 12, flexWrap: "wrap", marginTop: 14 }}>
+      <Cuadro titulo="Estado de los casos">
+        <div style={{ display: "grid", gridTemplateColumns: GRID_A, gap: 8, padding: "5px 14px",
+          fontSize: 9.5, letterSpacing: 0.3, textTransform: "uppercase",
+          color: "var(--texto-tenue)", fontWeight: 600 }}>
+          <span>Estado</span>
+          <span style={{ textAlign: "right" }}>Casos</span>
+          <span style={{ textAlign: "right" }}>Monto</span>
+          <span style={{ textAlign: "right" }}>%</span>
+        </div>
+        {ESTADOS_PNR.map((e) => {
+          const d = por[e.clave] || { n: 0, monto: 0 };
+          const activa = filtro.tipo === "estado" && filtro.valor === e.clave;
+          const vacia = d.n === 0;
+          return (
+            <div key={e.clave} onClick={() => !vacia && onFiltrar(e.clave)} title={e.motivo}
+              style={{ display: "grid", gridTemplateColumns: GRID_A, gap: 8, padding: "6px 14px",
+                borderTop: "1px solid var(--borde)", cursor: vacia ? "default" : "pointer",
+                background: activa ? C.naranjaTenue : "#fff", opacity: vacia ? 0.45 : 1 }}>
+              <span style={{ fontSize: 12, fontWeight: activa ? 600 : 500,
+                color: COLOR_ESTADO[e.clave] || "var(--texto)", overflow: "hidden",
+                textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{e.etiqueta}</span>
+              <span style={{ textAlign: "right", fontSize: 12, fontWeight: 600, color: "var(--texto)",
+                fontVariantNumeric: "tabular-nums" }}>{d.n}</span>
+              <span style={{ textAlign: "right", fontSize: 12, color: "var(--texto)",
+                fontVariantNumeric: "tabular-nums" }}>{dinero(d.monto)}</span>
+              <span style={{ textAlign: "right", fontSize: 11, color: "var(--texto-tenue)",
+                fontVariantNumeric: "tabular-nums" }}>{pct(d.n, total)}</span>
+            </div>
+          );
+        })}
+        <div style={{ display: "grid", gridTemplateColumns: GRID_A, gap: 8, padding: "7px 14px",
+          borderTop: `2px solid ${C.navy}`, background: C.navyTenue }}>
+          <span style={{ fontSize: 12, fontWeight: 700, color: C.navy }}>Total</span>
+          <span style={{ textAlign: "right", fontSize: 13, fontWeight: 700, color: C.navy,
+            fontVariantNumeric: "tabular-nums" }}>{total}</span>
+          <span style={{ textAlign: "right", fontSize: 12, fontWeight: 700, color: C.navy,
+            fontVariantNumeric: "tabular-nums" }}>{dinero(totalMonto)}</span>
+          <span style={{ textAlign: "right", fontSize: 11, color: C.navy }}>100%</span>
+        </div>
+      </Cuadro>
 
-      {ESTADOS_PNR.map((e) => {
-        const d = por[e.clave] || { n: 0, monto: 0 };
-        const activa = filtro.tipo === "estado" && filtro.valor === e.clave;
-        const vacia = d.n === 0;
-        return (
-          <div key={e.clave} onClick={() => !vacia && onFiltrar(e.clave)}
-            style={{
-              display: "grid", gridTemplateColumns: "210px 58px 88px 50px minmax(0,1fr) 96px", gap: 10,
-              padding: "6px 14px", borderTop: "1px solid var(--borde)",
-              cursor: vacia ? "default" : "pointer",
-              background: activa ? C.naranjaTenue : "#fff",
-              opacity: vacia ? 0.45 : 1,
-            }}>
-            <span style={{ fontSize: 12, fontWeight: activa ? 600 : 500,
-              color: COLOR_ESTADO[e.clave] || "var(--texto)" }}>
-              {e.etiqueta}
-            </span>
-            <span style={{ textAlign: "right", fontSize: 12, fontWeight: 600, color: "var(--texto)",
-              fontVariantNumeric: "tabular-nums" }}>{d.n}</span>
-            <span style={{ textAlign: "right", fontSize: 12, color: "var(--texto)",
-              fontVariantNumeric: "tabular-nums" }}>{dinero(d.monto)}</span>
-            <span style={{ textAlign: "right", fontSize: 11, color: "var(--texto-tenue)",
-              fontVariantNumeric: "tabular-nums" }}>{pct(d.n, total)}</span>
-            <span style={{ fontSize: 11.5, color: "var(--texto-suave)", overflow: "hidden",
-              textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{e.motivo}</span>
-            {/* Cuántos casos pasaron a este estado hoy. Es su propio filtro:
-                un clic acá deja en la lista solo los que se movieron, que es lo
-                que hay que revisar antes de seguir peleando una foto. */}
-            <span onClick={(ev) => {
-                ev.stopPropagation();
-                if (movidos[e.clave]) onFiltrarMovidos(e.clave);
-              }}
-              title={movidos[e.clave] ? `Ver los ${movidos[e.clave]} que pasaron a ${e.etiqueta} hoy` : ""}
-              style={{ textAlign: "right", fontSize: 12, fontVariantNumeric: "tabular-nums",
-                fontWeight: movidos[e.clave] ? 700 : 400,
-                cursor: movidos[e.clave] ? "pointer" : "default",
-                color: movidos[e.clave] ? C.naranja : "var(--texto-tenue)" }}>
-              {movidos[e.clave] || "—"}
-            </span>
-          </div>
-        );
-      })}
-
-      {/* Total al pie. Es el número que se contrasta contra el panel de MELI:
-          si los dos dicen lo mismo, el scraper trajo todo. Va acá y no en una
-          tarjeta aparte porque es la suma de la columna que tiene arriba. */}
-      <div style={{ display: "grid", gridTemplateColumns: "210px 58px 88px 50px minmax(0,1fr) 96px", gap: 10,
-        padding: "8px 14px", borderTop: `2px solid ${C.navy}`, background: C.navyTenue }}>
-        <span style={{ fontSize: 12, fontWeight: 700, color: C.navy }}>Total</span>
-        <span style={{ textAlign: "right", fontSize: 13, fontWeight: 700, color: C.navy,
-          fontVariantNumeric: "tabular-nums" }}>{total}</span>
-        <span style={{ textAlign: "right", fontSize: 12, fontWeight: 700, color: C.navy,
-          fontVariantNumeric: "tabular-nums" }}>{dinero(totalMonto)}</span>
-        <span style={{ textAlign: "right", fontSize: 11, color: C.navy }}>100%</span>
-        <span style={{ fontSize: 11, color: "var(--texto-suave)", overflow: "hidden",
-          textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-          Debe coincidir con el total de casos del panel de MELI
-        </span>
-        <span style={{ textAlign: "right", fontSize: 12, fontWeight: 700, color: C.navy,
-          fontVariantNumeric: "tabular-nums" }}>{movidosTotal || "—"}</span>
-      </div>
+      <Cuadro titulo="Movimientos del día"
+        extra={
+          <input type="date" value={dia} max={hoyMX()} onChange={(e) => onDia(e.target.value)}
+            style={{ fontSize: 11.5, padding: "2px 6px", borderRadius: 6,
+              border: "1px solid var(--borde)" }} />
+        }>
+        <div style={{ display: "grid", gridTemplateColumns: GRID_B, gap: 8, padding: "5px 14px",
+          fontSize: 9.5, letterSpacing: 0.3, textTransform: "uppercase",
+          color: "var(--texto-tenue)", fontWeight: 600 }}>
+          <span>Pasaron a</span>
+          <span style={{ textAlign: "right" }}>Casos</span>
+        </div>
+        {ESTADOS_PNR.map((e) => {
+          const n = movidos[e.clave] || 0;
+          const activa = filtro.tipo === "movidos_estado" && filtro.valor === e.clave;
+          return (
+            <div key={e.clave} onClick={() => n && onFiltrarMovidos(e.clave)}
+              title={n ? `Ver los ${n} que pasaron a ${e.etiqueta}` : ""}
+              style={{ display: "grid", gridTemplateColumns: GRID_B, gap: 8, padding: "6px 14px",
+                borderTop: "1px solid var(--borde)", cursor: n ? "pointer" : "default",
+                background: activa ? C.naranjaTenue : "#fff", opacity: n ? 1 : 0.45 }}>
+              <span style={{ fontSize: 12, fontWeight: activa ? 600 : 500,
+                color: COLOR_ESTADO[e.clave] || "var(--texto)", overflow: "hidden",
+                textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{e.etiqueta}</span>
+              <span style={{ textAlign: "right", fontSize: 12, fontVariantNumeric: "tabular-nums",
+                fontWeight: n ? 700 : 400, color: n ? C.naranja : "var(--texto-tenue)" }}>
+                {n || "\u2014"}
+              </span>
+            </div>
+          );
+        })}
+        <div style={{ display: "grid", gridTemplateColumns: GRID_B, gap: 8, padding: "7px 14px",
+          borderTop: `2px solid ${C.navy}`, background: C.navyTenue }}>
+          <span style={{ fontSize: 12, fontWeight: 700, color: C.navy }}>Total</span>
+          <span style={{ textAlign: "right", fontSize: 13, fontWeight: 700, color: C.navy,
+            fontVariantNumeric: "tabular-nums" }}>{movidosTotal || "\u2014"}</span>
+        </div>
+      </Cuadro>
     </div>
   );
 }
@@ -693,7 +732,7 @@ function Pruebas({ tarea, vueltas, onRepedir }) {
 function hace(iso, ahora) {
   if (!iso) return { texto: "", hoy: false };
   const min = Math.round((ahora - new Date(iso).getTime()) / 60000);
-  const hoy = min < 60 * 14;
+  const hoy = diaMX(iso) === hoyMX();
   if (min < 60) return { texto: `hace ${Math.max(min, 1)} min`, hoy };
   if (min < 2880) return { texto: `hace ${Math.round(min / 60)} h`, hoy };
   return { texto: `hace ${Math.round(min / 1440)} d`, hoy };
@@ -1153,6 +1192,7 @@ export default function Posventa() {
   const [tareas, setTareas] = useState({});
   const [vueltas, setVueltas] = useState({});
   const [historial, setHistorial] = useState({});
+  const [diaMov, setDiaMov] = useState(() => hoyMX());
 
   async function cargar() {
     setError(null);
@@ -1173,9 +1213,9 @@ export default function Posventa() {
       sb.from("pnr_tareas_vueltas").select("*").order("vuelta").limit(5000),
     ]);
 
-    // Últimos siete días de movimientos. Alcanza para el contexto que necesita
-    // el analista y evita traer todo el historial cada vez que carga.
-    const desde = new Date(Date.now() - 7 * 86400000).toISOString();
+    // Últimos treinta días de movimientos, para que el selector de fecha sirva
+    // de algo. Son unos 25 cambios diarios, así que el volumen es trivial.
+    const desde = new Date(Date.now() - 30 * 86400000).toISOString();
     const hist = await sb.from("pnr_historial_mx")
       .select("*").gte("creado_en", desde).order("creado_en", { ascending: false }).limit(3000);
     if (tablero.error) setError(tablero.error.message);
@@ -1340,15 +1380,12 @@ export default function Posventa() {
       : delPeriodo.filter((c) => {
           if (filtro.tipo === "todos") return true;
           if (filtro.tipo === "movidos_estado") {
-            const corte = Date.now() - 14 * 3600 * 1000;
             return (historial[c.case_id] || []).some(
-              (m) => m.sub_a === filtro.valor && new Date(m.creado_en).getTime() > corte
+              (m) => m.sub_a === filtro.valor && diaMX(m.creado_en) === diaMov
             );
           }
           if (filtro.tipo === "movidos") {
-            const ms = historial[c.case_id] || [];
-            const corte = Date.now() - 14 * 3600 * 1000;
-            return ms.some((m) => new Date(m.creado_en).getTime() > corte);
+            return (historial[c.case_id] || []).some((m) => diaMX(m.creado_en) === diaMov);
           }
           if (filtro.tipo === "estado") return c.sub_estado === filtro.valor;
           return clasificar(c) === filtro.valor;
@@ -1373,7 +1410,7 @@ export default function Posventa() {
       const d = valor(a) - valor(b);
       return orden.dir === "asc" ? d : -d;
     });
-  }, [casos, delPeriodo, filtro, busqueda, buscando, orden, historial]);
+  }, [casos, delPeriodo, filtro, busqueda, buscando, orden, historial, diaMov]);
 
   function ordenar(campo) {
     setOrden((o) => o.campo === campo
@@ -1551,6 +1588,7 @@ export default function Posventa() {
 
       {/* Mismo formato que el panel de MELI, con los números de nuestra base. */}
       <TablaEstados casos={delPeriodo} filtro={filtro} historial={historial}
+        dia={diaMov} onDia={setDiaMov}
         onFiltrar={(clave) => { setBusqueda(""); setFiltro({ tipo: "estado", valor: clave }); setAbiertas(new Set()); }}
         onFiltrarMovidos={(clave) => { setBusqueda(""); setFiltro({ tipo: "movidos_estado", valor: clave }); setAbiertas(new Set()); }} />
 
