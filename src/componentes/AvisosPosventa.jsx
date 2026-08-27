@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import { sb } from "../shared/supabase.js";
-import { useAlertas } from "../shared/alertas.jsx";
+import { useSonidoPnr, sonarPnr } from "../shared/sonido-pnr.js";
 
 // ═══════════════════════════════════════════════════════════════════════════
 // AVISOS DEL CANAL DE POSVENTA
@@ -12,56 +12,24 @@ import { useAlertas } from "../shared/alertas.jsx";
 // días. Que suenen igual obliga a mirar la pantalla para saber cuál es urgente.
 //
 // El sonido se genera con WebAudio en vez de un archivo: dos notas descendentes,
-// más graves y más lentas que el aviso de la torre. Sin archivo no hay que
-// desplegar nada extra ni esperar que cargue.
+// más graves y más lentas que el aviso de la torre. Vive en shared/sonido-pnr.js
+// porque también lo usa la campana al probar el volumen.
 //
-// Respeta la campana del Topbar: si el analista silenció la torre, esto también
-// se calla. Un solo control para las dos cosas.
+// El volumen es propio, con su campana P en el Topbar. Un analista que está
+// peleando tickets en vivo quiere la torre en "Fuerte" y Posventa en "Suave", y
+// con un solo control tenía que elegir.
 // ═══════════════════════════════════════════════════════════════════════════
 
 const VIDA_MS = 12000;   // más que el de la torre: acá no hay que reaccionar ya
 
-const GANANCIA = { suave: 0.12, normal: 0.3, fuerte: 0.6 };
-
-function sonar(nivel) {
-  try {
-    const Ctx = window.AudioContext || window.webkitAudioContext;
-    if (!Ctx) return;
-    const ctx = new Ctx();
-    const vol = GANANCIA[nivel] || GANANCIA.normal;
-
-    // Dos notas descendentes, 660 → 440 Hz. La torre usa tonos ascendentes y
-    // más agudos, así que se distinguen sin mirar.
-    [[660, 0], [440, 0.18]].forEach(([hz, t]) => {
-      const osc = ctx.createOscillator();
-      const g = ctx.createGain();
-      osc.type = "sine";
-      osc.frequency.value = hz;
-      g.gain.setValueAtTime(0, ctx.currentTime + t);
-      g.gain.linearRampToValueAtTime(vol, ctx.currentTime + t + 0.02);
-      g.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + t + 0.16);
-      osc.connect(g).connect(ctx.destination);
-      osc.start(ctx.currentTime + t);
-      osc.stop(ctx.currentTime + t + 0.18);
-    });
-
-    setTimeout(() => ctx.close().catch(() => {}), 900);
-  } catch {
-    // Sin audio disponible el aviso visual igual aparece.
-  }
-}
-
 export default function AvisosPosventa() {
   const [avisos, setAvisos] = useState([]);
   const navegar = useNavigate();
-  const alertas = useAlertas();
-  // Se leen por referencia para que el canal de Realtime no se rearme cada vez
+  const sonido = useSonidoPnr();
+  // Se lee por referencia para que el canal de Realtime no se rearme cada vez
   // que el analista cambia el volumen.
-  const cfg = useRef({ activo: true, nivel: "normal" });
-  cfg.current = {
-    activo: alertas ? alertas.sonidoActivo !== false : true,
-    nivel: alertas ? alertas.nivelSonido || "normal" : "normal",
-  };
+  const cfg = useRef(sonido);
+  cfg.current = sonido;
 
   useEffect(() => {
     const canal = sb.channel("pnr-avisos-globales")
@@ -88,7 +56,7 @@ export default function AvisosPosventa() {
 
           const aviso = { id: m.id, quien, resumen, caseId: m.case_id };
           setAvisos((prev) => [...prev.slice(-2), aviso]);
-          if (cfg.current.activo) sonar(cfg.current.nivel);
+          if (cfg.current.activo) sonarPnr(cfg.current.nivel);
           setTimeout(() => setAvisos((prev) => prev.filter((a) => a.id !== aviso.id)), VIDA_MS);
         })
       .subscribe();

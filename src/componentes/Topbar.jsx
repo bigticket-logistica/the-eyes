@@ -4,6 +4,7 @@ import { NavLink } from "react-router-dom";
 import { useAlertas } from "../shared/alertas.jsx";
 import { useChatNoLeidos } from "../modulos/Mensajes.jsx";
 import { usePnrSinVer } from "../modulos/Posventa.jsx";
+import { useSonidoPnr } from "../shared/sonido-pnr.js";
 
 function iniciales(nombre) {
   if (!nombre) return "··";
@@ -67,8 +68,13 @@ function PanelSonido({ nivelSonido, setNivelSonido, sonidoActivo, setSonidoActiv
       <button onClick={() => setAbierto((v) => !v)}
         title={sonidoActivo ? `Sonido: ${nivelSonido}` : "Sonido silenciado"}
         style={{ background: "transparent", border: "none", color: "#bcd0ec",
-          cursor: "pointer", fontSize: 16, padding: 2 }}>
+          cursor: "pointer", fontSize: 16, padding: 2, position: "relative" }}>
         {sonidoActivo ? "🔔" : "🔕"}
+        {/* La T y la P distinguen las dos campanas. Sin letra, dos iguales al
+            lado obligan a abrirlas para saber cuál es cuál. */}
+        <span style={{ position: "absolute", bottom: -2, right: -3, fontSize: 8.5,
+          fontWeight: 700, color: "#bcd0ec", background: "var(--navy)",
+          borderRadius: 3, padding: "0 2px", lineHeight: 1.3 }}>T</span>
       </button>
 
       {abierto && (
@@ -102,6 +108,70 @@ function PanelSonido({ nivelSonido, setNivelSonido, sonidoActivo, setSonidoActiv
           <div style={{ fontSize: 9.5, color: "var(--texto-tenue)", padding: "6px 6px 0", lineHeight: 1.35 }}>
             Si aun en "Fuerte" no se escucha, revisa el volumen del equipo: el
             navegador no puede pasar de ahí.
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Campana de Posventa, con su propio volumen. Los dos canales interrumpen por
+// cosas distintas: la torre es un conductor detenido en ruta ahora, Posventa es
+// un reclamo de una entrega de hace dos días. Un analista puede querer la torre
+// en "Fuerte" y Posventa en "Suave", y con una sola campana tenía que elegir.
+function PanelSonidoPnr() {
+  const [abierto, setAbierto] = useState(false);
+  const caja = useRef(null);
+  const { activo, nivel, setNivel, probar } = useSonidoPnr();
+
+  useEffect(() => {
+    if (!abierto) return;
+    const fuera = (e) => { if (caja.current && !caja.current.contains(e.target)) setAbierto(false); };
+    document.addEventListener("pointerdown", fuera);
+    return () => document.removeEventListener("pointerdown", fuera);
+  }, [abierto]);
+
+  const actual = activo ? nivel : "silencio";
+
+  return (
+    <div ref={caja} style={{ position: "relative", flexShrink: 0 }}>
+      <button onClick={() => setAbierto((v) => !v)}
+        title={activo ? `Posventa: ${nivel}` : "Posventa silenciado"}
+        style={{ background: "transparent", border: "none", color: "#bcd0ec",
+          cursor: "pointer", fontSize: 16, padding: 2, position: "relative" }}>
+        {activo ? "🔔" : "🔕"}
+        <span style={{ position: "absolute", bottom: -2, right: -3, fontSize: 8.5,
+          fontWeight: 700, color: "var(--naranja)", background: "var(--navy)",
+          borderRadius: 3, padding: "0 2px", lineHeight: 1.3 }}>P</span>
+      </button>
+
+      {abierto && (
+        <div style={{ position: "absolute", right: 0, top: 30, zIndex: 9998,
+          background: "#fff", border: "1px solid var(--borde)", borderRadius: 10,
+          boxShadow: "0 6px 22px rgba(0,0,0,.18)", padding: 8, width: 210 }}>
+          <div style={{ fontSize: 10.5, color: "var(--texto-suave)", padding: "2px 6px 6px" }}>
+            Aviso de Posventa
+          </div>
+          {OPCIONES.map((o) => (
+            <button key={o.clave} onClick={() => setNivel(o.clave)}
+              style={{ display: "flex", width: "100%", alignItems: "baseline", gap: 6,
+                textAlign: "left", background: actual === o.clave ? "var(--naranja-suave)" : "transparent",
+                border: "none", borderRadius: 7, padding: "6px 8px", cursor: "pointer",
+                fontSize: 12.5, color: "var(--texto)" }}>
+              <span style={{ fontWeight: actual === o.clave ? 600 : 400 }}>{o.etiqueta}</span>
+              <span style={{ fontSize: 10.5, color: "var(--texto-tenue)" }}>{o.pista}</span>
+              {actual === o.clave && <span style={{ marginLeft: "auto", color: "var(--naranja)" }}>✓</span>}
+            </button>
+          ))}
+          <div style={{ borderTop: "1px solid var(--borde)", marginTop: 6, paddingTop: 6,
+            display: "flex", alignItems: "center", gap: 6 }}>
+            <button onClick={probar} disabled={!activo}
+              style={{ fontSize: 11.5, padding: "4px 10px" }}>
+              🔊 Probar
+            </button>
+            <span style={{ fontSize: 9.5, color: "var(--texto-tenue)", lineHeight: 1.3 }}>
+              Suena distinto al de la torre
+            </span>
           </div>
         </div>
       )}
@@ -155,9 +225,7 @@ export default function Topbar() {
           <Tab to="/anomalias">Anomalías</Tab>
           {/* Posventa va después de Anomalías: las dos se miran cuando el día
               operativo ya cerró, a diferencia de las primeras que se usan en
-              vivo. El contador de casos por vencer se cablea cuando exista el
-              hook; hoy la pestaña entra sin badge para no pedir una consulta
-              más en cada carga de la torre. */}
+              vivo. El badge cuenta los casos que nadie abrió. */}
           <Tab to="/posventa" badge={pnrSinVer}>Posventa</Tab>
           {/* Salud es una pantalla de infraestructura, no de operación: se
               muestra solo a quien la mantiene. La lista está acá y no en la base
@@ -175,6 +243,7 @@ export default function Topbar() {
         <PanelSonido nivelSonido={nivelSonido} setNivelSonido={setNivelSonido}
           sonidoActivo={sonidoActivo} setSonidoActivo={setSonidoActivo}
           probarSonido={probarSonido} />
+        <PanelSonidoPnr />
         <span style={{ color: "#bcd0ec", fontSize: 12.5, whiteSpace: "nowrap", maxWidth: 130, overflow: "hidden", textOverflow: "ellipsis" }} title={analista?.nombre}>{analista?.nombre}</span>
         <div style={{
           width: 28, height: 28, borderRadius: "50%", background: "var(--naranja)",
