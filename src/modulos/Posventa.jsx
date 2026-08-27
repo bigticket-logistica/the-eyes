@@ -1645,8 +1645,11 @@ export default function Posventa() {
             </button>
           ))}
         </div>
+        {/* El buscador y el periodo son del tablero: en el chat no filtran nada
+            y solo ocupan la barra con controles que no responden. */}
         <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 8 }}>
           {aviso && <span style={{ fontSize: 11.5, color: C.verde }}>{aviso}</span>}
+          {vista === "chat" ? null : <Fragment>
           <input value={busqueda} onChange={(e) => { setBusqueda(e.target.value); setAbiertas(new Set()); }}
             placeholder="Buscar caso, guía, ruta o conductor"
             style={{ fontSize: 12.5, padding: "5px 10px", borderRadius: 7,
@@ -1660,6 +1663,7 @@ export default function Posventa() {
             {periodos.map((p) => <option key={p} value={p}>{p}</option>)}
           </select>
           <button onClick={cargar} style={{ fontSize: 11.5, padding: "5px 11px" }}>Actualizar</button>
+          </Fragment>}
         </div>
       </div>
 
