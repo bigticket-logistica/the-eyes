@@ -73,9 +73,22 @@ function Mapa({ lat, lng }) {
 }
 
 // ── Adjunto genérico ────────────────────────────────────────────────────────
+// Cómo dibujar el adjunto. Se decide por el MIME real y no por el tipo que
+// mandó Meta: cuando el conductor manda una foto "sin comprimir", WhatsApp la
+// entrega como documento con media_mime image/jpeg, y se veía como un archivo
+// para descargar en vez de la foto. Lo mismo con los audios y los videos.
+function comoDibujar(m) {
+  const mime = (m.media_mime || "").toLowerCase();
+  if (/^image\//.test(mime)) return "imagen";
+  if (/^audio\//.test(mime)) return "audio";
+  if (/^video\//.test(mime)) return "video";
+  return m.tipo_contenido;
+}
+
 function Adjunto({ m }) {
   const [url, setUrl] = useState(null);
   const [ampliada, setAmpliada] = useState(false);
+  const dibujo = comoDibujar(m);
 
   useEffect(() => {
     let vivo = true;
@@ -108,7 +121,7 @@ function Adjunto({ m }) {
     return <div style={{ fontSize: 12, opacity: 0.6 }}>{ICONO[m.tipo_contenido] || "📎"} cargando…</div>;
   }
 
-  if (m.tipo_contenido === "imagen" || m.tipo_contenido === "sticker") {
+  if (dibujo === "imagen" || dibujo === "sticker") {
     return (
       <>
         <img
@@ -133,7 +146,7 @@ function Adjunto({ m }) {
     );
   }
 
-  if (m.tipo_contenido === "audio") {
+  if (dibujo === "audio") {
     return (
       <div style={{ marginTop: 4 }}>
         {/* WhatsApp entrega OGG/Opus: suena en Chrome, Edge, Firefox y Android.
@@ -147,7 +160,7 @@ function Adjunto({ m }) {
     );
   }
 
-  if (m.tipo_contenido === "video") {
+  if (dibujo === "video") {
     return <video controls src={url} style={{ maxWidth: 280, borderRadius: 8, marginTop: 4, display: "block" }} />;
   }
 
@@ -174,7 +187,8 @@ function Adjunto({ m }) {
 function Transcripcion({ m }) {
   if (!m.transcripcion) return null;
   const alerta = m.transcripcion.startsWith("ALERTA:");
-  const etiqueta = m.tipo_contenido === "audio" ? "🎧 Transcripción" : "👁 Descripción";
+  const etiqueta = /^audio\//.test((m.media_mime || "").toLowerCase()) || m.tipo_contenido === "audio"
+    ? "🎧 Transcripción" : "👁 Descripción";
   return (
     <div style={{
       marginTop: 6, padding: "6px 8px", borderRadius: 7, fontSize: 12,
