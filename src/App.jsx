@@ -14,6 +14,7 @@ import Posventa from "./modulos/Posventa.jsx";
 import Salud from "./modulos/Salud.jsx";
 import Topbar from "./componentes/Topbar.jsx";
 import { AlertasProvider, ContenedorToasts } from "./shared/alertas.jsx";
+import AvisosPosventa from "./componentes/AvisosPosventa.jsx";
 
 function Cargando() {
   return (
@@ -78,6 +79,11 @@ export default function App() {
         </div>
       </div>
       <ContenedorToasts />
+      {/* Los avisos de Posventa van aparte: abajo a la izquierda y con otro
+          sonido. Dentro del AlertasProvider para que respeten la campana del
+          Topbar, pero en su propio contenedor para que no compitan por el
+          mismo rincón de la pantalla. */}
+      <AvisosPosventa />
     </AlertasProvider>
   );
 }
