@@ -1,5 +1,6 @@
 import { Fragment, useState, useEffect, useMemo } from "react";
 import { sb } from "../shared/supabase.js";
+import ChatPosventa from "./ChatPosventa.jsx";
 
 // ── Posventa ───────────────────────────────────────────────────────────────
 // Hoy solo PNR; las devoluciones entran después como una segunda vista del
@@ -28,8 +29,8 @@ const WEBHOOK_SECRETO = import.meta.env.VITE_PNR_WEBHOOK_SECRET || "";
 // los supervisores entran a su propia bitácora: cambiarle el correo a Juan
 // Mancilla lo dejaría sin acceso. Con las dos cadenas vacías, el envío usa los
 // datos reales y no hay nada que revertir.
-const PRUEBA_TEL_SUPERVISOR   = "";
-const PRUEBA_EMAIL_SUPERVISOR = "";
+const PRUEBA_TEL_SUPERVISOR   = "+56957730804";
+const PRUEBA_EMAIL_SUPERVISOR = "camilo.naranjo@fullmotos.cl";
 
 function detalleFresco(c) {
   if (!c || !c.detalle_capturado_en) return false;
@@ -86,8 +87,9 @@ export function usePnrSinVer() {
 }
 
 const VISTAS = [
-  { clave: "pnr",          etiqueta: "PNR",          activa: true  },
-  { clave: "devoluciones", etiqueta: "Devoluciones", activa: false },
+  { clave: "pnr",          etiqueta: "PNR",           activa: true  },
+  { clave: "devoluciones", etiqueta: "Devoluciones",  activa: false },
+  { clave: "chat",         etiqueta: "Chat Posventa", activa: true  },
 ];
 
 // Paleta. Navy y naranja son los institucionales; los otros tres se derivan
@@ -1661,6 +1663,16 @@ export default function Posventa() {
         </div>
       </div>
 
+      {/* El chat ocupa el alto completo y no comparte pantalla con el tablero:
+          son dos formas de trabajar distintas y mezclarlas dejaría las dos a
+          media altura. */}
+      {vista === "chat" ? (
+        <div style={{ height: "calc(100vh - 150px)", minHeight: 420 }}>
+          <ChatPosventa />
+        </div>
+      ) : (
+      <Fragment>
+
       {error && (
         <div style={{ background: C.ladrilloTenue, border: `1px solid ${C.ladrillo}`, color: C.ladrillo,
           borderRadius: 10, padding: "10px 14px", fontSize: 12.5, marginBottom: 14 }}>
@@ -1804,6 +1816,9 @@ export default function Posventa() {
           </div>
         </div>
       </div>
+
+      </Fragment>
+      )}
     </div>
   );
 }
