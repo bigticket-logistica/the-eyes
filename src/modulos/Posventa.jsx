@@ -199,12 +199,21 @@ function chipEstado(sub) {
 // Solo se infiere hacia adelante y desde estados que lo garantizan: un caso en
 // UPLOADED_RECEIPT tuvo comprobante, seguro. Un NOT_BILLED pudo llegar ahí sin
 // comprobante —el comprador retira el reclamo— así que ahí no se infiere nada.
+// Cuatro hitos, no seis. Los dos que faltan —"Aviso 2" y "Aviso 3"— eran del
+// diseño de escalamientos con umbrales móviles, que se descartó cuando el
+// recordatorio pasó a ser uno diario a las 15:00. Sus columnas quedaron vacías y
+// el riel mostraba dos círculos que nunca se iban a llenar.
+//
+// El recordatorio no es un hito que ocurre una vez: son N, uno por día mientras
+// el caso siga abierto. Por eso lleva contador en vez de círculo, y la fecha del
+// último debajo. Un caso con tres recordatorios y sin comprobante es un
+// supervisor que no está respondiendo, y eso el riel ahora lo dice.
 const HITOS = [
-  { clave: "avisado_inicial_en",   etiqueta: "Aviso 1", titulo: "Primer aviso al conductor" },
-  { clave: "avisado_24h_en",       etiqueta: "Aviso 2", titulo: "Escalamiento al supervisor (24 h)" },
-  { clave: "avisado_final_en",     etiqueta: "Aviso 3", titulo: "Escalamiento al dueño (40 h)" },
-  { clave: "pruebas_recibidas_en", etiqueta: "Pruebas", titulo: "El conductor entregó las pruebas" },
-  { clave: "comprobante_en",       etiqueta: "Cargado", titulo: "Comprobante cargado en MELI",
+  { clave: "avisado_inicial_en",   etiqueta: "Aviso",    titulo: "Primer aviso al chofer y al supervisor" },
+  { clave: "recordatorio_ultimo",  etiqueta: "Recuerdos", titulo: "Recordatorios diarios enviados",
+    contador: "recordatorios" },
+  { clave: "pruebas_recibidas_en", etiqueta: "Pruebas",  titulo: "El supervisor cargó las pruebas" },
+  { clave: "comprobante_en",       etiqueta: "Cargado",  titulo: "Comprobante cargado en MELI",
     inferir: (c) => ["UPLOADED_RECEIPT", "ON_REVIEW", "ASSIGNED"].includes(c.sub_estado) },
 ];
 
@@ -349,6 +358,31 @@ function Riel({ c, color, terminal, fondo }) {
       }} />
       {HITOS.map((h) => {
         const f = fechaHito(c[h.clave]);
+
+        // El de recordatorios lleva el número en el punto: no es un hito que
+        // ocurre una vez, son varios, y cuántos van importa más que cuándo.
+        if (h.contador) {
+          const n = Number(c[h.contador] || 0);
+          return (
+            <span key={h.clave}
+              title={n ? `${h.titulo}: ${n}${f ? `, último ${f}` : ""}` : `${h.titulo}: ninguno`}
+              style={{ position: "relative", textAlign: "center", lineHeight: 1.15, overflow: "hidden" }}>
+              <span style={{
+                display: "inline-flex", alignItems: "center", justifyContent: "center",
+                minWidth: 15, height: 15, borderRadius: 8, padding: "0 3px",
+                fontSize: 9.5, fontWeight: 700,
+                background: n ? color : "transparent",
+                border: `1.5px solid ${n ? color : "var(--borde)"}`,
+                color: n ? "#fff" : "var(--texto-tenue)",
+                boxShadow: `0 0 0 2.5px ${fondo}`, verticalAlign: "middle",
+              }}>{n || "–"}</span>
+              <div style={{ fontSize: 8, color: "var(--texto-tenue)", whiteSpace: "nowrap", marginTop: 1 }}>
+                {f || ""}
+              </div>
+            </span>
+          );
+        }
+
         // Ocurrió, pero antes de que el historial existiera: punto lleno y
         // "sin fecha". El hecho es cierto; lo que falta es el cuándo.
         const inferido = !f && h.inferir && h.inferir(c);
