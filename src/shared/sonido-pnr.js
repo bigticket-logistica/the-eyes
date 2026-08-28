@@ -9,60 +9,94 @@ import { useState, useEffect, useCallback } from "react";
 // tickets en vivo quiere la torre en "Fuerte" y Posventa en "Suave", y con una
 // sola campana tenía que elegir.
 //
-// Se guarda en el navegador y no en la base: es una preferencia de quien está
-// sentado ahí, no del analista como persona. La misma cuenta en la torre de
-// México y en un portátil en casa puede querer volúmenes distintos.
+// TRES COSAS COPIADAS DE shared/alertas.jsx, QUE YA LAS PAGÓ CARO
+//
+//   1. UN SOLO AudioContext para toda la sesión. La primera versión de este
+//      archivo creaba uno nuevo en cada aviso: Chrome permite unos seis por
+//      pestaña y después los rechaza, así que a partir del séptimo aviso el
+//      sonido dejaba de funcionar hasta recargar la página.
+//
+//   2. FRECUENCIA ALTA. Los 660 y 440 Hz de la primera versión caen donde el
+//      oído humano es poco sensible: a igual volumen se percibe mucho más bajo.
+//      El aviso vive en la zona de 2 a 2.6 kHz, la de máxima sensibilidad.
+//
+//   3. ONDA TRIANGULAR y no senoidal. La senoidal es la que menos se oye.
+//
+// CÓMO SE DISTINGUE DE LA TORRE
+//   La torre repite la misma nota dos o tres veces. Posventa hace dos notas
+//   DESCENDENTES, 2637 → 1976 Hz, y más separadas: 250 ms contra 170. El patrón
+//   se reconoce sin mirar la pantalla, que es el punto de tenerlos separados.
+//
+// El nivel "fuerte" pasa de 1.0 en el GainNode, que es la única forma de sonar
+// por encima del máximo del sistema. Distorsiona un poco a propósito: en una
+// torre con ruido es preferible.
 // ═══════════════════════════════════════════════════════════════════════════
 
+export const NIVELES_PNR = { silencio: 0, suave: 0.3, normal: 0.85, fuerte: 1.7 };
+
 const LLAVE = "pnr_sonido";
-const NIVELES = ["silencio", "suave", "normal", "fuerte"];
-const GANANCIA = { suave: 0.12, normal: 0.3, fuerte: 0.6 };
+const EVENTO = "pnr-sonido-cambio";
 
 function leer() {
   try {
     const g = JSON.parse(window.localStorage.getItem(LLAVE) || "{}");
-    return {
-      activo: g.activo !== false,
-      nivel: NIVELES.includes(g.nivel) && g.nivel !== "silencio" ? g.nivel : "normal",
-    };
+    const nivel = g.nivel in NIVELES_PNR && g.nivel !== "silencio" ? g.nivel : "normal";
+    return { activo: g.activo !== false, nivel };
   } catch {
     return { activo: true, nivel: "normal" };
   }
 }
 
-// Dos notas descendentes, 660 → 440 Hz. La torre usa tonos ascendentes y más
-// agudos, así que se distinguen sin mirar la pantalla — que es el punto de
-// tenerlos separados.
-export function sonarPnr(nivel) {
+let ctxAudio = null;
+
+// Un solo contexto, y se reanuda: el navegador lo deja "suspended" hasta que la
+// persona interactúa con la página, así que el primer aviso de la mañana no
+// sonaría si nadie hizo clic todavía.
+function contextoAudio() {
   try {
-    const Ctx = window.AudioContext || window.webkitAudioContext;
-    if (!Ctx) return;
-    const ctx = new Ctx();
-    const vol = GANANCIA[nivel] || GANANCIA.normal;
-
-    [[660, 0], [440, 0.18]].forEach(([hz, t]) => {
-      const osc = ctx.createOscillator();
-      const g = ctx.createGain();
-      osc.type = "sine";
-      osc.frequency.value = hz;
-      g.gain.setValueAtTime(0, ctx.currentTime + t);
-      g.gain.linearRampToValueAtTime(vol, ctx.currentTime + t + 0.02);
-      g.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + t + 0.16);
-      osc.connect(g).connect(ctx.destination);
-      osc.start(ctx.currentTime + t);
-      osc.stop(ctx.currentTime + t + 0.18);
-    });
-
-    setTimeout(() => ctx.close().catch(() => {}), 900);
+    if (!ctxAudio) {
+      const AC = window.AudioContext || window.webkitAudioContext;
+      if (!AC) return null;
+      ctxAudio = new AC();
+    }
+    if (ctxAudio.state === "suspended") ctxAudio.resume().catch(() => {});
+    return ctxAudio;
   } catch {
-    // Sin audio disponible el aviso visual igual aparece.
+    return null;
   }
 }
 
-// Un evento propio para que las dos partes que leen esto —la campana del Topbar
-// y el contenedor de avisos— se enteren del cambio. localStorage no avisa a la
-// misma pestaña que lo escribió.
-const EVENTO = "pnr-sonido-cambio";
+function pulso(ctx, t0, freq, dur, vol, tipo) {
+  const osc = ctx.createOscillator();
+  const g = ctx.createGain();
+  osc.type = tipo;
+  osc.frequency.setValueAtTime(freq, t0);
+  osc.connect(g);
+  g.connect(ctx.destination);
+  // exponentialRamp no admite cero: de ahí los 0.0001 en los extremos.
+  g.gain.setValueAtTime(0.0001, t0);
+  g.gain.exponentialRampToValueAtTime(Math.max(0.0002, vol), t0 + 0.012);
+  g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
+  osc.start(t0);
+  osc.stop(t0 + dur + 0.02);
+}
+
+// Dos notas descendentes. La torre repite la misma nota; esto baja, y con eso
+// se distingue de oído sin mirar la pantalla.
+export function sonarPnr(nivel) {
+  const vol = typeof nivel === "number" ? nivel : (NIVELES_PNR[nivel] ?? NIVELES_PNR.normal);
+  if (!vol || vol <= 0) return;
+  const ctx = contextoAudio();
+  if (!ctx) return;
+  const base = ctx.currentTime + 0.02;
+
+  // 2637 Hz y 1976 Hz: las dos en la zona sensible, una quinta de distancia.
+  // La octava de abajo le da cuerpo sin bajar la frecuencia percibida.
+  [[2637, 1319, 0], [1976, 988, 0.25]].forEach(([alto, bajo, t]) => {
+    pulso(ctx, base + t, alto, 0.14, vol * 0.55, "triangle");
+    pulso(ctx, base + t, bajo, 0.14, vol * 0.4, "sine");
+  });
+}
 
 export function useSonidoPnr() {
   const [cfg, setCfg] = useState(leer);
@@ -77,6 +111,18 @@ export function useSonidoPnr() {
     };
   }, []);
 
+  // Desbloquear el audio con el primer gesto. Sin esto el primer aviso de la
+  // jornada no suena y parece que el sistema falla.
+  useEffect(() => {
+    const abrir = () => { contextoAudio(); };
+    window.addEventListener("pointerdown", abrir, { once: true });
+    window.addEventListener("keydown", abrir, { once: true });
+    return () => {
+      window.removeEventListener("pointerdown", abrir);
+      window.removeEventListener("keydown", abrir);
+    };
+  }, []);
+
   const guardar = useCallback((nuevo) => {
     try { window.localStorage.setItem(LLAVE, JSON.stringify(nuevo)); } catch { /* modo privado */ }
     setCfg(nuevo);
@@ -86,6 +132,7 @@ export function useSonidoPnr() {
   // Suena al elegir, para poder calibrarlo: sin escucharlo no hay forma de
   // saber si "Suave" alcanza en esta sala.
   const setNivel = useCallback((nivel) => {
+    if (!(nivel in NIVELES_PNR)) return;
     if (nivel === "silencio") { guardar({ activo: false, nivel: cfg.nivel }); return; }
     guardar({ activo: true, nivel });
     sonarPnr(nivel);
