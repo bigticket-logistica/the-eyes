@@ -1070,7 +1070,7 @@ function Detalle({ c, onPedir, trayendo, supervisor, tarea, vueltas, movimientos
     // aparte: si n8n falla, el supervisor igual tiene la tarea en su bitácora
     // y el analista sabe que le tiene que avisar por otro lado.
     const r = onNotificar
-      ? await onNotificar(c.case_id, "inicial", cuerpoAviso())
+      ? await onNotificar(c.case_id, "inicial", cuerpoAviso(), telElegido)
       : { ok: false, error: "sin envío" };
     setEnvio(r);
     setCreando(false);
@@ -1081,7 +1081,7 @@ function Detalle({ c, onPedir, trayendo, supervisor, tarea, vueltas, movimientos
     setCreando(true);
     setEnvio(null);
     const r = onNotificar
-      ? await onNotificar(c.case_id, "inicial", cuerpoAviso())
+      ? await onNotificar(c.case_id, "inicial", cuerpoAviso(), telElegido)
       : { ok: false, error: "sin envío" };
     setEnvio(r);
     setCreando(false);
@@ -1094,7 +1094,7 @@ function Detalle({ c, onPedir, trayendo, supervisor, tarea, vueltas, movimientos
     setCreando(true);
     setEnvio(null);
     const r = onNotificar
-      ? await onNotificar(c.case_id, "recordatorio")
+      ? await onNotificar(c.case_id, "recordatorio", null, telElegido)
       : { ok: false, error: "sin envío" };
     setEnvio(r);
     setCreando(false);
@@ -1111,7 +1111,7 @@ function Detalle({ c, onPedir, trayendo, supervisor, tarea, vueltas, movimientos
       analista: "posventa",
       sc: c.service_center,
       conductor: c.transportista || c.conductor_ruta || c.conductor,
-      telefono_conductor: c.telefono || c.telefono_ruta,
+      telefono_conductor: telElegido || c.telefono || c.telefono_ruta,
       supervisor_nombre: supervisor ? supervisor.supervisor_nombre : null,
       // Sin reemplazos de prueba en el código: los datos de prueba viven en
       // supervisores_bt, que es una sola fila y se revierte con un update. Dos
@@ -1810,13 +1810,18 @@ export default function Posventa() {
   // navegador: el recordatorio de las 15:00 y el aviso de cambio de estado
   // llaman a la misma función, y si cada uno los armara por su lado
   // terminarían mandando textos distintos.
-  async function notificar(caseId, tipo, datosCorreo) {
+  async function notificar(caseId, tipo, datosCorreo, telefono) {
     const t = tipo || "inicial";
     let wa = { ok: false, error: "sin envío" };
 
     try {
+      // El teléfono elegido va solo si el analista eligió uno. Si no, la
+      // función decide: primero el último con el que se le escribió a este
+      // caso, después el de MELI. Así el automático de las 15:00 sigue la
+      // decisión del analista sin guardarla en ninguna columna.
       const { data, error } = await sb.rpc("fn_pnr_avisar", {
         p_case_id: caseId, p_tipo: t, p_quien: "analista",
+        p_telefono: telefono || null,
       });
       if (error) throw new Error(error.message);
       const r = data || {};
