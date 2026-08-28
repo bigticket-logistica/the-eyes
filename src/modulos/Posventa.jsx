@@ -1815,6 +1815,13 @@ export default function Posventa() {
             detalle_capturado_en: j.detalle.capturado_en,
             detalle_error: j.detalle.error || null }
         : x));
+
+      // La ficha de teléfonos lee vw_pnr_telefonos, que se carga una sola vez al
+      // abrir la pantalla. El teléfono del chofer llega recién ahora, con el
+      // detalle: sin este refresco la ficha diría "sin teléfono" para un caso
+      // que acaba de traer uno, y el analista lo iría a pedir al supervisor sin
+      // necesidad.
+      cargarTelefonos();
     } catch (e) {
       setCasos((prev) => prev.map((x) => x.case_id === caseId
         ? { ...x, detalle_error: String(e.message || e) } : x));
