@@ -39,6 +39,16 @@ function hora(iso) {
   });
 }
 
+// Día en hora de México, formato YYYY-MM-DD.
+function diaMX(iso) {
+  if (!iso) return "";
+  return new Date(iso).toLocaleDateString("en-CA", { timeZone: "America/Mexico_City" });
+}
+
+function hoyMX() {
+  return new Date().toLocaleDateString("en-CA", { timeZone: "America/Mexico_City" });
+}
+
 function hace(iso) {
   if (!iso) return "";
   const min = Math.round((Date.now() - new Date(iso).getTime()) / 60000);
@@ -126,6 +136,10 @@ export default function ChatPosventa() {
   const [enviando, setEnviando] = useState(false);
   const [error, setError] = useState(null);
   const [busqueda, setBusqueda] = useState("");
+  // Día de la bandeja, como en Consultas de la torre. Sin esto la lista acumula
+  // conversaciones de días anteriores y el analista no distingue lo que llegó
+  // hoy de lo que quedó de ayer.
+  const [dia, setDia] = useState(() => hoyMX());
   const hiloRef = useRef(null);
 
   const cargarConvs = useCallback(async () => {
@@ -217,10 +231,12 @@ export default function ChatPosventa() {
   }
 
   const q = busqueda.trim().toLowerCase();
+  // La búsqueda ignora el día a propósito: si el analista busca un caso, quiere
+  // encontrarlo sin acordarse de qué día se habló.
   const lista = q
     ? convs.filter((c) => [c.conductor, c.telefono, c.case_id, c.route_id]
         .some((v) => String(v || "").toLowerCase().includes(q)))
-    : convs;
+    : convs.filter((c) => diaMX(c.ultimo_en) === dia);
 
   const abierta = sel ? ventanaAbierta(sel.ultimo_entrante_en) : false;
   const quedan = sel ? horasDeVentana(sel.ultimo_entrante_en) : 0;
@@ -249,7 +265,28 @@ export default function ChatPosventa() {
           <input value={busqueda} onChange={(e) => setBusqueda(e.target.value)}
             placeholder="Buscar conductor, teléfono o caso"
             style={{ width: "100%", fontSize: 11.5, padding: "5px 8px", borderRadius: 7,
-              border: "1px solid var(--borde)", boxSizing: "border-box" }} />
+              border: "1px solid var(--borde)", boxSizing: "border-box", marginBottom: 6 }} />
+
+          <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+            <input type="date" value={dia} max={hoyMX()} disabled={!!q}
+              onChange={(e) => setDia(e.target.value)}
+              style={{ flex: 1, fontSize: 11, padding: "3px 6px", borderRadius: 6,
+                border: "1px solid var(--borde)", boxSizing: "border-box",
+                opacity: q ? 0.5 : 1 }} />
+            {dia !== hoyMX() && !q && (
+              <button onClick={() => setDia(hoyMX())}
+                style={{ fontSize: 10.5, padding: "3px 8px", borderRadius: 6,
+                  border: "1px solid var(--borde)", background: "#fff",
+                  color: "var(--texto-suave)", cursor: "pointer", whiteSpace: "nowrap" }}>
+                Hoy
+              </button>
+            )}
+          </div>
+          {q && (
+            <div style={{ fontSize: 9.5, color: "var(--texto-tenue)", marginTop: 3 }}>
+              La búsqueda mira todos los días
+            </div>
+          )}
         </div>
 
         <div style={{ flex: 1, overflowY: "auto", minHeight: 0 }}>
@@ -257,8 +294,11 @@ export default function ChatPosventa() {
             <div style={{ padding: 16, fontSize: 12, color: "var(--texto-tenue)" }}>Cargando…</div>
           ) : lista.length === 0 ? (
             <div style={{ padding: 16, fontSize: 12, color: "var(--texto-suave)", lineHeight: 1.5 }}>
-              Todavía no hay conversaciones. Aparecen cuando un conductor responde
-              a un aviso de PNR.
+              {q
+                ? "Ningún resultado."
+                : dia === hoyMX()
+                  ? "Sin conversaciones hoy. Aparecen cuando se avisa un PNR o cuando un conductor responde."
+                  : "Sin conversaciones ese día."}
             </div>
           ) : (
             lista.map((c) => (
