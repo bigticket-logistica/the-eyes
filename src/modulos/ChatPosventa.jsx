@@ -51,6 +51,22 @@ function hace(iso) {
 const dinero = (n) => n == null ? "—"
   : "$" + Number(n).toLocaleString("es-MX", { maximumFractionDigits: 0 });
 
+// Dato del caso en formato de pastilla, con su rótulo en minúsculas. Es lo que
+// distingue el contexto de un mensaje: un texto corrido al lado del nombre se
+// lee como algo que alguien escribió.
+function Pastilla({ etiqueta, valor, color }) {
+  return (
+    <span style={{ display: "inline-flex", alignItems: "baseline", gap: 4,
+      background: "#fff", border: "1px solid var(--borde)", borderRadius: 20,
+      padding: "2px 9px", whiteSpace: "nowrap" }}>
+      <span style={{ fontSize: 9, color: "var(--texto-tenue)", textTransform: "uppercase",
+        letterSpacing: 0.3 }}>{etiqueta}</span>
+      <span style={{ fontSize: 11.5, fontWeight: 600, color: color || "var(--texto)",
+        fontVariantNumeric: "tabular-nums" }}>{valor}</span>
+    </span>
+  );
+}
+
 // ── Fila de la bandeja ─────────────────────────────────────────────────────
 
 function FilaConv({ c, activa, onClick }) {
@@ -262,48 +278,60 @@ export default function ChatPosventa() {
           </div>
         ) : (
           <>
-            {/* Contexto del caso. Es lo que el analista necesita a la vista para
-                contestar sin abrir la pestaña PNR. */}
-            <div style={{ padding: "9px 14px", borderBottom: "1px solid var(--borde)",
-              background: C.grisTenue, display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
-              <div style={{ minWidth: 0 }}>
-                <div style={{ fontSize: 13.5, fontWeight: 700, color: C.navy }}>
+            {/* Encabezado en dos filas.
+                La versión anterior ponía el caso y el nombre del producto como
+                texto corrido al lado del nombre, y se leía como si fuera un
+                mensaje del hilo. Con etiquetas en pastillas y el producto en su
+                propia línea rotulada, se entiende que es contexto del caso y no
+                algo que alguien escribió. */}
+            <div style={{ borderBottom: "1px solid var(--borde)", background: C.grisTenue }}>
+
+              <div style={{ display: "flex", alignItems: "baseline", gap: 10,
+                padding: "9px 14px 6px", flexWrap: "wrap" }}>
+                <span style={{ fontSize: 14, fontWeight: 700, color: C.navy }}>
                   {sel.conductor || sel.telefono}
-                </div>
-                <div style={{ fontSize: 11, color: "var(--texto-suave)" }}>
+                </span>
+                <span style={{ fontSize: 11, color: "var(--texto-tenue)",
+                  fontVariantNumeric: "tabular-nums" }}>
                   {sel.telefono}
-                  {sel.service_center ? ` · ${sel.service_center}` : ""}
-                  {sel.route_id ? ` · ruta ${sel.route_id}` : ""}
-                </div>
+                </span>
+                {sel.rol === "supervisor" && (
+                  <span style={{ fontSize: 9.5, fontWeight: 700, color: C.navy,
+                    background: "#e4ebf5", borderRadius: 4, padding: "1px 6px",
+                    textTransform: "uppercase", letterSpacing: 0.3 }}>
+                    supervisor
+                  </span>
+                )}
+                <span style={{ marginLeft: "auto", fontSize: 10.5,
+                  color: abierta ? C.verde : C.ladrillo }}>
+                  {abierta ? `ventana abierta · ${Math.floor(quedan)} h` : "ventana cerrada"}
+                </span>
               </div>
 
               {sel.case_id && (
-                <div style={{ fontSize: 11.5, color: "var(--texto-suave)", lineHeight: 1.4 }}>
-                  <div>
-                    Caso <strong style={{ color: "var(--texto)" }}>{sel.case_id}</strong>
-                    {" · "}<strong style={{ color: C.navy }}>{dinero(sel.monto)}</strong>
-                    {sel.horas_restantes != null && (
-                      <span style={{ color: Number(sel.horas_restantes) < 12 ? C.ladrillo : "var(--texto-suave)" }}>
-                        {" · "}
-                        {Number(sel.horas_restantes) > 0
-                          ? `quedan ${Math.round(sel.horas_restantes)} h`
-                          : `vencido hace ${Math.abs(Math.round(sel.horas_restantes))} h`}
-                      </span>
-                    )}
-                  </div>
+                <div style={{ padding: "0 14px 9px", display: "flex", gap: 6,
+                  alignItems: "center", flexWrap: "wrap" }}>
+                  <Pastilla etiqueta="caso" valor={sel.case_id} />
+                  {sel.service_center && <Pastilla etiqueta="centro" valor={sel.service_center} />}
+                  {sel.route_id && <Pastilla etiqueta="ruta" valor={sel.route_id} />}
+                  <Pastilla etiqueta="monto" valor={dinero(sel.monto)} color={C.navy} />
+                  {sel.horas_restantes != null && (
+                    <Pastilla etiqueta="sla"
+                      valor={Number(sel.horas_restantes) > 0
+                        ? `${Math.round(sel.horas_restantes)} h`
+                        : `vencido ${Math.abs(Math.round(sel.horas_restantes))} h`}
+                      color={Number(sel.horas_restantes) < 12 ? C.ladrillo : C.navy} />
+                  )}
                   {sel.producto && (
-                    <div style={{ maxWidth: 420, overflow: "hidden", textOverflow: "ellipsis",
-                      whiteSpace: "nowrap" }}>{sel.producto}</div>
+                    <span style={{ fontSize: 11, color: "var(--texto-suave)", minWidth: 0,
+                      overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+                      flex: 1 }}>
+                      <span style={{ color: "var(--texto-tenue)" }}>producto · </span>
+                      {sel.producto}
+                    </span>
                   )}
                 </div>
               )}
-
-              <div style={{ marginLeft: "auto", fontSize: 10.5, textAlign: "right",
-                color: abierta ? C.verde : C.ladrillo }}>
-                {abierta
-                  ? `ventana abierta · ${Math.floor(quedan)} h`
-                  : "ventana cerrada"}
-              </div>
             </div>
 
             <div ref={hiloRef} style={{ flex: 1, minHeight: 0, overflowY: "auto", padding: 16,
