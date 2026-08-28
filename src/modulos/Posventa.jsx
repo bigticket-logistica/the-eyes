@@ -25,7 +25,6 @@ const FRESCURA_MS = 12 * 3600 * 1000;
 const WEBHOOK_NOTIFICAR = import.meta.env.VITE_PNR_WEBHOOK || "";
 const WEBHOOK_SECRETO = import.meta.env.VITE_PNR_WEBHOOK_SECRET || "";
 
-
 function detalleFresco(c) {
   if (!c || !c.detalle_capturado_en) return false;
   return Date.now() - new Date(c.detalle_capturado_en).getTime() < FRESCURA_MS;
@@ -920,10 +919,12 @@ function Detalle({ c, onPedir, trayendo, supervisor, tarea, vueltas, movimientos
       conductor: c.transportista || c.conductor_ruta || c.conductor,
       telefono_conductor: c.telefono || c.telefono_ruta,
       supervisor_nombre: supervisor ? supervisor.supervisor_nombre : null,
-      supervisor_telefono: PRUEBA_TEL_SUPERVISOR
-        || (supervisor ? supervisor.supervisor_telefono : null),
-      supervisor_email: PRUEBA_EMAIL_SUPERVISOR
-        || (supervisor ? supervisor.supervisor_email : null),
+      // Sin reemplazos de prueba en el código: los datos de prueba viven en
+      // supervisores_bt, que es una sola fila y se revierte con un update. Dos
+      // constantes acá y un update en la base son dos verdades sobre lo mismo,
+      // y la del código gana en silencio.
+      supervisor_telefono: supervisor ? supervisor.supervisor_telefono : null,
+      supervisor_email: supervisor ? supervisor.supervisor_email : null,
       route_id: c.route_id,
       fecha_ruta: c.fecha_ruta,
       shipment_id: c.shipment_id,
