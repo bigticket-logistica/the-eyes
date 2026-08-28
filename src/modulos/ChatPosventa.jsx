@@ -99,18 +99,20 @@ function FilaConv({ c, activa, onClick }) {
         <span style={{ fontSize: 10, color: "var(--texto-tenue)" }}>{hace(c.ultimo_en)}</span>
       </div>
 
-      {c.case_id && (
-        <div style={{ fontSize: 10.5, color: "var(--texto-suave)", marginTop: 1 }}>
-          caso {c.case_id} · {dinero(c.monto)}
-          {c.rescatable && (
-            <span style={{ color: "#c2410c", fontWeight: 700 }}> · EN RUTA</span>
-          )}
-        </div>
-      )}
-
+      {/* Solo el último mensaje, como cualquier bandeja de chat. Antes había una
+          línea con el caso y el monto debajo del nombre, y se confundía con el
+          mensaje: el contexto del caso ya está en el encabezado del hilo. */}
       <div style={{ fontSize: 11.5, color: "var(--texto-tenue)", marginTop: 2,
         overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-        {c.ultima_direccion === "saliente" ? "→ " : ""}{c.ultimo_texto || "(adjunto)"}
+        {c.ultima_direccion === "saliente" ? "→ " : ""}
+        {c.ultimo_texto
+          ? c.ultimo_texto
+          : c.ultima_direccion
+            // Hay mensaje pero sin texto: es una foto, un audio o un documento.
+            ? "adjunto"
+            // No hay ningún mensaje. Antes decía "(adjunto)" y hacía pensar que
+            // había llegado algo que no se podía ver.
+            : "sin mensajes"}
       </div>
 
       {/* La ventana de 24 h decide si se puede escribir texto libre. Verlo en la
