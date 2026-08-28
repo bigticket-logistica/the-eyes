@@ -1,4 +1,4 @@
-import { Fragment, useState, useEffect, useMemo } from "react";
+import { Fragment, useState, useEffect, useMemo, useCallback } from "react";
 import { sb } from "../shared/supabase.js";
 import ChatPosventa from "./ChatPosventa.jsx";
 
@@ -630,6 +630,162 @@ function Dato({ etiqueta, valor }) {
   );
 }
 
+// ═══════════════════════════════════════════════════════════════════════════
+// TELÉFONOS DEL CONDUCTOR
+//
+// Muestra todos los números conocidos con su procedencia, y deja al analista
+// agregar uno nuevo cuando el supervisor se lo pasa.
+//
+// POR QUÉ EL ANALISTA TIENE QUE PODER ESCRIBIRLO
+//   De 78 casos abiertos, 17 tienen teléfono de MELI y 30 cruzan con el
+//   directorio de la torre. El resto no tiene a quién avisarle. Y los cruces
+//   automáticos no sirven: el nombre que guarda la torre son apodos —"arturo",
+//   "Raúl M"— y un conductor cambia de placa entre rutas, así que los dos daban
+//   números de otra persona con aire de certeza.
+//
+//   La única fuente confiable es preguntarle al supervisor. Cuesta una llamada
+//   la primera vez y después ese conductor ya tiene número: se guarda por
+//   conductor, no por caso, y un conductor puede tener tres PNR abiertos a la
+//   vez.
+// ═══════════════════════════════════════════════════════════════════════════
+
+const FUENTES = {
+  posventa:   { etiqueta: "propio",     color: "#1f7a5c" },
+  directorio: { etiqueta: "directorio", color: "#1a3a6b" },
+  meli:       { etiqueta: "MELI",       color: "#8a94a6" },
+};
+
+function Telefonos({ c, telefonos, elegido, onElegir, onGuardado }) {
+  const [abierto, setAbierto] = useState(false);
+  const [numero, setNumero] = useState("");
+  const [nota, setNota] = useState("");
+  const [guardando, setGuardando] = useState(false);
+  const [error, setError] = useState("");
+
+  const nombre = (c.transportista || c.conductor_ruta || c.conductor || "").trim();
+  const lista = (telefonos || []).slice()
+    .sort((a, b) => (b.confianza || 0) - (a.confianza || 0));
+
+  async function guardar() {
+    const limpio = numero.replace(/\D/g, "");
+    if (limpio.length < 10) { setError("Faltan dígitos. Con código de país."); return; }
+    if (!nombre) { setError("El caso no tiene nombre de conductor."); return; }
+    setGuardando(true);
+    setError("");
+    try {
+      const { error: e } = await sb.rpc("fn_pnr_guardar_telefono", {
+        p_conductor: nombre,
+        p_telefono: numero,
+        p_origen: "supervisor",
+        p_nota: nota.trim() || null,
+        p_quien: "analista",
+      });
+      if (e) throw new Error(e.message);
+      setNumero(""); setNota(""); setAbierto(false);
+      if (onGuardado) await onGuardado();
+    } catch (err) {
+      setError(String(err.message || err));
+    } finally {
+      setGuardando(false);
+    }
+  }
+
+  return (
+    <div style={{ border: "1px solid var(--borde)", borderRadius: 10, padding: "8px 10px",
+      background: "#fff" }}>
+      <div style={{ display: "flex", alignItems: "baseline", gap: 6, marginBottom: 3 }}>
+        <span style={{ fontSize: 10, color: "var(--texto-tenue)", textTransform: "uppercase",
+          letterSpacing: 0.3 }}>🚚 Conductor</span>
+        <button onClick={() => setAbierto((v) => !v)}
+          title="Agregar un número que te pasó el supervisor"
+          style={{ marginLeft: "auto", fontSize: 10.5, padding: "1px 7px", borderRadius: 6,
+            border: "1px solid var(--borde)", background: "#fff",
+            color: "var(--texto-suave)", cursor: "pointer" }}>
+          {abierto ? "Cancelar" : "+ número"}
+        </button>
+      </div>
+
+      <div style={{ fontSize: 12.5, color: "var(--texto)", lineHeight: 1.3 }}>
+        {nombre || "—"}
+      </div>
+
+      {lista.length === 0 ? (
+        <div style={{ fontSize: 12, color: C.ladrillo, marginTop: 2 }}>
+          Sin teléfono. Pídeselo al supervisor y guárdalo acá.
+        </div>
+      ) : (
+        <div style={{ marginTop: 3 }}>
+          {lista.map((t) => {
+            const f = FUENTES[t.fuente] || { etiqueta: t.fuente, color: C.gris };
+            const activo = elegido ? elegido === t.telefono : t === lista[0];
+            return (
+              <div key={`${t.fuente}-${t.telefono}`}
+                onClick={() => onElegir && onElegir(t.telefono)}
+                title={activo ? "Este es el que se va a usar" : "Usar este número"}
+                style={{ display: "flex", alignItems: "baseline", gap: 6,
+                  cursor: onElegir ? "pointer" : "default", padding: "1px 0" }}>
+                {/* El punto marca cuál se va a usar. Con un solo número no hay
+                    nada que elegir, pero igual se ve cuál es. */}
+                <span style={{ width: 6, height: 6, borderRadius: "50%", flexShrink: 0,
+                  background: activo ? C.naranja : "transparent",
+                  border: `1px solid ${activo ? C.naranja : "var(--borde)"}` }} />
+                <span style={{ fontSize: 14, fontWeight: activo ? 700 : 500,
+                  color: activo ? C.navy : "var(--texto-suave)",
+                  fontVariantNumeric: "tabular-nums" }}>
+                  {t.telefono}
+                </span>
+                <span style={{ fontSize: 9.5, fontWeight: 600, color: f.color,
+                  border: `1px solid ${f.color}`, borderRadius: 4, padding: "0 4px" }}>
+                  {f.etiqueta}
+                </span>
+                {/* Confirmado por uso: el conductor escribió desde ese número.
+                    Es la única prueba dura de que funciona. */}
+                {t.confianza === 4 && (
+                  <span title="El conductor escribió desde este número"
+                    style={{ fontSize: 10, color: C.verde }}>✓ contestó</span>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {abierto && (
+        <div style={{ marginTop: 6, paddingTop: 6, borderTop: "1px solid var(--borde)" }}>
+          <input value={numero} onChange={(e) => setNumero(e.target.value)}
+            onKeyDown={(e) => { if (e.key === "Enter") guardar(); }}
+            placeholder="+52 1 55 1234 5678"
+            style={{ width: "100%", fontSize: 12.5, padding: "5px 8px", borderRadius: 7,
+              border: "1px solid var(--borde)", boxSizing: "border-box", marginBottom: 4 }} />
+          <input value={nota} onChange={(e) => setNota(e.target.value)}
+            placeholder="Quién lo pasó (opcional)"
+            style={{ width: "100%", fontSize: 11, padding: "4px 8px", borderRadius: 7,
+              border: "1px solid var(--borde)", boxSizing: "border-box", marginBottom: 5 }} />
+          <button onClick={guardar} disabled={guardando}
+            style={{ width: "100%", fontSize: 11.5, fontWeight: 600, padding: "5px 10px",
+              borderRadius: 7, cursor: "pointer", border: `1px solid ${C.naranja}`,
+              background: C.naranja, color: "#fff" }}>
+            {guardando ? "Guardando…" : "Guardar para este conductor"}
+          </button>
+          <div style={{ fontSize: 9.5, color: "var(--texto-tenue)", marginTop: 4, lineHeight: 1.35 }}>
+            Se guarda a nombre de <strong>{nombre || "—"}</strong>, así que sirve
+            para todos sus reclamos, no solo este.
+          </div>
+          {error && (
+            <div style={{ fontSize: 11, color: C.ladrillo, marginTop: 4 }}>{error}</div>
+          )}
+        </div>
+      )}
+
+      {[c.patente, c.transportadora].filter(Boolean).length > 0 && (
+        <div style={{ fontSize: 11, color: "var(--texto-suave)", lineHeight: 1.35, marginTop: 3 }}>
+          {[c.patente, c.transportadora].filter(Boolean).join(" · ")}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // Ficha de contacto. Nombre arriba, teléfono grande abajo: el teléfono es lo
 // que el analista va a leer en voz alta o a copiar, así que es el dato con más
 // peso visual de la tarjeta, no una línea más de la grilla.
@@ -875,7 +1031,7 @@ function LineaTiempo({ movimientos }) {
   );
 }
 
-function Detalle({ c, onPedir, trayendo, supervisor, tarea, vueltas, movimientos, onTareaCreada, onRepedir, onNotificar }) {
+function Detalle({ c, onPedir, trayendo, supervisor, tarea, vueltas, movimientos, telefonos, telElegido, onElegirTel, onTelGuardado, onTareaCreada, onRepedir, onNotificar }) {
   const [panel, setPanel] = useState(false);
   const [creando, setCreando] = useState(false);
   const [errorTarea, setErrorTarea] = useState("");
@@ -1068,10 +1224,8 @@ function Detalle({ c, onPedir, trayendo, supervisor, tarea, vueltas, movimientos
 
         {/* Derecha: a quién llamar y el botón que lo dispara */}
         <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-          <Contacto icono="🚚" rol="Conductor"
-            nombre={c.transportista || c.conductor_ruta || c.conductor}
-            telefono={c.telefono || c.telefono_ruta}
-            extra={[c.patente, c.transportadora].filter(Boolean).join(" · ")} />
+          <Telefonos c={c} telefonos={telefonos} elegido={telElegido}
+            onElegir={onElegirTel} onGuardado={onTelGuardado} />
 
           <Contacto icono="👤" rol="Reclamante"
             nombre={c.reclamante || c.designado_recibir}
@@ -1259,7 +1413,7 @@ function Detalle({ c, onPedir, trayendo, supervisor, tarea, vueltas, movimientos
   );
 }
 
-function Fila({ c, abierta, onAbrir, onPedir, trayendo, ahora, supervisor, tarea, vueltas, movimientos, sinVer, onTareaCreada, onRepedir, onNotificar }) {
+function Fila({ c, abierta, onAbrir, onPedir, trayendo, ahora, supervisor, tarea, vueltas, movimientos, sinVer, telefonos, telElegido, onElegirTel, onTelGuardado, onTareaCreada, onRepedir, onNotificar }) {
   const g = POR_CLAVE[clasificar(c)];
   const fondo = abierta ? C.grisTenue : "#fff";
   const sub = chipEstado(c.sub_estado);
@@ -1323,6 +1477,8 @@ function Fila({ c, abierta, onAbrir, onPedir, trayendo, ahora, supervisor, tarea
       </div>
       {abierta && <Detalle c={c} onPedir={onPedir} trayendo={trayendo} supervisor={supervisor}
         tarea={tarea} vueltas={vueltas} movimientos={movimientos}
+        telefonos={telefonos} telElegido={telElegido} onElegirTel={onElegirTel}
+        onTelGuardado={onTelGuardado}
         onTareaCreada={onTareaCreada} onRepedir={onRepedir} onNotificar={onNotificar} />}
     </Fragment>
   );
@@ -1347,6 +1503,11 @@ export default function Posventa() {
   const [historial, setHistorial] = useState({});
   const [diaMov, setDiaMov] = useState(() => hoyMX());
   const [vistos, setVistos] = useState(() => new Set());
+  const [telefonos, setTelefonos] = useState({});
+  // El número que el analista eligió para cada caso. Se guarda en el navegador
+  // y no en la base porque es una preferencia de la sesión de trabajo: si otro
+  // analista abre el mismo caso, la elección la hace él.
+  const [telElegidos, setTelElegidos] = useState({});
   // Mensajes de conductores sin leer, para el globo de la pestaña Chat
   // Posventa. Va acá y no dentro del módulo del chat porque la pestaña se
   // dibuja antes de que el chat monte: si el contador viviera allá, el número
@@ -1371,6 +1532,8 @@ export default function Posventa() {
         .limit(5000),
       sb.from("pnr_tareas_vueltas").select("*").order("vuelta").limit(5000),
     ]);
+
+    await cargarTelefonos();
 
     const vis = await sb.from("pnr_vistos_mx").select("case_id").limit(10000);
     if (!vis.error && vis.data) setVistos(new Set(vis.data.map((x) => x.case_id)));
@@ -1704,6 +1867,26 @@ export default function Posventa() {
     if (!error && data) setTareas((prev) => ({ ...prev, [data.case_id]: data }));
   }
 
+  // Los números conocidos de cada caso: MELI, el directorio de la torre y el
+  // propio de Posventa. Se recarga al guardar uno nuevo para que aparezca sin
+  // volver a cargar la pantalla.
+  const cargarTelefonos = useCallback(async () => {
+    const { data, error: e } = await sb.from("vw_pnr_telefonos").select("*").limit(5000);
+    if (e || !data) return;
+    const m = {};
+    for (const t of data) {
+      if (!m[t.case_id]) m[t.case_id] = [];
+      m[t.case_id].push(t);
+    }
+    setTelefonos(m);
+  }, []);
+
+  // El elegido manda sobre el de más confianza: si el analista decidió usar
+  // otro, el aviso no debería contradecirlo.
+  function elegirTelefono(caseId, tel) {
+    setTelElegidos((prev) => ({ ...prev, [caseId]: tel }));
+  }
+
   function agregarTarea(t) {
     if (t) setTareas((prev) => ({ ...prev, [t.case_id]: t }));
   }
@@ -1926,6 +2109,9 @@ export default function Posventa() {
                   tarea={tareas[c.case_id]} vueltas={vueltas[c.case_id]}
                   onTareaCreada={agregarTarea} onRepedir={repedirPruebas}
                   movimientos={historial[c.case_id]} sinVer={!vistos.has(c.case_id)}
+                  telefonos={telefonos[c.case_id]} telElegido={telElegidos[c.case_id]}
+                  onElegirTel={(t) => elegirTelefono(c.case_id, t)}
+                  onTelGuardado={cargarTelefonos}
                   onNotificar={notificar} />
               ))
             )}
