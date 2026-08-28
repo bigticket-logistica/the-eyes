@@ -882,16 +882,33 @@ function Detalle({ c, onPedir, trayendo, supervisor, tarea, vueltas, movimientos
     // La tarea ya quedó. Los avisos van después y su resultado se muestra
     // aparte: si n8n falla, el supervisor igual tiene la tarea en su bitácora
     // y el analista sabe que le tiene que avisar por otro lado.
-    const r = onNotificar ? await onNotificar(cuerpoAviso()) : { ok: false, error: "sin envío" };
+    const r = onNotificar
+      ? await onNotificar(c.case_id, "inicial", cuerpoAviso())
+      : { ok: false, error: "sin envío" };
     setEnvio(r);
     setCreando(false);
   }
 
-  // Reintento de los avisos cuando la tarea ya existe.
+  // Repetir el aviso inicial cuando la tarea ya existe.
   async function soloNotificar() {
     setCreando(true);
     setEnvio(null);
-    const r = onNotificar ? await onNotificar(cuerpoAviso()) : { ok: false, error: "sin envío" };
+    const r = onNotificar
+      ? await onNotificar(c.case_id, "inicial", cuerpoAviso())
+      : { ok: false, error: "sin envío" };
+    setEnvio(r);
+    setCreando(false);
+  }
+
+  // Recordatorio a demanda, solo WhatsApp. El automático sale a las 15:00; este
+  // es para cuando el analista ve que a un caso le quedan pocas horas y no
+  // quiere esperar al horario.
+  async function recordar() {
+    setCreando(true);
+    setEnvio(null);
+    const r = onNotificar
+      ? await onNotificar(c.case_id, "recordatorio")
+      : { ok: false, error: "sin envío" };
     setEnvio(r);
     setCreando(false);
   }
@@ -1068,12 +1085,25 @@ function Detalle({ c, onPedir, trayendo, supervisor, tarea, vueltas, movimientos
                     {tarea.supervisor_nombre || tarea.sc} la tiene en su bitácora desde
                     {" "}{fechaHito(tarea.creada_en)}. Estado: {tarea.estado}.
                   </div>
-                  <button onClick={soloNotificar} disabled={creando}
-                    style={{ width: "100%", marginTop: 8, fontSize: 11.5, padding: "6px 10px",
-                      borderRadius: 8, cursor: "pointer", border: "1px solid var(--borde)",
-                      background: "#fff", color: "var(--texto-suave)" }}>
-                    {creando ? "Enviando…" : "Volver a enviar los avisos"}
-                  </button>
+                  <div style={{ display: "flex", gap: 6, marginTop: 8 }}>
+                    <button onClick={soloNotificar} disabled={creando}
+                      title="Vuelve a mandar el aviso inicial y el correo"
+                      style={{ flex: 1, fontSize: 11.5, padding: "6px 10px", borderRadius: 8,
+                        cursor: "pointer", border: "1px solid var(--borde)",
+                        background: "#fff", color: "var(--texto-suave)" }}>
+                      {creando ? "…" : "Repetir el inicial"}
+                    </button>
+                    {/* Recordatorio a demanda, solo WhatsApp. El automático sale
+                        a las 15:00; el botón lleva las horas que le quedan al
+                        caso para que el analista decida si vale adelantarlo. */}
+                    <button onClick={recordar} disabled={creando}
+                      title="Manda solo el WhatsApp de recordatorio, sin correo"
+                      style={{ flex: 1, fontSize: 11.5, padding: "6px 10px", borderRadius: 8,
+                        cursor: "pointer", border: `1px solid ${C.naranja}`,
+                        background: C.naranjaTenue, color: C.naranja, fontWeight: 600 }}>
+                      {creando ? "…" : `Recordar · ${c.horas_restantes != null ? Math.round(c.horas_restantes) + " h" : "—"}`}
+                    </button>
+                  </div>
                   {(tarea.fotos || []).length > 0 && (
                     <div style={{ fontSize: 11.5, color: C.verde, marginTop: 4 }}>
                       {tarea.fotos.length} {tarea.fotos.length === 1 ? "foto" : "fotos"} cargadas
@@ -1103,8 +1133,9 @@ function Detalle({ c, onPedir, trayendo, supervisor, tarea, vueltas, movimientos
                       para que el analista sepa qué pasa y qué no: prometer un
                       correo que no sale es peor que no mencionarlo. */}
                   <div style={{ fontSize: 10.5, color: "var(--texto-tenue)", marginTop: 6, lineHeight: 1.4 }}>
-                    Se crea la tarea en la bitácora y salen tres avisos: WhatsApp al conductor,
-                    WhatsApp al supervisor y correo al supervisor.
+                    Se crea la tarea en la bitácora y salen tres avisos: WhatsApp al chofer,
+                    WhatsApp al supervisor y correo al supervisor. Los recordatorios
+                    posteriores son solo WhatsApp.
                   </div>
                   <button onClick={crearTarea} disabled={!supervisor || creando}
                     style={{ width: "100%", marginTop: 8, fontSize: 12.5, fontWeight: 600,
@@ -1129,13 +1160,29 @@ function Detalle({ c, onPedir, trayendo, supervisor, tarea, vueltas, movimientos
                   color: envio.ok ? C.verde : C.ladrillo }}>
                   {envio.ok ? (
                     <Fragment>
-                      <div style={{ fontWeight: 600 }}>Avisos enviados</div>
-                      <div style={{ color: "var(--texto-suave)" }}>
-                        Conductor {envio.conductor || "—"}<br />
-                        Supervisor {envio.supervisor || "—"}<br />
-                        Correo {envio.correo || "—"}
-                        {envio.modo_prueba ? " · modo prueba" : ""}
+                      <div style={{ fontWeight: 600 }}>
+                        {envio.tipo === "recordatorio" ? "Recordatorio encolado" : "Avisos encolados"}
+                        {envio.horas_restantes != null ? ` · quedan ${envio.horas_restantes} h` : ""}
                       </div>
+                      {/* Un renglón por destino, con el número que se usó de
+                          verdad. Es la primera pregunta cuando el conductor no
+                          responde, y sin esto habría que ir a mirar la tabla de
+                          mensajes para contestarla. */}
+                      <div style={{ color: envio.conductor?.ok ? "var(--texto-suave)" : C.ladrillo }}>
+                        Chofer: {envio.conductor?.ok
+                          ? envio.conductor.telefono
+                          : `no salió — ${envio.conductor?.error || "sin teléfono"}`}
+                      </div>
+                      <div style={{ color: envio.supervisor?.ok ? "var(--texto-suave)" : C.ladrillo }}>
+                        Supervisor: {envio.supervisor?.ok
+                          ? `${envio.supervisor.nombre || ""} ${envio.supervisor.telefono || ""}`.trim()
+                          : `no salió — ${envio.supervisor?.error || "sin teléfono"}`}
+                      </div>
+                      {envio.correo !== undefined && (
+                        <div style={{ color: envio.correo ? "var(--texto-suave)" : C.ladrillo }}>
+                          Correo: {envio.correo ? "enviado" : `no salió — ${envio.correo_error || "sin detalle"}`}
+                        </div>
+                      )}
                       {envio.marcado === false && (
                         <div style={{ color: C.ladrillo, marginTop: 3 }}>
                           No se pudo marcar el hito Aviso 1: {envio.error_marca}
@@ -1267,6 +1314,11 @@ export default function Posventa() {
   const [historial, setHistorial] = useState({});
   const [diaMov, setDiaMov] = useState(() => hoyMX());
   const [vistos, setVistos] = useState(() => new Set());
+  // Mensajes de conductores sin leer, para el globo de la pestaña Chat
+  // Posventa. Va acá y no dentro del módulo del chat porque la pestaña se
+  // dibuja antes de que el chat monte: si el contador viviera allá, el número
+  // aparecería recién al entrar, justo cuando ya no sirve para avisar.
+  const [msjSinLeer, setMsjSinLeer] = useState(0);
 
   async function cargar() {
     setError(null);
@@ -1403,6 +1455,21 @@ export default function Posventa() {
   }, []);
 
   useEffect(() => {
+    let vivo = true;
+    const contarMsj = async () => {
+      const { data } = await sb.from("pnr_conversaciones_mx")
+        .select("no_leidos").gt("no_leidos", 0);
+      if (vivo) setMsjSinLeer((data || []).reduce((s, c) => s + (c.no_leidos || 0), 0));
+    };
+    contarMsj();
+    const t = setInterval(() => { if (!document.hidden) contarMsj(); }, 30000);
+    const canal = sb.channel("pnr-chat-badge")
+      .on("postgres_changes", { event: "*", schema: "public", table: "pnr_conversaciones_mx" }, contarMsj)
+      .subscribe();
+    return () => { vivo = false; clearInterval(t); sb.removeChannel(canal); };
+  }, []);
+
+  useEffect(() => {
     cargar();
     // pnr-mx.cjs corre cada 5 min; refrescar cada 3 alcanza para no mirar
     // datos viejos sin castigar la base.
@@ -1534,53 +1601,58 @@ export default function Posventa() {
   // Varias filas pueden quedar abiertas: el analista compara casos del mismo
   // conductor o de la misma ruta, y cerrarle la anterior cada vez lo obliga a
   // memorizar lo que acaba de leer.
-  // Dispara los avisos. Es un paso aparte de crear la tarea a propósito: la
-  // tarea es lo que queda registrado y el aviso es lo que puede fallar. Si se
-  // hicieran juntos y n8n estuviera caído, el analista no sabría si la tarea
-  // quedó creada o no, y volvería a apretar.
-  async function notificar(datos) {
-    if (!WEBHOOK_NOTIFICAR) {
-      setAviso("Falta VITE_PNR_WEBHOOK");
-      setTimeout(() => setAviso(""), 3000);
-      return { ok: false, error: "sin webhook configurado" };
-    }
-    try {
-      const r = await fetch(WEBHOOK_NOTIFICAR, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          // El secreto viaja en el JavaScript del navegador igual que la URL, así
-          // que no es una defensa fuerte: sirve para que conocer la dirección no
-          // alcance, y para poder rotarlo sin tocar el flujo de n8n.
-          ...(WEBHOOK_SECRETO ? { "x-pnr-secret": WEBHOOK_SECRETO } : {}),
-        },
-        body: JSON.stringify(datos),
-      });
-      const j = await r.json().catch(() => ({}));
-      if (r.status === 401 || r.status === 403) {
-        throw new Error("n8n rechazó la llamada: revisa VITE_PNR_WEBHOOK_SECRET");
-      }
-      if (!r.ok || j.ok === false) throw new Error(j.error || `n8n respondió ${r.status}`);
-      // El hito se marca acá y no en n8n: así solo se enciende si el envío
-      // salió bien. El permiso está acotado por columna, así que desde el
-      // navegador solo se pueden escribir las tres fechas de aviso.
-      const ahoraIso = new Date().toISOString();
-      const { error: errMarca } = await sb.from("pnr_casos_mx")
-        .update({ avisado_inicial_en: ahoraIso })
-        .eq("case_id", datos.case_id)
-        .is("avisado_inicial_en", null);
-      if (!errMarca) {
-        setCasos((prev) => prev.map((x) => x.case_id === datos.case_id
-          ? { ...x, avisado_inicial_en: x.avisado_inicial_en || ahoraIso } : x));
-      }
+  // Dispara los avisos.
+  //
+  //   WhatsApp al chofer y al supervisor  -> cola del canal de Posventa
+  //   Correo al supervisor                -> flujo de n8n, solo en el inicial
+  //
+  // Los WhatsApp van por la cola y no por n8n para que el mensaje quede en el
+  // hilo del chat: así el analista ve qué se le dijo al conductor y puede
+  // seguir la conversación desde ahí. Con un envío por fuera sería invisible.
+  //
+  // Y los parámetros de la plantilla los arma fn_pnr_avisar en la base, no el
+  // navegador: el recordatorio de las 15:00 y el aviso de cambio de estado
+  // llaman a la misma función, y si cada uno los armara por su lado
+  // terminarían mandando textos distintos.
+  async function notificar(caseId, tipo, datosCorreo) {
+    const t = tipo || "inicial";
+    let wa = { ok: false, error: "sin envío" };
 
-      // n8n devuelve los destinos que usó de verdad. Mostrarlos es lo único que
-      // le dice al analista a qué número salió, que es la primera pregunta
-      // cuando el conductor no responde.
-      return { ok: true, ...j, marcado: !errMarca, error_marca: errMarca ? errMarca.message : null };
+    try {
+      const { data, error } = await sb.rpc("fn_pnr_avisar", {
+        p_case_id: caseId, p_tipo: t, p_quien: "analista",
+      });
+      if (error) throw new Error(error.message);
+      const r = data || {};
+      // Los dos destinos se encolan en bloques separados en la base, así que
+      // uno puede salir y el otro no. Se devuelve el detalle de cada uno.
+      wa = { ok: !!(r.conductor?.ok || r.supervisor?.ok), ...r };
     } catch (e) {
-      return { ok: false, error: String(e.message || e) };
+      wa = { ok: false, error: String(e.message || e) };
     }
+
+    // El correo va solo con el aviso inicial: los recordatorios y los cambios
+    // de estado son WhatsApp nada más. Y va aparte de los WhatsApp: si n8n
+    // está caído, el conductor igual se enteró.
+    if (t === "inicial" && WEBHOOK_NOTIFICAR && datosCorreo) {
+      try {
+        const r = await fetch(WEBHOOK_NOTIFICAR, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            ...(WEBHOOK_SECRETO ? { "x-pnr-secret": WEBHOOK_SECRETO } : {}),
+          },
+          body: JSON.stringify({ ...datosCorreo, solo_correo: true }),
+        });
+        wa.correo = r.ok;
+        if (!r.ok) wa.correo_error = `n8n respondió ${r.status}`;
+      } catch (e) {
+        wa.correo = false;
+        wa.correo_error = String(e.message || e);
+      }
+    }
+
+    return wa;
   }
 
   // Reabrir no borra las fotos rechazadas: son el registro de qué se mandó y
@@ -1642,6 +1714,13 @@ export default function Posventa() {
                 color: vista === v.clave ? "#fff" : v.activa ? "var(--texto)" : "var(--texto-tenue)",
               }}>
               {v.etiqueta}
+              {v.clave === "chat" && msjSinLeer > 0 && (
+                <span style={{ marginLeft: 6, fontSize: 10, fontWeight: 700,
+                  background: C.naranja, color: "#fff", borderRadius: 10,
+                  padding: "1px 7px", verticalAlign: "middle" }}>
+                  {msjSinLeer}
+                </span>
+              )}
             </button>
           ))}
         </div>
