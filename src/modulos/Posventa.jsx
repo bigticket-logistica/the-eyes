@@ -25,12 +25,6 @@ const FRESCURA_MS = 12 * 3600 * 1000;
 const WEBHOOK_NOTIFICAR = import.meta.env.VITE_PNR_WEBHOOK || "";
 const WEBHOOK_SECRETO = import.meta.env.VITE_PNR_WEBHOOK_SECRET || "";
 
-// Reemplazos para probar sin tocar supervisores_bt, que es la tabla con la que
-// los supervisores entran a su propia bitácora: cambiarle el correo a Juan
-// Mancilla lo dejaría sin acceso. Con las dos cadenas vacías, el envío usa los
-// datos reales y no hay nada que revertir.
-const PRUEBA_TEL_SUPERVISOR   = "+56957730804";
-const PRUEBA_EMAIL_SUPERVISOR = "camilo.naranjo@fullmotos.cl";
 
 function detalleFresco(c) {
   if (!c || !c.detalle_capturado_en) return false;
