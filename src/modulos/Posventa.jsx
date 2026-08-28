@@ -219,7 +219,11 @@ const HITOS = [
 
 // Una sola plantilla de columnas para la cabecera y para las filas: así no
 // hay forma de que se desalineen cuando cambie un ancho.
-const GRID = "14px 84px 112px minmax(118px,1fr) 122px 126px 286px 78px";
+// El ancho de la columna del riel sale de la cantidad de hitos, no de un número
+// escrito a mano: cuando el riel pasó de cinco puntos a cuatro, los 286 px
+// dejaron los títulos descuadrados respecto de los círculos.
+const ANCHO_HITO = 58;
+const GRID = `14px 84px 112px minmax(118px,1fr) 122px 126px ${HITOS.length * ANCHO_HITO}px 78px`;
 
 function dinero(n) {
   if (n === null || n === undefined) return "—";
@@ -350,7 +354,7 @@ function Tarjeta({ grupo, monto, casos, activa, onClick }) {
 // cerrado se lee como un caso cerrado.
 function Riel({ c, color, terminal, fondo }) {
   return (
-    <span style={{ position: "relative", display: "grid", gridTemplateColumns: "repeat(5, 1fr)", gap: 2 }}>
+    <span style={{ position: "relative", display: "grid", gridTemplateColumns: `repeat(${HITOS.length}, 1fr)`, gap: 2 }}>
       <span aria-hidden="true" style={{
         position: "absolute", left: "10%", right: "10%", top: 5, height: 0,
         borderTop: terminal ? `2px solid ${color}` : `2px dashed ${color}`,
@@ -1897,7 +1901,7 @@ export default function Posventa() {
               <span>Conductor</span>
               <span>Ruta · centro</span>
               <span style={{ textAlign: "center" }}>Estado</span>
-              <span style={{ display: "grid", gridTemplateColumns: "repeat(5, 1fr)", gap: 2 }}>
+              <span style={{ display: "grid", gridTemplateColumns: `repeat(${HITOS.length}, 1fr)`, gap: 2 }}>
                 {HITOS.map((h) => (
                   <span key={h.clave} title={h.titulo} style={{ textAlign: "center" }}>{h.etiqueta}</span>
                 ))}
