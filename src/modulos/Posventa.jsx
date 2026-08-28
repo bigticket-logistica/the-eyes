@@ -1413,7 +1413,7 @@ function Detalle({ c, onPedir, trayendo, supervisor, tarea, vueltas, movimientos
   );
 }
 
-function Fila({ c, abierta, onAbrir, onPedir, trayendo, ahora, supervisor, tarea, vueltas, movimientos, sinVer, telefonos, telElegido, onElegirTel, onTelGuardado, onTareaCreada, onRepedir, onNotificar }) {
+function Fila({ c, abierta, onAbrir, onPedir, trayendo, ahora, supervisor, tarea, vueltas, movimientos, sinVer, fueraDePeriodo, telefonos, telElegido, onElegirTel, onTelGuardado, onTareaCreada, onRepedir, onNotificar }) {
   const g = POR_CLAVE[clasificar(c)];
   const fondo = abierta ? C.grisTenue : "#fff";
   const sub = chipEstado(c.sub_estado);
@@ -1437,6 +1437,15 @@ function Fila({ c, abierta, onAbrir, onPedir, trayendo, ahora, supervisor, tarea
                 background: C.naranja, marginRight: 5, verticalAlign: "middle" }} />
           )}
           {c.case_id}
+          {/* De otro periodo, pero sigue esperando comprobante. Aparece igual
+              porque todavía se puede pelear; la etiqueta explica por qué está
+              acá cuando el selector dice otra quincena. */}
+          {fueraDePeriodo && (
+            <span title={`Es del periodo ${c.periodo} y sigue esperando comprobante`}
+              style={{ display: "block", fontSize: 8.5, color: C.naranja, whiteSpace: "nowrap" }}>
+              {c.periodo}
+            </span>
+          )}
         </span>
         <Reloj c={c} ahora={ahora} />
         <span style={{ minWidth: 0, fontSize: 13, color: "var(--texto)", overflow: "hidden",
@@ -1683,10 +1692,30 @@ export default function Posventa() {
     if (!periodo && periodos.length) setPeriodo(periodos[0]);
   }, [periodos, periodo]);
 
+  // El periodo puro. Alimenta la tabla de estados, que existe para cuadrar el
+  // total contra el panel de MELI: si le metiéramos casos de otra quincena, el
+  // número dejaría de coincidir y la tabla perdería su razón de ser.
   const delPeriodo = useMemo(
     () => casos.filter((c) => !periodo || c.periodo === periodo),
     [casos, periodo]
   );
+
+  // La lista, en cambio, SIEMPRE incluye los que esperan comprobante, aunque
+  // sean de otro periodo.
+  //
+  // Un caso que nace el 30 de agosto tiene plazo hasta el 1 de septiembre. Con
+  // el filtro puro, el 1 de septiembre el selector salta a la quincena nueva y
+  // ese caso desaparece de la pantalla con horas de plazo por delante. El
+  // analista no trabaja sobre una quincena contable: trabaja sobre lo que
+  // todavía se puede pelear.
+  const paraLista = useMemo(() => {
+    if (!periodo) return casos;
+    const dentro = new Set(delPeriodo.map((c) => c.case_id));
+    const rezagados = casos.filter(
+      (c) => !dentro.has(c.case_id) && !c.cerrado && c.sub_estado === "WAITING_RECEIPT"
+    );
+    return [...delPeriodo, ...rezagados];
+  }, [casos, delPeriodo, periodo]);
 
   const totales = useMemo(() => {
     const t = {};
@@ -1717,7 +1746,7 @@ export default function Posventa() {
       ? casos.filter((c) =>
           [c.case_id, c.shipment_id, c.route_code, c.route_id, c.conductor, c.service_center, c.patente]
             .some((v) => String(v || "").toLowerCase().includes(q)))
-      : delPeriodo.filter((c) => {
+      : paraLista.filter((c) => {
           if (filtro.tipo === "todos") return true;
           if (filtro.tipo === "movidos_estado") {
             return (historial[c.case_id] || []).some(
@@ -1756,7 +1785,7 @@ export default function Posventa() {
       const d = valor(a) - valor(b);
       return orden.dir === "asc" ? d : -d;
     });
-  }, [casos, delPeriodo, filtro, busqueda, buscando, orden, historial, diaMov]);
+  }, [casos, delPeriodo, paraLista, filtro, busqueda, buscando, orden, historial, diaMov]);
 
   function ordenar(campo) {
     setOrden((o) => o.campo === campo
@@ -2114,6 +2143,7 @@ export default function Posventa() {
                   tarea={tareas[c.case_id]} vueltas={vueltas[c.case_id]}
                   onTareaCreada={agregarTarea} onRepedir={repedirPruebas}
                   movimientos={historial[c.case_id]} sinVer={!vistos.has(c.case_id)}
+                  fueraDePeriodo={!!periodo && c.periodo !== periodo}
                   telefonos={telefonos[c.case_id]} telElegido={telElegidos[c.case_id]}
                   onElegirTel={(t) => elegirTelefono(c.case_id, t)}
                   onTelGuardado={cargarTelefonos}
