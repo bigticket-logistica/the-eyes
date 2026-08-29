@@ -1151,6 +1151,19 @@ function Detalle({ c, onPedir, trayendo, supervisor, tarea, vueltas, movimientos
 
   return (
     <div style={{ padding: "12px 16px 14px 44px", background: C.grisTenue, borderTop: "1px solid var(--borde)" }}>
+      {/* Respondido a MELI sin comprobante. Es el estado donde más plata se
+          pierde y el que menos se nota: el caso sigue abierto, el reloj corre,
+          y ya se le dijo a Mercado Libre que no hay evidencia. Va arriba del
+          detalle para que el analista no lo trate como uno más. */}
+      {c.sub_estado === "WITHOUT_RECEIPT" && (
+        <div style={{ fontSize: 12.5, color: "#fff", background: C.ladrillo,
+          borderRadius: 10, padding: "8px 12px", marginBottom: 8, lineHeight: 1.4 }}>
+          <strong>Se respondió a Mercado Libre sin comprobante.</strong>{" "}
+          El caso queda sin respaldo y va camino al cobro. Si el supervisor
+          consigue la evidencia, todavía se puede pelear.
+        </div>
+      )}
+
       {c.rescatable && (
         <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8,
           background: "#fff1e6", border: "1px solid #c2410c", borderRadius: 10, padding: "7px 11px" }}>
