@@ -67,157 +67,76 @@ function hace(iso) {
 }
 
 // ── Turno del asistente ────────────────────────────────────────────────────
-// Igual que el turno de Biggy: por tiempo y no un interruptor suelto. Quien lo
-// prende antes de salir es quien tendría que acordarse de apagarlo, y si se
-// olvida el olvido falla del lado seguro — como máximo queda el rato pedido.
+// Un solo interruptor, por tiempo y no permanente. Quien lo prende antes de
+// salir es quien tendría que acordarse de apagarlo; con vencimiento, el olvido
+// falla del lado seguro: como máximo queda prendido el rato que se pidió.
 //
-// POR ROL Y NO GLOBAL
-//   Un supervisor que pregunta un plazo recibe un dato. Un conductor recibe un
-//   criterio del que depende que le cobren el producto. Un solo interruptor
-//   obligaría a tratarlos igual, y la respuesta correcta es soltarlo donde el
-//   riesgo es bajo y mirarlo en sombra donde no.
+// POR QUÉ NO HAY UN INTERRUPTOR POR TIPO DE PERSONA
+//   Lo hubo, y estaba mal planteado: al momento de prender el turno nadie sabe
+//   quién va a escribir después, así que era pedirle al analista que adivine.
+//   El asistente igual sabe con quién habla —lee el rol de la conversación— y
+//   ajusta cómo responde. Eso es contexto suyo, no una decisión de acá.
 //
-// LO QUE SIGNIFICA CADA NIVEL
+// LO QUE SÍ DECIDE ESTE BOTÓN
+//   Si lo que escribe se envía o se queda de borrador. Eso no puede depender de
+//   la pregunta: quien juzga si una respuesta era buena no puede ser el mismo
+//   que la escribió. Si el asistente decidiera solo cuándo enviarse, el modo
+//   sombra dejaría de existir.
+//
 //   sombra — escribe el borrador y NO lo envía. Nadie tiene que hacer nada con
-//            él; es la ventana a lo que haría, y la única forma de calibrarlo
-//            antes de confiarle una conversación con plata en juego.
-//   auto   — responde de verdad. Si un analista escribe en el hilo, el
-//            asistente no vuelve a hablar sobre ese mensaje.
+//            él; es la ventana a lo que haría.
+//   auto   — responde de verdad, a quien sea que escriba. Si un analista
+//            contesta en el hilo, el asistente no habla encima.
 const MINUTOS_TURNO = [30, 60, 120, 240];
-
-const ROL_TEXTO = {
-  conductor: "Conductores",
-  supervisor: "Supervisores",
-  tercero: "Terceros",
-  otro: "Sin identificar",
-};
-
-function FilaTurno({ e, onActivar, onApagar, ocupado, puede }) {
-  const [abierto, setAbierto] = useState(false);
-  const vigente = !!e.vigente;
-  const restan = e.minutos_restantes;
-
-  return (
-    <div style={{ borderTop: "1px solid var(--borde)" }}>
-      <button onClick={() => setAbierto((v) => !v)}
-        style={{ display: "flex", alignItems: "center", gap: 6, width: "100%",
-          textAlign: "left", background: "transparent", border: "none",
-          padding: "6px 10px", cursor: "pointer" }}>
-        <span style={{ width: 7, height: 7, borderRadius: 4, flexShrink: 0,
-          background: vigente ? (e.nivel === "auto" ? C.verde : C.ia) : "#d6dce6" }} />
-        <span style={{ fontSize: 11.5, fontWeight: 600,
-          color: vigente ? "var(--texto)" : "var(--texto-tenue)" }}>
-          {ROL_TEXTO[e.rol] || e.rol}
-        </span>
-        {vigente && (
-          <span style={{ fontSize: 9.5, fontWeight: 700, color: "#fff",
-            background: e.nivel === "auto" ? C.verde : C.ia, borderRadius: 9,
-            padding: "1px 6px" }}>
-            {e.nivel}
-          </span>
-        )}
-        {vigente && restan != null && (
-          <span style={{ fontSize: 9.5, color: restan <= 5 ? C.ladrillo : "var(--texto-suave)",
-            fontWeight: restan <= 5 ? 700 : 500 }}>
-            {restan} min
-          </span>
-        )}
-        {/* Activo pero fuera de la ventana horaria: el estado real es que no
-            está respondiendo, y decirlo evita que alguien lo dé por prendido. */}
-        {e.activo && !vigente && (
-          <span style={{ fontSize: 9.5, color: C.ladrillo }}>fuera de horario</span>
-        )}
-        <span style={{ marginLeft: "auto", fontSize: 9.5, color: "var(--texto-tenue)" }}>
-          {abierto ? "▲" : "▼"}
-        </span>
-      </button>
-
-      {abierto && (
-        <div style={{ padding: "0 10px 8px 24px" }}>
-          <div style={{ fontSize: 9.5, color: "var(--texto-tenue)", lineHeight: 1.4,
-            marginBottom: 5 }}>
-            Responde entre las {e.ventana_desde}:00 y las {e.ventana_hasta}:00 CDMX,
-            {" "}después de {e.espera_seg} s de espera.
-            {vigente && e.activado_por ? ` Lo activó ${e.activado_por}.` : ""}
-          </div>
-
-          {!puede ? (
-            <div style={{ fontSize: 9.5, color: "var(--texto-tenue)", fontStyle: "italic" }}>
-              Tu usuario es de solo lectura.
-            </div>
-          ) : e.activo ? (
-            <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
-              <button onClick={() => onApagar(e.rol)} disabled={ocupado}
-                style={{ fontSize: 10, padding: "3px 9px" }}>
-                ⏹ Apagar
-              </button>
-              {MINUTOS_TURNO.map((m) => (
-                <button key={m} onClick={() => onActivar(e.rol, m, e.nivel)} disabled={ocupado}
-                  title={`Extender a ${m} minutos desde ahora, en ${e.nivel}`}
-                  style={{ fontSize: 10, padding: "3px 7px" }}>
-                  +{m}
-                </button>
-              ))}
-            </div>
-          ) : (
-            <>
-              <div style={{ fontSize: 9.5, color: "var(--texto-tenue)", marginBottom: 3 }}>
-                Escribe el borrador y no lo envía:
-              </div>
-              <div style={{ display: "flex", gap: 4, flexWrap: "wrap", marginBottom: 6 }}>
-                {MINUTOS_TURNO.map((m) => (
-                  <button key={m} onClick={() => onActivar(e.rol, m, "sombra")} disabled={ocupado}
-                    style={{ fontSize: 10, padding: "3px 8px" }}>
-                    {m} min en sombra
-                  </button>
-                ))}
-              </div>
-              <div style={{ fontSize: 9.5, color: C.ladrillo, marginBottom: 3 }}>
-                Responde de verdad:
-              </div>
-              <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
-                {[30, 60].map((m) => (
-                  <button key={m} className="btn-navy"
-                    onClick={() => onActivar(e.rol, m, "auto")} disabled={ocupado}
-                    style={{ fontSize: 10, padding: "3px 9px" }}>
-                    {m} min en auto
-                  </button>
-                ))}
-              </div>
-            </>
-          )}
-        </div>
-      )}
-    </div>
-  );
-}
 
 function PanelAsistente({ estado, onActivar, onApagar, ocupado, puede, onRefrescar }) {
   const [abierto, setAbierto] = useState(false);
-  const vigentes = estado.filter((e) => e.vigente);
-  const hayAuto = vigentes.some((e) => e.nivel === "auto");
+  const e = estado || {};
+  const vigente = !!e.vigente;
+  const auto = vigente && e.nivel === "auto";
+  const restan = e.minutos_restantes;
 
   return (
     <div style={{ marginBottom: 8, borderRadius: 10, overflow: "hidden",
-      border: `1px solid ${vigentes.length ? C.iaBorde : "var(--borde)"}`,
-      background: vigentes.length ? C.iaFondo : "#fff" }}>
+      border: `1px solid ${vigente ? (auto ? C.verde : C.iaBorde) : "var(--borde)"}`,
+      background: vigente ? (auto ? "#eef7f3" : C.iaFondo) : "#fff" }}>
+
       <button onClick={() => setAbierto((v) => !v)}
         style={{ display: "flex", alignItems: "center", gap: 7, width: "100%",
           textAlign: "left", background: "transparent", border: "none",
           padding: "8px 10px", cursor: "pointer" }}>
         <span style={{ fontSize: 13 }}>🤖</span>
         <span style={{ fontSize: 12, fontWeight: 600,
-          color: vigentes.length ? C.ia : "var(--texto-suave)" }}>
-          {vigentes.length === 0
-            ? "Asistente apagado"
-            : `Asistente en ${vigentes.map((e) => ROL_TEXTO[e.rol]?.toLowerCase() || e.rol).join(", ")}`}
+          color: vigente ? (auto ? C.verde : C.ia) : "var(--texto-suave)" }}>
+          {!e.activo ? "Asistente apagado"
+            : auto ? "Asistente respondiendo"
+            : "Asistente en sombra"}
         </span>
-        {hayAuto && (
-          <span style={{ fontSize: 9.5, fontWeight: 700, color: "#fff",
-            background: C.verde, borderRadius: 9, padding: "1px 6px" }}>
-            enviando
+
+        {vigente && restan != null && (
+          <span style={{ fontSize: 10, fontWeight: restan <= 5 ? 700 : 500,
+            color: restan <= 5 ? C.ladrillo : "var(--texto-suave)" }}>
+            {restan} min
           </span>
         )}
+
+        {/* Prendido pero fuera de la ventana horaria: el estado real es que no
+            está respondiendo, y decirlo evita darlo por activo. */}
+        {e.activo && !e.en_horario && (
+          <span style={{ fontSize: 9.5, color: C.ladrillo }}>fuera de horario</span>
+        )}
+
+        {/* Borradores que nadie calificó. Es lo que hace que la sombra sirva:
+            sin alguien que diga si servían, no hay con qué decidir si se
+            suelta en auto. */}
+        {e.sin_revisar > 0 && (
+          <span title="Borradores sin revisar"
+            style={{ fontSize: 9.5, fontWeight: 700, color: "#fff", background: C.ia,
+              borderRadius: 9, padding: "1px 6px" }}>
+            {e.sin_revisar} sin revisar
+          </span>
+        )}
+
         <span role="button" tabIndex={0} title="Actualizar ahora"
           onClick={(ev) => { ev.stopPropagation(); onRefrescar?.(); }}
           onKeyDown={(ev) => { if (ev.key === "Enter") { ev.stopPropagation(); onRefrescar?.(); } }}
@@ -229,17 +148,58 @@ function PanelAsistente({ estado, onActivar, onApagar, ocupado, puede, onRefresc
       </button>
 
       {abierto && (
-        <div>
-          {estado.length === 0 ? (
-            <div style={{ padding: "7px 10px", fontSize: 10.5, color: "var(--texto-tenue)",
-              borderTop: "1px solid var(--borde)" }}>
-              Sin configuración. Corre la migración del asistente.
+        <div style={{ padding: "0 10px 9px 10px", borderTop: "1px solid var(--borde)" }}>
+          <div style={{ fontSize: 9.5, color: "var(--texto-tenue)", lineHeight: 1.4,
+            margin: "6px 0 6px 0" }}>
+            Responde entre las {e.ventana_desde ?? 8}:00 y las {e.ventana_hasta ?? 21}:00 CDMX,
+            {" "}después de {e.espera_seg ?? 90} s de espera.
+            {vigente && e.activado_por ? ` Lo activó ${e.activado_por}.` : ""}
+          </div>
+
+          {!puede ? (
+            <div style={{ fontSize: 9.5, color: "var(--texto-tenue)", fontStyle: "italic" }}>
+              Tu usuario es de solo lectura.
+            </div>
+          ) : e.activo ? (
+            <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
+              <button onClick={onApagar} disabled={ocupado}
+                style={{ fontSize: 10.5, padding: "4px 10px" }}>
+                ⏹ Apagar
+              </button>
+              {MINUTOS_TURNO.map((m) => (
+                <button key={m} onClick={() => onActivar(m, e.nivel)} disabled={ocupado}
+                  title={`Extender a ${m} minutos desde ahora, en ${e.nivel}`}
+                  style={{ fontSize: 10.5, padding: "4px 8px" }}>
+                  +{m}
+                </button>
+              ))}
             </div>
           ) : (
-            estado.map((e) => (
-              <FilaTurno key={e.rol} e={e} onActivar={onActivar} onApagar={onApagar}
-                ocupado={ocupado} puede={puede} />
-            ))
+            <>
+              <div style={{ fontSize: 9.5, color: "var(--texto-tenue)", marginBottom: 3 }}>
+                Escribe el borrador y no lo envía:
+              </div>
+              <div style={{ display: "flex", gap: 4, flexWrap: "wrap", marginBottom: 7 }}>
+                {MINUTOS_TURNO.map((m) => (
+                  <button key={m} onClick={() => onActivar(m, "sombra")} disabled={ocupado}
+                    style={{ fontSize: 10.5, padding: "4px 9px" }}>
+                    {m} min
+                  </button>
+                ))}
+              </div>
+              <div style={{ fontSize: 9.5, color: C.ladrillo, marginBottom: 3 }}>
+                Responde de verdad, a quien escriba:
+              </div>
+              <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
+                {[30, 60].map((m) => (
+                  <button key={m} className="btn-navy"
+                    onClick={() => onActivar(m, "auto")} disabled={ocupado}
+                    style={{ fontSize: 10.5, padding: "4px 10px" }}>
+                    {m} min en auto
+                  </button>
+                ))}
+              </div>
+            </>
           )}
         </div>
       )}
@@ -501,34 +461,34 @@ export default function ChatPosventa() {
   // ── Turno del asistente ──────────────────────────────────────────────────
   // Cada 30 s porque la cuenta regresiva avanza sola y porque otro analista
   // puede prenderlo o apagarlo desde su pantalla.
-  const [turnos, setTurnos] = useState([]);
+  const [turno, setTurno] = useState(null);
   const [turnoOcupado, setTurnoOcupado] = useState(false);
-  const cargarTurnos = useCallback(async () => {
+  const cargarTurno = useCallback(async () => {
     const { data, error: e } = await sb.rpc("fn_pnr_asistente_estado");
-    if (!e) setTurnos(Array.isArray(data) ? data : []);
+    if (!e) setTurno(data || null);
   }, []);
   useEffect(() => {
-    cargarTurnos();
-    const t = setInterval(cargarTurnos, 30000);
+    cargarTurno();
+    const t = setInterval(cargarTurno, 30000);
     return () => clearInterval(t);
-  }, [cargarTurnos]);
+  }, [cargarTurno]);
 
-  async function activarTurno(rol, minutos, nivel) {
+  async function activarTurno(minutos, nivel) {
     setTurnoOcupado(true);
     const { error: e } = await sb.rpc("fn_pnr_asistente_turno",
-      { p_rol: rol, p_minutos: minutos, p_nivel: nivel });
+      { p_minutos: minutos, p_nivel: nivel });
     setTurnoOcupado(false);
     if (e) { setError("No se pudo activar: " + e.message); return; }
-    await cargarTurnos();
+    await cargarTurno();
   }
 
-  async function apagarTurno(rol) {
+  async function apagarTurno() {
     setTurnoOcupado(true);
     const { error: e } = await sb.rpc("fn_pnr_asistente_turno",
-      { p_rol: rol, p_minutos: null, p_nivel: "sombra" });
+      { p_minutos: null, p_nivel: "sombra" });
     setTurnoOcupado(false);
     if (e) { setError("No se pudo apagar: " + e.message); return; }
-    await cargarTurnos();
+    await cargarTurno();
   }
 
   // ── Tareas ───────────────────────────────────────────────────────────────
@@ -715,10 +675,10 @@ export default function ChatPosventa() {
   const quedan = sel ? horasDeVentana(sel.ultimo_entrante_en) : 0;
   const sinLeer = convs.reduce((s, c) => s + (c.no_leidos || 0), 0);
 
-  // Estado del asistente para el rol de la conversación abierta. Se muestra en
-  // el encabezado porque cambia lo que significa el silencio: en auto, que no
-  // haya respuesta es un problema; apagado, es lo esperado.
-  const turnoSel = sel ? turnos.find((t) => t.rol === sel.rol) : null;
+  // El estado del asistente también se ve en el encabezado del hilo, porque
+  // cambia lo que significa el silencio: en auto, que no haya respuesta es un
+  // problema; apagado, es lo esperado.
+  const turnoSel = turno;
 
   // El hilo mezcla mensajes y borradores por hora. Se ordena una sola vez acá
   // en vez de intercalar al pintar: un borrador tiene que quedar justo debajo
@@ -737,8 +697,8 @@ export default function ChatPosventa() {
       <div style={{ width: 290, flexShrink: 0, display: "flex", flexDirection: "column",
         minHeight: 0 }}>
 
-        <PanelAsistente estado={turnos} onActivar={activarTurno} onApagar={apagarTurno}
-          ocupado={turnoOcupado} puede={puede} onRefrescar={cargarTurnos} />
+        <PanelAsistente estado={turno} onActivar={activarTurno} onApagar={apagarTurno}
+          ocupado={turnoOcupado} puede={puede} onRefrescar={cargarTurno} />
 
         <BloqueTareas tareas={tareas} cargando={cargandoTareas} onResolver={resolverTarea}
           onAbrirChat={abrirDesdeTarea} onRefrescar={cargarTareas} puede={puede} />
