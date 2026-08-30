@@ -134,35 +134,37 @@ function clasificar(c) {
   // eso sacaba al caso de la lista donde el analista trabaja: la tarjeta de En
   // ruta marcaba 1 y los 21 de Por responder no lo incluían. Dos conjuntos que
   // no se cruzaban, y el caso más recuperable del día escondido en una pestaña
-  // aparte. Ahora "En ruta ahora" es un FILTRO sobre la misma lista, no un
+  // aparte. Ahora "En ruta hoy" es un FILTRO sobre la misma lista, no un
   // grupo que se lleva casos.
   const e = POR_ESTADO[c.sub_estado];
   return e ? e.grupo : "responder";
 }
 
-// El paquete salió a reparto HOY. Es la prioridad más alta de la pantalla y no
-// se confunde con "rescatable":
+// LOS DOS CAMPOS DE RUTA, que ya no significan lo mismo:
 //
-//   entregaHoy  → el paquete se entregó en el día en curso. El cliente lo
-//                 recibió hace horas y todavía se acuerda de quién se lo dio.
-//                 Es el caso que más fácil se gana, y el que más rápido se
-//                 enfría.
-//   rescatable  → además la ruta sigue abierta ahora mismo. Es un subconjunto
-//                 más estrecho: un paquete entregado hoy a las 09:00 ya no
-//                 tiene al conductor en calle, pero sigue siendo urgente.
+//   rescatable    → el PNR salió de una ruta del DÍA EN CURSO, haya terminado
+//                   esa ruta o no. Es la prioridad máxima de la pantalla y lo
+//                   que cuenta la tarjeta "En ruta hoy".
+//   ruta_abierta  → además la ruta sigue en calle ahora mismo. Solo alimenta
+//                   la insignia: es la señal de que el conductor puede
+//                   resolverlo sin volver a salir.
 //
-// Se usa fecha_ruta (la fecha operativa de la ruta) y no entregado_en, que solo
-// existe cuando alguien abrió el detalle del caso — hoy 57 casos no lo tienen,
-// y una prioridad que depende de un dato ausente en la mayoría no sirve.
-function entregaHoy(c) {
-  return !!c.fecha_ruta && c.fecha_ruta === hoyMX();
-}
+// Que la ruta esté cerrada no baja la prioridad. Solo significa que el
+// conductor ya entregó todo; sigue siendo el mismo día, todavía puede volver o
+// llamar, y sobre todo el cliente todavía se acuerda de quién le entregó.
+//
+// Con la definición vieja —que exigía ruta abierta— la tarjeta marcaba 1 caso
+// el 29 cuando había 10 abiertos de rutas de ese día. Los otros 9 quedaban
+// mezclados abajo por SLA, que es justo donde no se los mira.
+//
+// Al día siguiente el caso sale solo de la prioridad, porque fecha_ruta deja de
+// ser hoy a medianoche, y pasa a ordenarse por tiempo restante como el resto.
 
 const GRUPOS = [
   // Rescatable no es un estado de MELI, es una ventana de tiempo: el conductor
   // sigue en calle. Va primera y siempre visible, incluso en cero — el día que
   // marque uno, el analista ya sabe dónde mirar.
-  { clave: "rescatable",  etiqueta: "En ruta ahora",  nota: "se resuelve hoy",      color: "#c2410c",  tinte: "#fff1e6",       terminal: false, ventana: true, reloj: true },
+  { clave: "rescatable",  etiqueta: "En ruta hoy",    nota: "ruta del día",         color: "#c2410c",  tinte: "#fff1e6",       terminal: false, ventana: true, reloj: true },
   { clave: "responder",   etiqueta: "Por responder",  nota: "falta el comprobante", color: C.naranja,  tinte: C.naranjaTenue,  terminal: false, reloj: true },
   // Con Penalidad va aparte y no dentro de "Por responder" porque la acción es
   // otra: acá no se sube una foto, se pide revisión. Mezclarlos hacía que el
@@ -1190,7 +1192,9 @@ function Detalle({ c, onPedir, trayendo, supervisor, tarea, vueltas, movimientos
         <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8,
           background: "#fff1e6", border: "1px solid #c2410c", borderRadius: 10, padding: "7px 11px" }}>
           <span style={{ fontSize: 12.5, fontWeight: 600, color: "#c2410c" }}>
-            El conductor está en ruta ahora
+            {c.ruta_abierta
+              ? "El conductor está en ruta ahora"
+              : "Entregado hoy · el conductor ya terminó la ruta"}
           </span>
           <span style={{ fontSize: 11.5, color: "#8a3208" }}>
             Ruta {c.route_code} del {c.fecha_ruta} · {c.estado_ruta}
@@ -1485,18 +1489,11 @@ function Fila({ c, abierta, onAbrir, onPedir, trayendo, ahora, supervisor, tarea
         <Reloj c={c} ahora={ahora} />
         <span style={{ minWidth: 0, fontSize: 13, color: "var(--texto)", overflow: "hidden",
           textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-          {/* Dos insignias, no una. Sin la de HOY, un caso que está arriba de
-              todo por haberse entregado hoy no tiene en la fila nada que lo
-              explique, y el orden parece arbitrario. */}
-          {entregaHoy(c) && !c.rescatable && (
-            <span title="El paquete se entregó hoy: es cuando la evidencia todavía se consigue"
-              style={{ display: "inline-block", fontSize: 9.5, fontWeight: 700, color: "#b8651c",
-                background: "#fdf3e8", border: "1px solid #b8651c", borderRadius: 4,
-                padding: "0 5px", marginRight: 6, verticalAlign: "middle" }}>
-              HOY
-            </span>
-          )}
-          {c.rescatable && (
+          {/* Una sola insignia, y marca la ruta ABIERTA, no el día. Si marcara
+              el día la llevarían todos los de arriba y dejaría de decir nada:
+              lo que aporta es distinguir a quién todavía se puede alcanzar en
+              calle. Que el caso sea del día ya se ve en que está arriba. */}
+          {c.ruta_abierta && (
             <span title="La ruta de este caso sigue en calle: el conductor puede resolverlo ahora"
               style={{ display: "inline-block", fontSize: 9.5, fontWeight: 700, color: "#c2410c",
                 background: "#fff1e6", border: "1px solid #c2410c", borderRadius: 4,
@@ -1834,21 +1831,18 @@ export default function Posventa() {
       if (orden.campo === "caso") return Number(c.case_id || 0);
       return c.horas_restantes == null ? 9999 : Number(c.horas_restantes);
     };
-    // Dos prioridades por encima del orden que elija el analista, en este
-    // orden y no al revés:
+    // TODO PNR de una ruta del día en curso va arriba, por encima del orden que
+    // elija el analista y sin importar si esa ruta ya terminó. Es cuando la
+    // evidencia todavía se consigue con un mensaje: el cliente recibió el
+    // paquete hace horas y se acuerda de quién se lo dio.
     //
-    //   1. Entregado hoy. TODO PNR de un paquete repartido en el día en curso
-    //      va arriba. El cliente lo recibió hace horas: es cuando la evidencia
-    //      todavía se consigue con un mensaje.
-    //   2. En ruta ahora. Dentro de los de hoy, primero aquel cuyo conductor
-    //      sigue en calle y puede resolverlo sin volver a salir.
+    // Dentro de ese grupo manda la columna elegida, no la ruta abierta. Entre
+    // dos casos del mismo día lo que decide es cuánto plazo queda; que el
+    // camión siga en calle es una facilidad, no una urgencia mayor.
     //
-    // Recién después manda la columna que el analista haya elegido. Esto no
-    // depende del filtro: en la pantalla inicial, sin ninguna tarjeta apretada,
-    // los de hoy salen arriba igual.
+    // Esto no depende del filtro: en la pantalla inicial, sin ninguna tarjeta
+    // apretada, los del día salen arriba igual.
     return base.slice().sort((a, b) => {
-      const ha = entregaHoy(a), hb = entregaHoy(b);
-      if (ha !== hb) return ha ? -1 : 1;
       if (!!a.rescatable !== !!b.rescatable) return a.rescatable ? -1 : 1;
       const d = valor(a) - valor(b);
       return orden.dir === "asc" ? d : -d;
