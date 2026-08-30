@@ -39,6 +39,21 @@ const C = {
   ia: "#3730a3", iaFondo: "#eef2ff", iaBorde: "#c7d2fe",
 };
 
+// TODAS las horas de este módulo van en CDMX, sin excepción.
+//
+// POR QUÉ NO SE USA fechaHora() DE shared/fechas.js
+//   Esa función pide el formato es-MX pero NO fija la zona, así que pinta en la
+//   del navegador. Con el analista en Chile, el mismo mensaje salía como 09:47
+//   en la burbuja del conductor y 07:48 en la del borrador: dos relojes en el
+//   mismo hilo, y ninguna forma de saber cuál era la buena.
+//
+//   No se arregló allá porque fechaHora() la usan otros módulos y no sabemos
+//   cuáles son de Chile. Cambiarla movería horas fuera de esta pantalla.
+//
+//   Y en Posventa la zona no es un detalle de presentación: el plazo de 48 h,
+//   el recordatorio de las 15:00 y la ventana del asistente corren todos en
+//   CDMX. Si el chat muestra Chile, cada comparación contra un plazo obliga a
+//   restar dos horas de cabeza, y ahí es donde se equivoca la gente.
 function hora(iso) {
   if (!iso) return "";
   return new Date(iso).toLocaleString("es-MX", {
@@ -352,6 +367,31 @@ function FilaConv({ c, activa, onClick }) {
   );
 }
 
+// ── Burbuja de mensaje ─────────────────────────────────────────────────────
+// Envuelve a BurbujaPnr solo para taparle la hora con una en CDMX. Se hace acá
+// y no dentro del componente porque BurbujaPnr también lo usan otras pantallas:
+// esta es la única que necesita forzar la zona.
+//
+// La etiqueta "CDMX" va visible a propósito. Un reloj sin zona en una operación
+// de dos países es una trampa: se lee como local y no lo es.
+
+function BurbujaConHora({ m }) {
+  return (
+    <div style={{ position: "relative" }}>
+      <BurbujaPnr m={m} />
+      <div style={{
+        position: "absolute", bottom: 6,
+        [m.direccion === "saliente" ? "right" : "left"]: 14,
+        fontSize: 9.5, color: m.direccion === "saliente" && m.emisor !== "ia"
+          ? "rgba(255,255,255,.75)" : "var(--texto-tenue)",
+        background: "inherit", pointerEvents: "none",
+      }}>
+        {hora(m.creado_en)} CDMX
+      </div>
+    </div>
+  );
+}
+
 // ── Burbuja de borrador ────────────────────────────────────────────────────
 // Un borrador NO es un mensaje pendiente de enviar: es lo que el asistente
 // habría contestado. La persona no recibió nada. Por eso va con otro borde,
@@ -390,7 +430,7 @@ function BurbujaBorrador({ d, onRevisar, puede }) {
           <span style={{ fontSize: 9.5, color: "var(--texto-suave)" }}>{d.intencion}</span>
         )}
         <span style={{ marginLeft: "auto", fontSize: 9.5, color: "var(--texto-tenue)" }}>
-          {hora(d.creado_en)}
+          {hora(d.creado_en)} CDMX
         </span>
       </div>
 
@@ -853,7 +893,7 @@ export default function ChatPosventa() {
                 </div>
               ) : (
                 hilo.map((x) => x.clase === "msg"
-                  ? <BurbujaPnr key={x.id} m={x.dato} />
+                  ? <BurbujaConHora key={x.id} m={x.dato} />
                   : <BurbujaBorrador key={x.id} d={x.dato} onRevisar={revisarBorrador}
                       puede={puede} />)
               )}
