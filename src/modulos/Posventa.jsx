@@ -128,12 +128,34 @@ const POR_ESTADO = Object.fromEntries(ESTADOS_PNR.map((e) => [e.clave, e]));
 // Un sub_estado que MELI invente mañana cae en "responder": aparece arriba
 // pidiendo que alguien lo mire, en vez de esconderse en el medio.
 function clasificar(c) {
-  // La ventana gana sobre el sub_estado: un caso rescatable puede estar en
-  // cualquier estado abierto, y lo que decide dónde mostrarlo no es cómo lo
-  // clasifica MELI sino que el conductor esté arriba del camión ahora.
-  if (c.rescatable) return "rescatable";
+  // El grupo lo decide SIEMPRE el sub_estado de MELI.
+  //
+  // Antes esta función devolvía "rescatable" antes de mirar el sub_estado, y
+  // eso sacaba al caso de la lista donde el analista trabaja: la tarjeta de En
+  // ruta marcaba 1 y los 21 de Por responder no lo incluían. Dos conjuntos que
+  // no se cruzaban, y el caso más recuperable del día escondido en una pestaña
+  // aparte. Ahora "En ruta ahora" es un FILTRO sobre la misma lista, no un
+  // grupo que se lleva casos.
   const e = POR_ESTADO[c.sub_estado];
   return e ? e.grupo : "responder";
+}
+
+// El paquete salió a reparto HOY. Es la prioridad más alta de la pantalla y no
+// se confunde con "rescatable":
+//
+//   entregaHoy  → el paquete se entregó en el día en curso. El cliente lo
+//                 recibió hace horas y todavía se acuerda de quién se lo dio.
+//                 Es el caso que más fácil se gana, y el que más rápido se
+//                 enfría.
+//   rescatable  → además la ruta sigue abierta ahora mismo. Es un subconjunto
+//                 más estrecho: un paquete entregado hoy a las 09:00 ya no
+//                 tiene al conductor en calle, pero sigue siendo urgente.
+//
+// Se usa fecha_ruta (la fecha operativa de la ruta) y no entregado_en, que solo
+// existe cuando alguien abrió el detalle del caso — hoy 57 casos no lo tienen,
+// y una prioridad que depende de un dato ausente en la mayoría no sirve.
+function entregaHoy(c) {
+  return !!c.fecha_ruta && c.fecha_ruta === hoyMX();
 }
 
 const GRUPOS = [
@@ -1463,6 +1485,17 @@ function Fila({ c, abierta, onAbrir, onPedir, trayendo, ahora, supervisor, tarea
         <Reloj c={c} ahora={ahora} />
         <span style={{ minWidth: 0, fontSize: 13, color: "var(--texto)", overflow: "hidden",
           textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+          {/* Dos insignias, no una. Sin la de HOY, un caso que está arriba de
+              todo por haberse entregado hoy no tiene en la fila nada que lo
+              explique, y el orden parece arbitrario. */}
+          {entregaHoy(c) && !c.rescatable && (
+            <span title="El paquete se entregó hoy: es cuando la evidencia todavía se consigue"
+              style={{ display: "inline-block", fontSize: 9.5, fontWeight: 700, color: "#b8651c",
+                background: "#fdf3e8", border: "1px solid #b8651c", borderRadius: 4,
+                padding: "0 5px", marginRight: 6, verticalAlign: "middle" }}>
+              HOY
+            </span>
+          )}
           {c.rescatable && (
             <span title="La ruta de este caso sigue en calle: el conductor puede resolverlo ahora"
               style={{ display: "inline-block", fontSize: 9.5, fontWeight: 700, color: "#c2410c",
@@ -1737,6 +1770,14 @@ export default function Posventa() {
       const k = clasificar(c);
       t[k].monto += Number(c.monto || 0);
       t[k].n += 1;
+      // El rescatable se suma ADEMÁS en su tarjeta. Un caso en ruta cuenta dos
+      // veces —en En ruta y en el grupo de su estado— y eso es a propósito: la
+      // tarjeta dejó de ser un grupo excluyente y pasó a ser un atajo. El total
+      // de las tarjetas ya no es el total de casos.
+      if (c.rescatable) {
+        t.rescatable.monto += Number(c.monto || 0);
+        t.rescatable.n += 1;
+      }
     }
     return t;
   }, [delPeriodo]);
@@ -1770,6 +1811,9 @@ export default function Posventa() {
             return (historial[c.case_id] || []).some((m) => diaMX(m.creado_en) === diaMov);
           }
           if (filtro.tipo === "estado") return c.sub_estado === filtro.valor;
+          // En ruta ya no es un grupo: es una marca sobre el caso, así que se
+          // pregunta por la marca y no por la clasificación.
+          if (filtro.valor === "rescatable") return !!c.rescatable;
           return clasificar(c) === filtro.valor;
         });
 
@@ -1790,10 +1834,21 @@ export default function Posventa() {
       if (orden.campo === "caso") return Number(c.case_id || 0);
       return c.horas_restantes == null ? 9999 : Number(c.horas_restantes);
     };
-    // Los rescatables van arriba de todo, por encima del orden que elija el
-    // analista. Es lo único de esta pantalla que se pierde por esperar: dentro
-    // de unas horas la ruta cierra y el caso pasa a costar días de gestión.
+    // Dos prioridades por encima del orden que elija el analista, en este
+    // orden y no al revés:
+    //
+    //   1. Entregado hoy. TODO PNR de un paquete repartido en el día en curso
+    //      va arriba. El cliente lo recibió hace horas: es cuando la evidencia
+    //      todavía se consigue con un mensaje.
+    //   2. En ruta ahora. Dentro de los de hoy, primero aquel cuyo conductor
+    //      sigue en calle y puede resolverlo sin volver a salir.
+    //
+    // Recién después manda la columna que el analista haya elegido. Esto no
+    // depende del filtro: en la pantalla inicial, sin ninguna tarjeta apretada,
+    // los de hoy salen arriba igual.
     return base.slice().sort((a, b) => {
+      const ha = entregaHoy(a), hb = entregaHoy(b);
+      if (ha !== hb) return ha ? -1 : 1;
       if (!!a.rescatable !== !!b.rescatable) return a.rescatable ? -1 : 1;
       const d = valor(a) - valor(b);
       return orden.dir === "asc" ? d : -d;
