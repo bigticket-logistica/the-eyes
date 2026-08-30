@@ -680,15 +680,28 @@ export default function ChatPosventa() {
   // problema; apagado, es lo esperado.
   const turnoSel = turno;
 
-  // El hilo mezcla mensajes y borradores por hora. Se ordena una sola vez acá
-  // en vez de intercalar al pintar: un borrador tiene que quedar justo debajo
-  // del mensaje que lo provocó, y ese orden es cronológico.
+  // El hilo mezcla mensajes y borradores. Un borrador se ordena por la hora del
+  // MENSAJE QUE RESPONDE, no por la suya: se genera minutos u horas después, y
+  // ordenarlo por creado_en lo mandaba al final del hilo, lejos de lo que
+  // contestaba. Con el desempate de 1 ms queda pegado justo debajo.
   const hilo = verBorradores
     ? [
-        ...mensajes.map((m) => ({ clase: "msg", en: m.creado_en, id: `m${m.id}`, dato: m })),
-        ...borradores.map((d) => ({ clase: "borr", en: d.creado_en, id: `d${d.id}`, dato: d })),
-      ].sort((a, b) => new Date(a.en) - new Date(b.en))
-    : mensajes.map((m) => ({ clase: "msg", en: m.creado_en, id: `m${m.id}`, dato: m }));
+        ...mensajes.map((m) => ({
+          clase: "msg", en: new Date(m.creado_en).getTime(), id: `m${m.id}`, dato: m,
+        })),
+        ...borradores.map((d) => {
+          const origen = mensajes.find((m) => m.id === d.mensaje_id);
+          return {
+            clase: "borr",
+            en: new Date(origen?.creado_en || d.creado_en).getTime() + 1,
+            id: `d${d.id}`,
+            dato: d,
+          };
+        }),
+      ].sort((a, b) => a.en - b.en)
+    : mensajes.map((m) => ({
+        clase: "msg", en: new Date(m.creado_en).getTime(), id: `m${m.id}`, dato: m,
+      }));
 
   return (
     <div style={{ display: "flex", height: "100%", minHeight: 0, gap: 12 }}>
