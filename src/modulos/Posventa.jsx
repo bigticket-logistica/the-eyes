@@ -254,10 +254,21 @@ function dinero(n) {
   return "$" + Number(n).toLocaleString("es-MX", { maximumFractionDigits: 0 });
 }
 
+// Reloj de 24 horas, siempre. Con am/pm un aviso de las 20:02 se pintaba
+// "08:02 p" y la "p" quedaba cortada por el ancho de la columna: no había forma
+// de distinguirlo de las 8 de la mañana ni mirando de cerca.
+//
+// En esta pantalla eso no es un detalle de gusto. La columna existe para que el
+// analista calcule cuánto plazo queda desde el aviso; leer doce horas de menos
+// convierte un caso urgente en uno tranquilo.
+//
+// La zona es CDMX porque toda la operación —el plazo de 48 h, el recordatorio
+// de las 15:00— corre en México, y el analista mira desde Chile.
 function fechaHito(iso) {
   if (!iso) return null;
   return new Date(iso).toLocaleString("es-MX", {
-    timeZone: "America/Mexico_City", day: "2-digit", month: "2-digit",
+    timeZone: "America/Mexico_City", hour12: false,
+    day: "2-digit", month: "2-digit",
     hour: "2-digit", minute: "2-digit",
   });
 }
