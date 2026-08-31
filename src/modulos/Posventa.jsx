@@ -1144,7 +1144,37 @@ function Pruebas({ tarea, vueltas, onRepedir }) {
               </span>
             )}
           </div>
-          <Miniaturas fotos={v.fotos} />
+          {/* La foto a la izquierda y lo que se dice de ella a la derecha.
+              Antes la nota de Vision vivía en el title de la insignia: para
+              leerla había que adivinar que estaba ahí y dejar el cursor quieto.
+              Es el texto que dice QUÉ FALTA en la evidencia — lo único que el
+              analista necesita para decidir si rechaza y con qué motivo. */}
+          <div style={{ display: "flex", gap: 10, alignItems: "flex-start", flexWrap: "wrap" }}>
+            <Miniaturas fotos={v.fotos} />
+            {(v.vision_nota || v.vision_veredicto) && (
+              <div style={{ flex: "1 1 240px", minWidth: 200, fontSize: 11.5, lineHeight: 1.45,
+                background: "#fff", border: "1px solid var(--borde)", borderRadius: 8,
+                padding: "7px 10px" }}>
+                {v.vision_veredicto && (
+                  <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: 0.3,
+                    textTransform: "uppercase", marginBottom: 3,
+                    color: v.vision_veredicto === "SIRVE" ? C.verde
+                      : v.vision_veredicto === "PARCIAL" ? C.naranja : C.ladrillo }}>
+                    {v.vision_veredicto.replace("_", " ")}
+                    {v.vision_tipo ? ` · ${String(v.vision_tipo).toLowerCase()}` : ""}
+                  </div>
+                )}
+                <div style={{ color: "var(--texto-suave)" }}>{v.vision_nota}</div>
+                {/* Que es una recomendación y no un dictamen. La decisión de
+                    rechazar la toma el analista, y el criterio lo dice: un
+                    puntaje alto sobre una captura recortada puede seguir sin
+                    servir para apelar. */}
+                <div style={{ fontSize: 9.5, color: "var(--texto-tenue)", marginTop: 4 }}>
+                  Lectura automática · la decisión es tuya
+                </div>
+              </div>
+            )}
+          </div>
           {v.comentario && (
             <div style={{ fontSize: 12, color: "var(--texto)", lineHeight: 1.4, marginTop: 5 }}>
               “{v.comentario}”
