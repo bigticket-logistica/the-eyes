@@ -379,14 +379,28 @@ function BurbujaConHora({ m }) {
   return (
     <div style={{ position: "relative" }}>
       <BurbujaPnr m={m} />
+
+      {/* La hora en CDMX, tapando la que trae BurbujaPnr.
+          El primer intento la dibujaba encima sin fondo y quedaban las dos
+          superpuestas, ilegibles. Ahora el recuadro es opaco y del color de la
+          burbuja, así que oculta la de abajo en vez de sumarse a ella.
+          Se tapa y no se arregla en BurbujaPnr porque ese componente lo usan
+          otras pantallas: esta es la única que necesita forzar la zona. */}
       <div style={{
-        position: "absolute", bottom: 6,
-        [m.direccion === "saliente" ? "right" : "left"]: 14,
-        fontSize: 9.5, color: m.direccion === "saliente" && m.emisor !== "ia"
-          ? "rgba(255,255,255,.75)" : "var(--texto-tenue)",
-        background: "inherit", pointerEvents: "none",
+        position: "absolute", bottom: 11,
+        [m.direccion === "saliente" ? "right" : "left"]: 13,
+        fontSize: 10, lineHeight: 1.2, padding: "1px 4px", borderRadius: 4,
+        whiteSpace: "nowrap", pointerEvents: "none",
+        // Mismo fondo que la burbuja: navy en los salientes del analista,
+        // lavanda en los de la IA, blanco en los entrantes.
+        background: m.direccion === "saliente"
+          ? (m.emisor === "ia" ? "#EEF2FF" : "var(--navy)")
+          : "#fff",
+        color: m.direccion === "saliente" && m.emisor !== "ia"
+          ? "rgba(255,255,255,.72)" : "var(--texto-tenue)",
       }}>
         {hora(m.creado_en)} CDMX
+        {m.direccion === "saliente" && m.estado_entrega ? ` · ${m.estado_entrega}` : ""}
       </div>
     </div>
   );

@@ -247,12 +247,12 @@ const HITOS = [
 // escrito a mano: cuando el riel pasó de cinco puntos a cuatro, los 286 px
 // dejaron los títulos descuadrados respecto de los círculos.
 const ANCHO_HITO = 58;
-// La columna del SLA pasó de 112 a 152px: ahora lleva tres relojes apilados con
+// La columna del SLA pasó de 112 a 168px: ahora lleva tres relojes apilados con
 // su barra, no uno. Los 40px salen del mínimo del conductor, que baja de 118 a
 // 78 — es la única columna elástica (1fr) y en la práctica tenía holgura de
 // sobra, así que el nombre sigue entrando y lo que no cabe se corta con
 // ellipsis como antes.
-const GRID = `14px 84px 152px minmax(78px,1fr) 122px 126px ${HITOS.length * ANCHO_HITO}px 78px`;
+const GRID = `14px 84px 168px minmax(78px,1fr) 122px 126px ${HITOS.length * ANCHO_HITO}px 78px`;
 
 function dinero(n) {
   if (n === null || n === undefined) return "—";
@@ -408,17 +408,25 @@ function Reloj({ c, ahora }) {
               : `${t.titulo}. Quedan ${p.resta.toFixed(1)} h de sus ${t.tope}.`}
             style={{ display: "block", lineHeight: 1.15, marginBottom: 2 }}>
             <span style={{ display: "flex", alignItems: "baseline", gap: 4 }}>
+              {/* 62px y flexShrink 0: "SUPERVISOR" no cabía en 46 y el reloj se
+                  le montaba encima. Sin el flexShrink, flex comprime la caja
+                  hasta el ancho del contenedor y el texto se desborda en vez de
+                  empujar al vecino. El letterSpacing baja a 0 porque con la
+                  palabra larga cada décima cuenta. */}
               <span style={{ fontSize: 8.5, fontWeight: corriendo ? 700 : 600,
-                letterSpacing: 0.2, textTransform: "uppercase", width: 46,
+                letterSpacing: 0, textTransform: "uppercase",
+                width: 62, flexShrink: 0, whiteSpace: "nowrap",
                 color: corriendo ? p.color : "var(--texto-tenue)" }}>
                 {t.rotulo}
               </span>
               <span style={{ fontSize: corriendo ? 12 : 10.5,
                 fontWeight: corriendo ? 700 : 500, color: p.color,
-                fontVariantNumeric: "tabular-nums" }}>
+                fontVariantNumeric: "tabular-nums", flexShrink: 0 }}>
                 {p.reloj}
               </span>
-              <span style={{ fontSize: 8.5, color: "var(--texto-tenue)" }}>/{t.tope}</span>
+              <span style={{ fontSize: 8.5, color: "var(--texto-tenue)", flexShrink: 0 }}>
+                /{t.tope}
+              </span>
             </span>
             <span style={{ display: "block", height: corriendo ? 3 : 2, borderRadius: 2,
               background: "#e6eaf1" }}>
