@@ -1385,20 +1385,16 @@ function Detalle({ c, ahora, onPedir, trayendo, supervisor, tarea, vueltas, movi
         </div>
       )}
 
-      {c.rescatable && (
-        <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8,
-          background: "#fff1e6", border: "1px solid #c2410c", borderRadius: 10, padding: "7px 11px" }}>
-          <span style={{ fontSize: 12.5, fontWeight: 600, color: "#c2410c" }}>
-            {c.ruta_abierta
-              ? "El conductor está en ruta ahora"
-              : "Entregado hoy · el conductor ya terminó la ruta"}
-          </span>
-          <span style={{ fontSize: 11.5, color: "#8a3208" }}>
-            Ruta {c.route_code} del {c.fecha_ruta} · {c.estado_ruta}
-            {c.ruta_vista_en ? ` · vista ${fechaHito(c.ruta_vista_en)}` : ""}
-          </span>
-        </div>
-      )}
+      {/* Se quitó el aviso "Entregado hoy · el conductor ya terminó la ruta".
+          Afirmaba algo falso: lo decidía por ruta_abierta, que no existe en
+          vw_pnr_detalle, así que siempre caía del lado de "terminó" — incluso en
+          rutas con estado active y cuarenta y siete paradas pendientes.
+
+          Y aunque el dato estuviera, el aviso no aportaba: que el PNR es de una
+          ruta de hoy ya se ve en la insignia EN RUTA de la fila, antes de
+          desplegar, que es donde el analista lo necesita. Un cartel adentro
+          repite lo que ya sabe y afirma detalles de la ruta que esta pantalla no
+          tiene con qué sostener. */}
 
       {/* ── La cascada completa ──────────────────────────────────────────
           En la fila va un solo reloj, el del tramo activo. Acá los tres, porque
@@ -1701,12 +1697,14 @@ function Fila({ c, abierta, onAbrir, onPedir, trayendo, ahora, supervisor, tarea
         <Reloj c={c} ahora={ahora} />
         <span style={{ minWidth: 0, fontSize: 13, color: "var(--texto)", overflow: "hidden",
           textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-          {/* Una sola insignia, y marca la ruta ABIERTA, no el día. Si marcara
-              el día la llevarían todos los de arriba y dejaría de decir nada:
-              lo que aporta es distinguir a quién todavía se puede alcanzar en
-              calle. Que el caso sea del día ya se ve en que está arriba. */}
-          {c.ruta_abierta && (
-            <span title="La ruta de este caso sigue en calle: el conductor puede resolverlo ahora"
+          {/* Lee rescatable, que es "PNR de una ruta del día".
+              La versión anterior leía ruta_abierta y NUNCA se dibujaba: esa
+              columna existe en vw_pnr_tablero pero no en vw_pnr_detalle, que es
+              de donde lee esta pantalla. Un campo ausente en JavaScript es
+              undefined, o sea falso, así que la insignia desaparecía sin dar
+              error. Es el peor tipo de fallo: nada se rompe, solo falta. */}
+          {c.rescatable && (
+            <span title="PNR de una ruta de hoy: el conductor todavía puede resolverlo"
               style={{ display: "inline-block", fontSize: 9.5, fontWeight: 700, color: "#c2410c",
                 background: "#fff1e6", border: "1px solid #c2410c", borderRadius: 4,
                 padding: "0 5px", marginRight: 6, verticalAlign: "middle" }}>
