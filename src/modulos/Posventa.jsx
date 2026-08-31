@@ -249,7 +249,7 @@ const HITOS = [
 // escrito a mano: cuando el riel pasó de cinco puntos a cuatro, los 286 px
 // dejaron los títulos descuadrados respecto de los círculos.
 const ANCHO_HITO = 58;
-const GRID = `14px 84px 112px minmax(118px,1fr) 122px 126px ${HITOS.length * ANCHO_HITO}px 78px`;
+const GRID = `14px 92px 168px minmax(118px,1fr) 122px 126px ${HITOS.length * ANCHO_HITO}px 78px`;
 
 function dinero(n) {
   if (n === null || n === undefined) return "—";
@@ -319,23 +319,49 @@ function tramoActivo(transcurrido) {
   return { quien: "vencido", tope: SLA_H, restante: SLA_H - transcurrido };
 }
 
-const ETIQUETA_TRAMO = {
-  chofer:     { texto: "chofer",     titulo: "El plazo del chofer está corriendo" },
-  supervisor: { texto: "supervisor", titulo: "El plazo del chofer venció: ahora es del supervisor" },
-  analista:   { texto: "TÚ",         titulo: "Venció el plazo del chofer y del supervisor: el caso es tuyo" },
-  vencido:    { texto: "vencido",    titulo: "Se pasaron las 48 h de MELI" },
-};
+// Los tres tramos, en orden de la cascada. "Posventa" y no "analista" porque así
+// se llama el área: el rótulo tiene que decir lo mismo que dice la gente.
+const TRAMOS = [
+  { quien: "chofer",     rotulo: "Chofer",     tope: SLA_CHOFER,
+    titulo: "El plazo del chofer está corriendo" },
+  { quien: "supervisor", rotulo: "Supervisor", tope: SLA_SUPERVISOR,
+    titulo: "El plazo del chofer venció: ahora es del supervisor" },
+  { quien: "analista",   rotulo: "Posventa",   tope: SLA_H,
+    titulo: "Vencieron los plazos del chofer y del supervisor: el caso es de Posventa" },
+];
+
+// Reloj y color de un tramo, para no repetir la cuenta en la fila y en el
+// detalle. resta en horas decimales; corriendo dice si es el tramo activo.
+function pintaTramo(tope, transcurrido, corriendo) {
+  const resta = tope - transcurrido;
+  const vencido = resta <= 0;
+  const pct = Math.max(0, Math.min(100, (transcurrido / tope) * 100));
+
+  // Rojo bajo las 3 h, que es el margen de la alerta final. Los tramos que no
+  // corren van en gris tenue: están ahí para que se vea la cadena, no para
+  // competir por la atención.
+  const color = vencido ? C.gris
+    : !corriendo ? "var(--texto-suave)"
+    : resta < 3 ? C.ladrillo
+    : resta < 8 ? C.naranja
+    : C.navy;
+
+  const h = Math.floor(resta);
+  const m = Math.floor((resta - h) * 60);
+
+  return {
+    resta, vencido, pct, color,
+    reloj: vencido ? "vencido" : `${h}:${String(m).padStart(2, "0")}`,
+  };
+}
 
 function Reloj({ c, ahora }) {
   const g = POR_CLAVE[clasificar(c)];
 
   // El contador corre solo donde nuestra gestión puede cambiar el resultado.
   // Con el comprobante cargado, en revisión o ya sentenciado, lo que quede de
-  // las 48 horas dejó de importar: el reloj solo competiría por la atención de
+  // los plazos dejó de importar: los relojes solo competirían por la atención de
   // los casos que sí hay que atender.
-  //
-  // En su lugar va la fecha del último movimiento, que ahí sí informa — cuánto
-  // lleva esperando a MELI, o cuándo se decidió.
   if (!g || !g.reloj) {
     return (
       <span title="No corre: el resultado ya no depende de nosotros"
@@ -352,57 +378,68 @@ function Reloj({ c, ahora }) {
   if (!inicio) return <span style={{ fontSize: 12, color: C.gris }}>—</span>;
 
   const transcurrido = (ahora - inicio) / 3600000;
-  const t = tramoActivo(transcurrido);
-  const eti = ETIQUETA_TRAMO[t.quien];
+  const activo = tramoActivo(transcurrido).quien;
 
-  // Cuenta hacia ABAJO y no hacia arriba. Con un solo plazo el ascendente
-  // servía porque 48 estaba siempre a la vista; con tres topes distintos, un
-  // "22:14" obliga a saber contra qué tope se compara. Lo que hay que decidir
-  // es cuánto queda, así que se muestra eso.
-  const restante = Math.max(0, t.restante);
-  const h = Math.floor(restante);
-  const m = Math.floor((restante - h) * 60);
-
-  // El porcentaje es del tramo activo, no de las 48: la barra se llena cuando
-  // se agota el plazo de quien lo tiene ahora, que es lo que urge.
-  const pct = Math.max(0, Math.min(100, ((t.tope - t.restante) / t.tope) * 100));
-
-  // Rojo bajo el margen de la alerta final (3 h), y desde que el caso llega al
-  // analista: ahí ya no hay nadie más abajo en la cascada.
-  const color = t.quien === "vencido" ? C.gris
-    : t.quien === "analista" || t.restante < 3 ? C.ladrillo
-    : t.restante < 8 ? C.naranja
-    : C.navy;
-
+  // LOS TRES PLAZOS EN LA FILA, no solo el activo.
+  //
+  // Con uno solo el analista no sabe cuándo le cae el caso a él: para eso tiene
+  // que ver el reloj del supervisor mientras todavía es del chofer. La fila dice
+  // dos cosas distintas — de quién es ahora, y cuánto falta para que sea de los
+  // demás — y con un número solo se pierde la segunda.
   return (
-    <span style={{ display: "block", lineHeight: 1.2 }}
-      title={`${eti.titulo}. Quedan ${t.restante.toFixed(1)} h de sus ${t.tope}. ` +
-             `MELI cierra en ${(SLA_H - transcurrido).toFixed(1)} h.`}>
-      <span style={{ fontSize: 13.5, fontWeight: 700, color, fontVariantNumeric: "tabular-nums" }}>
-        {t.quien === "vencido" ? "—" : `${h}:${String(m).padStart(2, "0")}`}
-      </span>
-      <span style={{ fontSize: 9.5, color: "var(--texto-tenue)" }}> / {t.tope} h</span>
-
-      {/* De quién es el caso AHORA. Sin esto el número no dice nada: 3 horas
-          del chofer y 3 del analista piden acciones distintas. */}
-      <span style={{ display: "block", fontSize: 9, fontWeight: 700, color,
-        letterSpacing: 0.3, textTransform: "uppercase" }}>
-        {eti.texto}
-      </span>
-
-      <span style={{ display: "block", height: 3, borderRadius: 2, background: "#e6eaf1", margin: "2px 0 1px" }}>
-        <span style={{ display: "block", height: 3, borderRadius: 2, width: `${pct}%`, background: color }} />
-      </span>
-      <span style={{ fontSize: 9, color: "var(--texto-tenue)", whiteSpace: "nowrap" }}>
+    <span style={{ display: "block" }}
+      title={`MELI cierra en ${(SLA_H - transcurrido).toFixed(1)} h`}>
+      {TRAMOS.map((t) => {
+        const corriendo = activo === t.quien;
+        const p = pintaTramo(t.tope, transcurrido, corriendo);
+        return (
+          <span key={t.quien} title={p.vencido
+              ? `${t.rotulo}: venció hace ${Math.abs(p.resta).toFixed(1)} h`
+              : `${t.titulo}. Quedan ${p.resta.toFixed(1)} h de sus ${t.tope}.`}
+            style={{ display: "block", lineHeight: 1.15, marginBottom: 2 }}>
+            <span style={{ display: "flex", alignItems: "baseline", gap: 4 }}>
+              {/* 62px y flexShrink 0: "SUPERVISOR" no cabía en 46 y el reloj se
+                  le montaba encima. Sin el flexShrink, flex comprime la caja
+                  hasta el ancho del contenedor y el texto se desborda en vez de
+                  empujar al vecino. */}
+              <span style={{ fontSize: 8.5, fontWeight: corriendo ? 700 : 600,
+                letterSpacing: 0, textTransform: "uppercase",
+                width: 62, flexShrink: 0, whiteSpace: "nowrap",
+                color: corriendo ? p.color : "var(--texto-tenue)" }}>
+                {t.rotulo}
+              </span>
+              <span style={{ fontSize: corriendo ? 12 : 10.5,
+                fontWeight: corriendo ? 700 : 500, color: p.color,
+                fontVariantNumeric: "tabular-nums", flexShrink: 0 }}>
+                {p.reloj}
+              </span>
+              <span style={{ fontSize: 8.5, color: "var(--texto-tenue)", flexShrink: 0 }}>
+                /{t.tope}
+              </span>
+            </span>
+            <span style={{ display: "block", height: corriendo ? 3 : 2, borderRadius: 2,
+              background: "#e6eaf1" }}>
+              <span style={{ display: "block", height: corriendo ? 3 : 2, borderRadius: 2,
+                width: `${p.pct}%`, background: p.color }} />
+            </span>
+          </span>
+        );
+      })}
+      <span style={{ fontSize: 8.5, color: "var(--texto-tenue)", whiteSpace: "nowrap" }}>
         {c.cuando_mx || "—"}
       </span>
     </span>
   );
 }
 
-// ── Los tres plazos de un caso ─────────────────────────────────────────────
-// Solo se dibuja en el detalle. Muestra los tres tramos con su propio contador
-// y marca cuál está corriendo, para que se vea la cadena y no solo el eslabón.
+// ── Los tres plazos, en grande ─────────────────────────────────────────────
+// En la fila los tres van chicos y apilados. Acá los mismos tres pero grandes y
+// en línea, porque al abrir el caso hay espacio y lo que se está haciendo es
+// decidir: vale la pena que el número se lea de lejos.
+//
+// Comparte TRAMOS y pintaTramo con la fila para que las dos no se puedan
+// desincronizar: un umbral cambiado en un solo lado sería un color que dice una
+// cosa arriba y otra abajo.
 
 function CascadaSla({ c, ahora }) {
   const inicio = c.fecha_caso ? new Date(c.fecha_caso).getTime() : null;
@@ -411,27 +448,16 @@ function CascadaSla({ c, ahora }) {
   const transcurrido = (ahora - inicio) / 3600000;
   const activo = tramoActivo(transcurrido).quien;
 
-  const tramos = [
-    { quien: "chofer",     rotulo: "Chofer",     tope: SLA_CHOFER },
-    { quien: "supervisor", rotulo: "Supervisor", tope: SLA_SUPERVISOR },
-    { quien: "analista",   rotulo: "Analista",   tope: SLA_H },
-  ];
-
   return (
     <div style={{ display: "flex", gap: 8, marginBottom: 8, flexWrap: "wrap" }}>
-      {tramos.map((t) => {
-        const resta = t.tope - transcurrido;
+      {TRAMOS.map((t) => {
         const corriendo = activo === t.quien;
-        const vencido = resta <= 0;
-        // El de MELI (el del analista) en gris cuando no corre: existe para
-        // cuadrar con el portal, no para perseguirlo.
-        const color = vencido ? C.gris : corriendo ? (resta < 3 ? C.ladrillo : C.navy) : "var(--texto-suave)";
-
+        const p = pintaTramo(t.tope, transcurrido, corriendo);
         return (
           <div key={t.quien}
-            title={vencido
-              ? `El plazo de ${t.rotulo.toLowerCase()} venció hace ${Math.abs(resta).toFixed(1)} h`
-              : `Quedan ${resta.toFixed(1)} h de las ${t.tope} de ${t.rotulo.toLowerCase()}`}
+            title={p.vencido
+              ? `${t.rotulo}: venció hace ${Math.abs(p.resta).toFixed(1)} h`
+              : `${t.titulo}. Quedan ${p.resta.toFixed(1)} h de sus ${t.tope}.`}
             style={{
               flex: "1 1 120px", minWidth: 110, padding: "6px 10px", borderRadius: 9,
               background: corriendo ? "#eef2f8" : "#fff",
@@ -441,11 +467,12 @@ function CascadaSla({ c, ahora }) {
               textTransform: "uppercase", color: corriendo ? C.navy : "var(--texto-tenue)" }}>
               {t.rotulo} · {t.tope} h{corriendo ? " ←" : ""}
             </div>
-            <div style={{ fontSize: 15, fontWeight: 700, color,
+            <div style={{ fontSize: 16, fontWeight: 700, color: p.color,
               fontVariantNumeric: "tabular-nums" }}>
-              {vencido
-                ? "vencido"
-                : `${Math.floor(resta)}:${String(Math.floor((resta % 1) * 60)).padStart(2, "0")}`}
+              {p.reloj}
+            </div>
+            <div style={{ height: 3, borderRadius: 2, background: "#e6eaf1", marginTop: 3 }}>
+              <div style={{ height: 3, borderRadius: 2, width: `${p.pct}%`, background: p.color }} />
             </div>
           </div>
         );
