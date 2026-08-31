@@ -281,7 +281,48 @@ function fechaHito(iso) {
 // Cuenta hacia arriba, no hacia atrás, y muestra debajo cuándo nació el caso.
 // El regresivo obligaba a hacer la resta de cabeza para saber de cuándo era;
 // así se ven las dos cosas y la barra dice a simple vista cuánto falta.
-const SLA_H = 48;
+// LOS TRES SLA DE LA CASCADA, por orden de gerencia:
+//
+//     0 ─────────── 36 ────── 40 ──── 48
+//          chofer     superv.  analista
+//
+// No son tres relojes paralelos: el plazo se pasa de mano en mano y quien lo
+// deja vencer se lo entrega al siguiente. Si nadie resuelve, el monto se cobra
+// al tercero.
+//
+// El reloj de la fila muestra SOLO el del tramo activo, con la etiqueta de
+// quién tiene la pelota ahora. Los tres juntos no caben y además no hacen
+// falta: lo que el analista necesita de un vistazo es de quién es el caso y
+// cuánto le queda a esa persona. La cascada completa se ve al desplegar.
+//
+// Ojo: acá están fijos y en pnr_sla_config también. Si gerencia los mueve hay
+// que cambiarlos en los dos lados — el front no lee la config porque leerla
+// obligaría a un viaje más en cada carga para tres números que cambian una vez
+// al año.
+const SLA_H = 48;                      // el de MELI, el que se cuadra con el portal
+const SLA_CHOFER = 36;
+const SLA_SUPERVISOR = 40;
+
+// De quién es el caso ahora y cuánto le queda a esa persona.
+function tramoActivo(transcurrido) {
+  if (transcurrido < SLA_CHOFER) {
+    return { quien: "chofer", tope: SLA_CHOFER, restante: SLA_CHOFER - transcurrido };
+  }
+  if (transcurrido < SLA_SUPERVISOR) {
+    return { quien: "supervisor", tope: SLA_SUPERVISOR, restante: SLA_SUPERVISOR - transcurrido };
+  }
+  if (transcurrido < SLA_H) {
+    return { quien: "analista", tope: SLA_H, restante: SLA_H - transcurrido };
+  }
+  return { quien: "vencido", tope: SLA_H, restante: SLA_H - transcurrido };
+}
+
+const ETIQUETA_TRAMO = {
+  chofer:     { texto: "chofer",     titulo: "El plazo del chofer está corriendo" },
+  supervisor: { texto: "supervisor", titulo: "El plazo del chofer venció: ahora es del supervisor" },
+  analista:   { texto: "TÚ",         titulo: "Venció el plazo del chofer y del supervisor: el caso es tuyo" },
+  vencido:    { texto: "vencido",    titulo: "Se pasaron las 48 h de MELI" },
+};
 
 function Reloj({ c, ahora }) {
   const g = POR_CLAVE[clasificar(c)];
@@ -309,22 +350,44 @@ function Reloj({ c, ahora }) {
   if (!inicio) return <span style={{ fontSize: 12, color: C.gris }}>—</span>;
 
   const transcurrido = (ahora - inicio) / 3600000;
-  const restante = SLA_H - transcurrido;
-  const pct = Math.max(0, Math.min(100, (transcurrido / SLA_H) * 100));
-  const color = restante < 6 ? C.ladrillo : restante < 24 ? C.naranja : C.navy;
+  const t = tramoActivo(transcurrido);
+  const eti = ETIQUETA_TRAMO[t.quien];
 
-  const h = Math.floor(transcurrido);
-  const m = Math.floor((transcurrido - h) * 60);
+  // Cuenta hacia ABAJO y no hacia arriba. Con un solo plazo el ascendente
+  // servía porque 48 estaba siempre a la vista; con tres topes distintos, un
+  // "22:14" obliga a saber contra qué tope se compara. Lo que hay que decidir
+  // es cuánto queda, así que se muestra eso.
+  const restante = Math.max(0, t.restante);
+  const h = Math.floor(restante);
+  const m = Math.floor((restante - h) * 60);
+
+  // El porcentaje es del tramo activo, no de las 48: la barra se llena cuando
+  // se agota el plazo de quien lo tiene ahora, que es lo que urge.
+  const pct = Math.max(0, Math.min(100, ((t.tope - t.restante) / t.tope) * 100));
+
+  // Rojo bajo el margen de la alerta final (3 h), y desde que el caso llega al
+  // analista: ahí ya no hay nadie más abajo en la cascada.
+  const color = t.quien === "vencido" ? C.gris
+    : t.quien === "analista" || t.restante < 3 ? C.ladrillo
+    : t.restante < 8 ? C.naranja
+    : C.navy;
 
   return (
     <span style={{ display: "block", lineHeight: 1.2 }}
-      title={restante > 0
-        ? `Quedan ${restante.toFixed(1)} h de las ${SLA_H}`
-        : `Vencido hace ${Math.abs(restante).toFixed(1)} h`}>
-      <span style={{ fontSize: 12.5, fontWeight: 600, color, fontVariantNumeric: "tabular-nums" }}>
-        {h}:{String(m).padStart(2, "0")}
+      title={`${eti.titulo}. Quedan ${t.restante.toFixed(1)} h de sus ${t.tope}. ` +
+             `MELI cierra en ${(SLA_H - transcurrido).toFixed(1)} h.`}>
+      <span style={{ fontSize: 13.5, fontWeight: 700, color, fontVariantNumeric: "tabular-nums" }}>
+        {t.quien === "vencido" ? "—" : `${h}:${String(m).padStart(2, "0")}`}
       </span>
-      <span style={{ fontSize: 9.5, color: "var(--texto-tenue)" }}> / {SLA_H} h</span>
+      <span style={{ fontSize: 9.5, color: "var(--texto-tenue)" }}> / {t.tope} h</span>
+
+      {/* De quién es el caso AHORA. Sin esto el número no dice nada: 3 horas
+          del chofer y 3 del analista piden acciones distintas. */}
+      <span style={{ display: "block", fontSize: 9, fontWeight: 700, color,
+        letterSpacing: 0.3, textTransform: "uppercase" }}>
+        {eti.texto}
+      </span>
+
       <span style={{ display: "block", height: 3, borderRadius: 2, background: "#e6eaf1", margin: "2px 0 1px" }}>
         <span style={{ display: "block", height: 3, borderRadius: 2, width: `${pct}%`, background: color }} />
       </span>
@@ -332,6 +395,60 @@ function Reloj({ c, ahora }) {
         {c.cuando_mx || "—"}
       </span>
     </span>
+  );
+}
+
+// ── Los tres plazos de un caso ─────────────────────────────────────────────
+// Solo se dibuja en el detalle. Muestra los tres tramos con su propio contador
+// y marca cuál está corriendo, para que se vea la cadena y no solo el eslabón.
+
+function CascadaSla({ c, ahora }) {
+  const inicio = c.fecha_caso ? new Date(c.fecha_caso).getTime() : null;
+  if (!inicio) return null;
+
+  const transcurrido = (ahora - inicio) / 3600000;
+  const activo = tramoActivo(transcurrido).quien;
+
+  const tramos = [
+    { quien: "chofer",     rotulo: "Chofer",     tope: SLA_CHOFER },
+    { quien: "supervisor", rotulo: "Supervisor", tope: SLA_SUPERVISOR },
+    { quien: "analista",   rotulo: "Analista",   tope: SLA_H },
+  ];
+
+  return (
+    <div style={{ display: "flex", gap: 8, marginBottom: 8, flexWrap: "wrap" }}>
+      {tramos.map((t) => {
+        const resta = t.tope - transcurrido;
+        const corriendo = activo === t.quien;
+        const vencido = resta <= 0;
+        // El de MELI (el del analista) en gris cuando no corre: existe para
+        // cuadrar con el portal, no para perseguirlo.
+        const color = vencido ? C.gris : corriendo ? (resta < 3 ? C.ladrillo : C.navy) : "var(--texto-suave)";
+
+        return (
+          <div key={t.quien}
+            title={vencido
+              ? `El plazo de ${t.rotulo.toLowerCase()} venció hace ${Math.abs(resta).toFixed(1)} h`
+              : `Quedan ${resta.toFixed(1)} h de las ${t.tope} de ${t.rotulo.toLowerCase()}`}
+            style={{
+              flex: "1 1 120px", minWidth: 110, padding: "6px 10px", borderRadius: 9,
+              background: corriendo ? "#eef2f8" : "#fff",
+              border: `1px solid ${corriendo ? C.navy : "var(--borde)"}`,
+            }}>
+            <div style={{ fontSize: 9.5, fontWeight: 700, letterSpacing: 0.3,
+              textTransform: "uppercase", color: corriendo ? C.navy : "var(--texto-tenue)" }}>
+              {t.rotulo} · {t.tope} h{corriendo ? " ←" : ""}
+            </div>
+            <div style={{ fontSize: 15, fontWeight: 700, color,
+              fontVariantNumeric: "tabular-nums" }}>
+              {vencido
+                ? "vencido"
+                : `${Math.floor(resta)}:${String(Math.floor((resta % 1) * 60)).padStart(2, "0")}`}
+            </div>
+          </div>
+        );
+      })}
+    </div>
   );
 }
 
@@ -1066,7 +1183,7 @@ function LineaTiempo({ movimientos }) {
   );
 }
 
-function Detalle({ c, onPedir, trayendo, supervisor, tarea, vueltas, movimientos, telefonos, telElegido, onElegirTel, onTelGuardado, onTareaCreada, onRepedir, onNotificar }) {
+function Detalle({ c, ahora, onPedir, trayendo, supervisor, tarea, vueltas, movimientos, telefonos, telElegido, onElegirTel, onTelGuardado, onTareaCreada, onRepedir, onNotificar }) {
   const [panel, setPanel] = useState(false);
   const [creando, setCreando] = useState(false);
   const [errorTarea, setErrorTarea] = useState("");
@@ -1213,6 +1330,16 @@ function Detalle({ c, onPedir, trayendo, supervisor, tarea, vueltas, movimientos
           </span>
         </div>
       )}
+
+      {/* ── La cascada completa ──────────────────────────────────────────
+          En la fila va un solo reloj, el del tramo activo. Acá los tres, porque
+          al abrir el caso lo que se necesita es otra cosa: saber cuándo le cae
+          a uno. Un analista que ve "supervisor 2:14" sabe que en dos horas el
+          caso es suyo y puede adelantarse en vez de enterarse cuando ya venció.
+
+          El plazo de MELI va último y en gris: es el que se cuadra con el
+          portal, no el que hay que perseguir. */}
+      <CascadaSla c={c} ahora={ahora} />
 
       <div style={{ display: "grid", gridTemplateColumns: "minmax(0,1.7fr) minmax(240px,1fr)", gap: 12 }}>
 
@@ -1538,7 +1665,7 @@ function Fila({ c, abierta, onAbrir, onPedir, trayendo, ahora, supervisor, tarea
           {dinero(c.monto)}
         </span>
       </div>
-      {abierta && <Detalle c={c} onPedir={onPedir} trayendo={trayendo} supervisor={supervisor}
+      {abierta && <Detalle c={c} ahora={ahora} onPedir={onPedir} trayendo={trayendo} supervisor={supervisor}
         tarea={tarea} vueltas={vueltas} movimientos={movimientos}
         telefonos={telefonos} telElegido={telElegido} onElegirTel={onElegirTel}
         onTelGuardado={onTelGuardado}
@@ -2194,7 +2321,7 @@ export default function Posventa() {
             }}>
               <span />
               <ColOrden campo="caso" orden={orden} onClick={ordenar}>Caso</ColOrden>
-              <ColOrden campo="sla" orden={orden} onClick={ordenar}>SLA 48 h</ColOrden>
+              <ColOrden campo="sla" orden={orden} onClick={ordenar}>SLA · TRAMO</ColOrden>
               <span>Conductor</span>
               <span>Ruta · centro</span>
               <span style={{ textAlign: "center" }}>Estado</span>
