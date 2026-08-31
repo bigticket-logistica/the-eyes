@@ -63,6 +63,34 @@ function Pct({ v, invertir }) {
   );
 }
 
+// El plazo del supervisor. Está acá y también en pnr_sla_config: el front lo usa
+// para pintar, la base para calcular. Si gerencia lo mueve hay que cambiarlo en
+// los dos lados.
+const SLA_SUPERVISOR = 40;
+
+// Horas promedio con su tope a la vista.
+//
+// Antes se mostraba el número solo — "34,1" — y no decía contra qué se compara.
+// Con el tope al lado se lee de una: 34 de 40 va apretado, 45 de 40 se pasó.
+//
+// El paréntesis es el denominador. Un promedio de tres casos y uno de doce se
+// veían idénticos, y el de tres se mueve entero con un caso raro.
+function Horas({ v, n }) {
+  if (v == null) return <span style={{ color: C.gris }}>—</span>;
+  const pasado = Number(v) > SLA_SUPERVISOR;
+  return (
+    <span title={pasado
+        ? `Se pasa del plazo de ${SLA_SUPERVISOR} h por ${(Number(v) - SLA_SUPERVISOR).toFixed(1)} h en promedio`
+        : `Dentro del plazo de ${SLA_SUPERVISOR} h`}>
+      <span style={{ fontWeight: pasado ? 700 : 500, color: pasado ? C.ladrillo : "inherit" }}>
+        {v}
+      </span>
+      <span style={{ color: C.gris, fontSize: 10 }}> /{SLA_SUPERVISOR}</span>
+      <span style={{ color: C.gris, fontSize: 10 }}> ({n})</span>
+    </span>
+  );
+}
+
 // ── Una cifra grande ───────────────────────────────────────────────────────
 
 function Cifra({ etiqueta, valor, nota, color = C.navy, tinte = "#fff" }) {
@@ -129,6 +157,20 @@ function Tabla({ columnas, filas, claveFila }) {
                 textTransform: "uppercase", color: C.gris, whiteSpace: "nowrap",
               }}>
                 {col.titulo}
+                {/* La (i) va en la CABECERA y no en un pie de tabla: la duda
+                    aparece mirando la columna, y un texto al final obliga a
+                    bajar, leer y volver a subir para saber qué se estaba
+                    mirando. Es title nativo y no un tooltip propio porque no
+                    hay que descubrirlo: el cursor de ayuda ya lo anuncia. */}
+                {col.ayuda && (
+                  <span title={col.ayuda}
+                    style={{ display: "inline-block", marginLeft: 4, width: 12, height: 12,
+                      borderRadius: "50%", border: `1px solid ${C.gris}`, color: C.gris,
+                      fontSize: 8.5, lineHeight: "11px", textAlign: "center",
+                      cursor: "help", fontWeight: 700, verticalAlign: "middle" }}>
+                    i
+                  </span>
+                )}
               </th>
             ))}
           </tr>
@@ -337,20 +379,30 @@ export default function TableroControl() {
         <Tabla claveFila={(f) => f.sc}
           filas={b1}
           columnas={[
-            { clave: "sc", titulo: "Centro" },
-            { clave: "pnr_total", titulo: "PNR", derecha: true, pinta: (f) => num(f.pnr_total) },
-            { clave: "anulados", titulo: "Anulados", derecha: true,
+            { clave: "sc", titulo: "Centro",
+              ayuda: "Centro de servicio donde ocurrió la entrega reclamada." },
+            { clave: "pnr_total", titulo: "PNR",
+              ayuda: "Reclamos que MELI abrió en el rango de fechas. Se cuenta por la fecha en que nació el caso, no por la de la ruta.", derecha: true, pinta: (f) => num(f.pnr_total) },
+            { clave: "anulados", titulo: "Anulados",
+              ayuda: "MELI cerró el caso a favor: no se cobra nada. Es el resultado que se busca.", derecha: true,
               pinta: (f) => <span style={{ color: C.verde }}>{num(f.anulados)}</span> },
-            { clave: "facturados", titulo: "Facturados", derecha: true,
+            { clave: "facturados", titulo: "Facturados",
+              ayuda: "MELI cobró el valor del producto. El caso se perdió.", derecha: true,
               pinta: (f) => <span style={{ color: C.ladrillo }}>{num(f.facturados)}</span> },
-            { clave: "esperando", titulo: "Esperando", derecha: true, pinta: (f) => num(f.esperando) },
-            { clave: "abiertos", titulo: "Abiertos", derecha: true, pinta: (f) => num(f.abiertos) },
-            { clave: "monto_total", titulo: "Monto total", derecha: true, pinta: (f) => dinero(f.monto_total) },
-            { clave: "monto_facturado", titulo: "Perdido", derecha: true,
+            { clave: "esperando", titulo: "Esperando",
+              ayuda: "Ya se hizo lo nuestro y decide MELI: comprobante cargado, en revisión o asignado.", derecha: true, pinta: (f) => num(f.esperando) },
+            { clave: "abiertos", titulo: "Abiertos",
+              ayuda: "Todavía dependen de nosotros: esperando comprobante o sin comprobante cargado.", derecha: true, pinta: (f) => num(f.abiertos) },
+            { clave: "monto_total", titulo: "Monto total",
+              ayuda: "Suma del valor de los productos de todos los PNR del rango.", derecha: true, pinta: (f) => dinero(f.monto_total) },
+            { clave: "monto_facturado", titulo: "Perdido",
+              ayuda: "Plata que MELI ya cobró. Es pérdida cerrada, no recuperable.", derecha: true,
               pinta: (f) => <span style={{ color: C.ladrillo }}>{dinero(f.monto_facturado)}</span> },
-            { clave: "monto_en_riesgo", titulo: "En riesgo", derecha: true,
+            { clave: "monto_en_riesgo", titulo: "En riesgo",
+              ayuda: "Valor de los casos abiertos y en revisión. Todavía se puede evitar perderlo.", derecha: true,
               pinta: (f) => <span style={{ color: C.naranja }}>{dinero(f.monto_en_riesgo)}</span> },
-            { clave: "pct_anulado", titulo: "% anulado", derecha: true,
+            { clave: "pct_anulado", titulo: "% anulado",
+              ayuda: "Anulados sobre los casos RESUELTOS (anulados + facturados). Los abiertos no entran al divisor: mientras un caso está abierto no se ganó ni se perdió.", derecha: true,
               pinta: (f) => <Pct v={f.pct_anulado} /> },
           ]} />
       </Bloque>
@@ -372,38 +424,45 @@ export default function TableroControl() {
         <Tabla claveFila={(f) => `${f.supervisor}|${f.sc}`}
           filas={b2}
           columnas={[
-            { clave: "supervisor", titulo: "Supervisor" },
-            { clave: "sc", titulo: "SC" },
+            { clave: "supervisor", titulo: "Supervisor",
+              ayuda: "Supervisor del centro donde ocurrió el reclamo." },
+            { clave: "sc", titulo: "SC",
+              ayuda: "Centro de servicio." },
             { clave: "pnr_total", titulo: "PNR", derecha: true, pinta: (f) => num(f.pnr_total) },
-            { clave: "tareas", titulo: "Tareas", derecha: true, pinta: (f) => num(f.tareas) },
-            { clave: "fotos_enviadas", titulo: "Con fotos", derecha: true,
+            { clave: "tareas", titulo: "Tareas",
+              ayuda: "Veces que un analista apretó Notificar y se creó la tarea de pedir fotos. Cero tareas con muchos PNR significa que nadie notificó: no es culpa del supervisor.", derecha: true, pinta: (f) => num(f.tareas) },
+            { clave: "fotos_enviadas", titulo: "Con fotos",
+              ayuda: "Tareas que el supervisor cerró subiendo la evidencia.", derecha: true,
               pinta: (f) => <span style={{ color: C.verde }}>{num(f.fotos_enviadas)}</span> },
-            { clave: "tareas_vencidas", titulo: "Vencidas", derecha: true,
+            { clave: "tareas_vencidas", titulo: "Vencidas",
+              ayuda: "Tareas que pasaron el plazo de 40 h sin cerrarse. Quedan bloqueadas en la bitácora como no cumplidas.", derecha: true,
               pinta: (f) => f.tareas_vencidas > 0
                 ? <span style={{ color: C.ladrillo, fontWeight: 700 }}>{num(f.tareas_vencidas)}</span>
                 : <span style={{ color: C.gris }}>0</span> },
-            { clave: "reaperturas", titulo: "Reaperturas", derecha: true,
+            { clave: "reaperturas", titulo: "Reaperturas",
+              ayuda: "Veces que la torre rechazó la evidencia y pidió otra. Cada reapertura es trabajo que se repite.", derecha: true,
               pinta: (f) => num(f.reaperturas) },
-            { clave: "pct_sla_fotos", titulo: "% SLA fotos", derecha: true,
+            { clave: "pct_sla_fotos", titulo: "% SLA fotos",
+              ayuda: "Tareas con fotos subidas dentro de las 40 h, sobre las que ya se definieron. \"Sin datos\" significa que no hay tareas: sin Notificar no hay nada que cumplir. Declarar que el conductor no tiene pruebas cuenta como cumplido.", derecha: true,
               pinta: (f) => <Pct v={f.pct_sla_fotos} /> },
-            { clave: "pct_sla_comprobante", titulo: "% SLA compr.", derecha: true,
+            { clave: "pct_sla_comprobante", titulo: "% SLA compr.",
+              ayuda: "Casos con el comprobante cargado en MELI dentro de las 40 h. Es el SLA que de verdad decide el caso, y el que tiene volumen suficiente para leerse.", derecha: true,
               pinta: (f) => <Pct v={f.pct_sla_comprobante} /> },
             // El promedio va con su denominador entre paréntesis. Un promedio de
             // una sola tarea no es una medición, y quien lee tiene que poder ver
             // de cuántas sale antes de sacar conclusiones.
             { clave: "horas_prom_fotos", titulo: "h a fotos", derecha: true,
-              pinta: (f) => f.horas_prom_fotos == null
-                ? <span style={{ color: C.gris }}>—</span>
-                : <span>{f.horas_prom_fotos}
-                    <span style={{ color: C.gris, fontSize: 10 }}> ({f.n_horas_fotos})</span>
-                  </span> },
+              ayuda: `Horas promedio desde que nació el PNR hasta que el supervisor `
+                + `subió las fotos. El plazo son ${SLA_SUPERVISOR} h. Entre paréntesis, `
+                + `sobre cuántos casos se calcula el promedio.`,
+              pinta: (f) => <Horas v={f.horas_prom_fotos} n={f.n_horas_fotos} /> },
             { clave: "horas_prom_comprobante", titulo: "h a compr.", derecha: true,
-              pinta: (f) => f.horas_prom_comprobante == null
-                ? <span style={{ color: C.gris }}>—</span>
-                : <span>{f.horas_prom_comprobante}
-                    <span style={{ color: C.gris, fontSize: 10 }}> ({f.n_horas_comprobante})</span>
-                  </span> },
+              ayuda: `Horas promedio desde que nació el PNR hasta que el comprobante `
+                + `quedó cargado en Mercado Libre. El plazo son ${SLA_SUPERVISOR} h. `
+                + `Entre paréntesis, sobre cuántos casos se calcula.`,
+              pinta: (f) => <Horas v={f.horas_prom_comprobante} n={f.n_horas_comprobante} /> },
             { clave: "monto_en_riesgo", titulo: "En riesgo", derecha: true,
+              ayuda: "Valor de los casos abiertos y en revisión de este supervisor. Todavía se puede evitar perderlo.",
               pinta: (f) => dinero(f.monto_en_riesgo) },
           ]} />
       </Bloque>
@@ -440,26 +499,35 @@ export default function TableroControl() {
           filas={b3}
           columnas={[
             { clave: "sc", titulo: "Centro" },
-            { clave: "con_prueba", titulo: "Con prueba", derecha: true,
+            { clave: "con_prueba", titulo: "Con prueba",
+              ayuda: "Casos donde el comprobante quedó cargado en MELI.", derecha: true,
               pinta: (f) => <span style={{ color: C.verde }}>{num(f.con_prueba)}</span> },
-            { clave: "sin_prueba", titulo: "Sin prueba", derecha: true,
+            { clave: "sin_prueba", titulo: "Sin prueba",
+              ayuda: "Casos respondidos a MELI SIN comprobante cargado. Se contestó sin respaldo.", derecha: true,
               pinta: (f) => f.sin_prueba > 0
                 ? <span style={{ color: C.ladrillo, fontWeight: 700 }}>{num(f.sin_prueba)}</span>
                 : <span style={{ color: C.gris }}>0</span> },
-            { clave: "pendiente", titulo: "Pendientes", derecha: true, pinta: (f) => num(f.pendiente) },
-            { clave: "con_prueba_anulado", titulo: "CP anulados", derecha: true,
+            { clave: "pendiente", titulo: "Pendientes",
+              ayuda: "Todavía se espera el comprobante: el caso sigue abierto.", derecha: true, pinta: (f) => num(f.pendiente) },
+            { clave: "con_prueba_anulado", titulo: "CP anulados",
+              ayuda: "De los que tenían prueba, cuántos se ganaron.", derecha: true,
               pinta: (f) => num(f.con_prueba_anulado) },
-            { clave: "con_prueba_facturado", titulo: "CP facturados", derecha: true,
+            { clave: "con_prueba_facturado", titulo: "CP facturados",
+              ayuda: "De los que tenían prueba, cuántos se perdieron igual.", derecha: true,
               pinta: (f) => num(f.con_prueba_facturado) },
-            { clave: "sin_prueba_facturado", titulo: "SP facturados", derecha: true,
+            { clave: "sin_prueba_facturado", titulo: "SP facturados",
+              ayuda: "De los respondidos sin prueba, cuántos se perdieron. Es el costo directo de no cargar la evidencia.", derecha: true,
               pinta: (f) => f.sin_prueba_facturado > 0
                 ? <span style={{ color: C.ladrillo, fontWeight: 700 }}>{num(f.sin_prueba_facturado)}</span>
                 : <span style={{ color: C.gris }}>0</span> },
-            { clave: "monto_sin_prueba", titulo: "Monto SP", derecha: true,
+            { clave: "monto_sin_prueba", titulo: "Monto SP",
+              ayuda: "Valor de los casos respondidos sin comprobante.", derecha: true,
               pinta: (f) => dinero(f.monto_sin_prueba) },
-            { clave: "pct_exito_con_prueba", titulo: "% éxito CP", derecha: true,
+            { clave: "pct_exito_con_prueba", titulo: "% éxito CP",
+              ayuda: "Anulados sobre resueltos, entre los que SÍ tenían prueba cargada.", derecha: true,
               pinta: (f) => <Pct v={f.pct_exito_con_prueba} /> },
-            { clave: "pct_exito_sin_prueba", titulo: "% éxito SP", derecha: true,
+            { clave: "pct_exito_sin_prueba", titulo: "% éxito SP",
+              ayuda: "Anulados sobre resueltos, entre los que NO tenían prueba. Comparado con el anterior dice cuánto sirve de verdad cargar la evidencia.", derecha: true,
               pinta: (f) => <Pct v={f.pct_exito_sin_prueba} /> },
           ]} />
       </Bloque>
