@@ -1,0 +1,468 @@
+import { useState, useEffect, useCallback } from "react";
+import { sb } from "../shared/supabase.js";
+
+// ═══════════════════════════════════════════════════════════════════════════
+// TABLERO DE CONTROL · PNR
+//
+// Tres bloques, en el orden en que se leen:
+//
+//   1  PNR y montos. Cuántos hay, cuántos se ganaron, cuántos se cobran, y la
+//      plata asociada. General y por centro.
+//   2  Tareas por supervisor. Los dos SLA que le corresponden, las reaperturas
+//      y los dos tiempos de respuesta.
+//   3  Evidencia. Con prueba cargada contra respondido sin prueba, y qué pasó
+//      con cada grupo ante MELI.
+//
+// LOS NÚMEROS NO SE CALCULAN ACÁ
+//   Vienen de fn_pnr_bloque1, 2 y 3. Si el front sumara, el CSV diría otra cosa
+//   y nadie sabría cuál de los dos creer. Y los porcentajes son el caso peor:
+//   el promedio de porcentajes no es el porcentaje del total, así que un total
+//   sumado en el cliente sale mal por definición.
+//
+// EL CSV Y NO XLSX
+//   El analista lo abre, lo modifica y lo manda. Un xlsx formateado se ve mejor
+//   la primera vez y estorba a partir de la segunda.
+// ═══════════════════════════════════════════════════════════════════════════
+
+const C = {
+  navy: "#1a3a6b", navyTenue: "#eef2f8",
+  naranja: "#F47B20", naranjaTenue: "#fdf1e6",
+  ladrillo: "#9e3b1b", ladrilloTenue: "#faece6",
+  verde: "#1f7a5c", verdeTenue: "#eaf5f1",
+  gris: "#8a94a6", grisTenue: "#f4f6f9",
+};
+
+function hoyMX() {
+  return new Date().toLocaleDateString("en-CA", { timeZone: "America/Mexico_City" });
+}
+
+function haceDiasMX(n) {
+  const d = new Date();
+  d.setDate(d.getDate() - n);
+  return d.toLocaleDateString("en-CA", { timeZone: "America/Mexico_City" });
+}
+
+const dinero = (n) =>
+  n == null ? "—" : "$" + Number(n).toLocaleString("es-MX", { maximumFractionDigits: 0 });
+
+const num = (n) => (n == null ? "—" : Number(n).toLocaleString("es-MX"));
+
+// Porcentaje con su sentido: verde si cumple, ladrillo si no. El umbral no es
+// una opinión de diseño — es el 80% que gerencia pide.
+const META_PCT = 80;
+
+function Pct({ v, invertir }) {
+  if (v == null) {
+    return <span style={{ color: C.gris, fontSize: 11 }}>sin datos</span>;
+  }
+  const bien = invertir ? Number(v) <= 100 - META_PCT : Number(v) >= META_PCT;
+  return (
+    <span style={{ fontWeight: 700, color: bien ? C.verde : C.ladrillo }}>
+      {Number(v).toFixed(1)}%
+    </span>
+  );
+}
+
+// ── Una cifra grande ───────────────────────────────────────────────────────
+
+function Cifra({ etiqueta, valor, nota, color = C.navy, tinte = "#fff" }) {
+  return (
+    <div style={{ flex: "1 1 140px", minWidth: 130, padding: "10px 13px",
+      borderRadius: 10, background: tinte, border: `1px solid ${color}22` }}>
+      <div style={{ fontSize: 9.5, fontWeight: 700, letterSpacing: 0.3,
+        textTransform: "uppercase", color: C.gris }}>
+        {etiqueta}
+      </div>
+      <div style={{ fontSize: 22, fontWeight: 800, color, lineHeight: 1.15,
+        fontVariantNumeric: "tabular-nums" }}>
+        {valor}
+      </div>
+      {nota && (
+        <div style={{ fontSize: 10, color: C.gris, marginTop: 1 }}>{nota}</div>
+      )}
+    </div>
+  );
+}
+
+// ── Envoltorio de bloque ───────────────────────────────────────────────────
+
+function Bloque({ n, titulo, subtitulo, children }) {
+  return (
+    <div style={{ border: "1px solid var(--borde)", borderRadius: 14,
+      background: "#fff", marginBottom: 16, overflow: "hidden" }}>
+      <div style={{ display: "flex", alignItems: "baseline", gap: 9,
+        padding: "11px 16px", background: C.navyTenue,
+        borderBottom: "1px solid var(--borde)" }}>
+        <span style={{ display: "inline-flex", alignItems: "center",
+          justifyContent: "center", width: 22, height: 22, borderRadius: "50%",
+          background: C.navy, color: "#fff", fontSize: 12, fontWeight: 700 }}>
+          {n}
+        </span>
+        <span style={{ fontSize: 14.5, fontWeight: 700, color: C.navy }}>{titulo}</span>
+        {subtitulo && (
+          <span style={{ fontSize: 11.5, color: C.gris }}>{subtitulo}</span>
+        )}
+      </div>
+      <div style={{ padding: 14 }}>{children}</div>
+    </div>
+  );
+}
+
+// ── Tabla ──────────────────────────────────────────────────────────────────
+// La fila TOTAL viene de la base, no sumada acá, y se pinta distinto para que no
+// se confunda con un centro más.
+
+function Tabla({ columnas, filas, claveFila }) {
+  if (!filas.length) {
+    return <div style={{ fontSize: 12, color: C.gris, padding: 8 }}>Sin datos en el rango.</div>;
+  }
+  return (
+    <div style={{ overflowX: "auto" }}>
+      <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+        <thead>
+          <tr>
+            {columnas.map((col) => (
+              <th key={col.clave} style={{
+                textAlign: col.derecha ? "right" : "left",
+                padding: "6px 8px", borderBottom: `1px solid ${C.navy}33`,
+                fontSize: 9.5, fontWeight: 700, letterSpacing: 0.3,
+                textTransform: "uppercase", color: C.gris, whiteSpace: "nowrap",
+              }}>
+                {col.titulo}
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {filas.map((f, i) => {
+            const total = !!f.es_total;
+            return (
+              <tr key={claveFila(f, i)} style={{
+                background: total ? C.navyTenue : i % 2 ? C.grisTenue : "#fff",
+                fontWeight: total ? 700 : 400,
+              }}>
+                {columnas.map((col) => (
+                  <td key={col.clave} style={{
+                    padding: "6px 8px", borderBottom: "1px solid var(--borde)",
+                    textAlign: col.derecha ? "right" : "left",
+                    fontVariantNumeric: col.derecha ? "tabular-nums" : "normal",
+                    whiteSpace: "nowrap",
+                  }}>
+                    {col.pinta ? col.pinta(f) : f[col.clave]}
+                  </td>
+                ))}
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+// ── Módulo ─────────────────────────────────────────────────────────────────
+
+export default function TableroControl() {
+  // Últimos 30 días por defecto. No el periodo de MELI: ese sirve para cuadrar
+  // contra el portal, y este tablero es de gestión — un rango móvil deja ver si
+  // la semana viene mejor o peor que la anterior, cosa que un periodo cerrado
+  // no muestra hasta que termina.
+  const [desde, setDesde] = useState(() => haceDiasMX(30));
+  const [hasta, setHasta] = useState(() => hoyMX());
+
+  const [b1, setB1] = useState([]);
+  const [b2, setB2] = useState([]);
+  const [b3, setB3] = useState([]);
+  const [alertas, setAlertas] = useState([]);
+  const [cargando, setCargando] = useState(true);
+  const [error, setError] = useState(null);
+  const [bajando, setBajando] = useState(false);
+
+  const cargar = useCallback(async () => {
+    setCargando(true);
+    setError(null);
+    const args = { p_desde: desde, p_hasta: hasta };
+    const [r1, r2, r3, ra] = await Promise.all([
+      sb.rpc("fn_pnr_bloque1", args),
+      sb.rpc("fn_pnr_bloque2", args),
+      sb.rpc("fn_pnr_bloque3", args),
+      sb.from("vw_pnr_sla_alertas").select("*"),
+    ]);
+    const malo = r1.error || r2.error || r3.error;
+    if (malo) setError(malo.message);
+    setB1(r1.data || []);
+    setB2(r2.data || []);
+    setB3(r3.data || []);
+    setAlertas(ra.error ? [] : (ra.data || []));
+    setCargando(false);
+  }, [desde, hasta]);
+
+  useEffect(() => { cargar(); }, [cargar]);
+
+  // ── El CSV ───────────────────────────────────────────────────────────────
+  // Baja el DETALLE, un caso por fila, no los totales. El analista agrupa como
+  // necesite en su planilla; con los totales ya sumados solo puede leerlos.
+  async function bajarCsv() {
+    setBajando(true);
+    setError(null);
+    try {
+      const { data, error: e } = await sb.from("vw_pnr_tablero_detalle")
+        .select("*")
+        .gte("dia", desde)
+        .lte("dia", hasta)
+        .order("dia", { ascending: false });
+      if (e) throw new Error(e.message);
+      if (!data || !data.length) throw new Error("No hay casos en ese rango.");
+
+      const cols = Object.keys(data[0]);
+
+      // Punto y coma como separador y BOM al inicio: Excel en español abre el
+      // CSV con coma como decimal, así que con comas de separador mete todo en
+      // una columna. Y sin el BOM los acentos salen rotos.
+      const escapa = (v) => {
+        if (v == null) return "";
+        const s = String(v);
+        return /[";\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+      };
+      const csv = "\uFEFF"
+        + cols.join(";") + "\n"
+        + data.map((f) => cols.map((c) => escapa(f[c])).join(";")).join("\n");
+
+      const url = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8" }));
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = desde === hasta
+        ? `pnr_${desde}.csv`
+        : `pnr_${desde}_a_${hasta}.csv`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (e) {
+      setError(e.message);
+    } finally {
+      setBajando(false);
+    }
+  }
+
+  const total = b1.find((f) => f.es_total) || {};
+  const t3 = b3.find((f) => f.es_total) || {};
+
+  return (
+    <div>
+      {/* ── Rango y descarga ──────────────────────────────────────────── */}
+      <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap",
+        marginBottom: 14 }}>
+        <span style={{ fontSize: 11, color: C.gris, textTransform: "uppercase",
+          letterSpacing: 0.3, fontWeight: 700 }}>Rango</span>
+        <input type="date" value={desde} max={hasta} onChange={(e) => setDesde(e.target.value)}
+          style={{ fontSize: 12, padding: "5px 8px", borderRadius: 7,
+            border: "1px solid var(--borde)" }} />
+        <span style={{ fontSize: 12, color: C.gris }}>a</span>
+        <input type="date" value={hasta} min={desde} max={hoyMX()}
+          onChange={(e) => setHasta(e.target.value)}
+          style={{ fontSize: 12, padding: "5px 8px", borderRadius: 7,
+            border: "1px solid var(--borde)" }} />
+
+        {/* Atajos: el día único es lo que más se pide y con dos calendarios
+            cuesta tres clics. Acá es uno. */}
+        <button onClick={() => { setDesde(hoyMX()); setHasta(hoyMX()); }}
+          style={{ fontSize: 11.5, padding: "5px 10px" }}>Hoy</button>
+        <button onClick={() => { setDesde(haceDiasMX(1)); setHasta(haceDiasMX(1)); }}
+          style={{ fontSize: 11.5, padding: "5px 10px" }}>Ayer</button>
+        <button onClick={() => { setDesde(haceDiasMX(7)); setHasta(hoyMX()); }}
+          style={{ fontSize: 11.5, padding: "5px 10px" }}>7 días</button>
+        <button onClick={() => { setDesde(haceDiasMX(30)); setHasta(hoyMX()); }}
+          style={{ fontSize: 11.5, padding: "5px 10px" }}>30 días</button>
+
+        <button onClick={cargar} disabled={cargando}
+          style={{ fontSize: 11.5, padding: "5px 11px", marginLeft: 4 }}>
+          {cargando ? "…" : "Actualizar"}
+        </button>
+
+        <button onClick={bajarCsv} disabled={bajando} className="btn-navy"
+          title="Baja un caso por fila, para agrupar en la planilla"
+          style={{ fontSize: 12, fontWeight: 600, padding: "6px 14px", borderRadius: 8,
+            marginLeft: "auto" }}>
+          {bajando ? "Generando…" : "↓ Descargar CSV"}
+        </button>
+      </div>
+
+      {error && (
+        <div style={{ background: C.ladrilloTenue, border: `1px solid ${C.ladrillo}`,
+          color: C.ladrillo, borderRadius: 10, padding: "10px 14px", fontSize: 12.5,
+          marginBottom: 14 }}>
+          {error}
+        </div>
+      )}
+
+      {/* ── La alerta del cierre ──────────────────────────────────────────
+          Un preliminar sin aviso se lee como definitivo, y de ese número salen
+          incentivos. Va arriba de todo y no se puede cerrar. */}
+      {alertas.map((a) => (
+        <div key={a.mes} style={{ background: C.naranjaTenue,
+          border: `1px solid ${C.naranja}`, borderRadius: 10, padding: "9px 14px",
+          fontSize: 12.5, marginBottom: 10, lineHeight: 1.4 }}>
+          <strong style={{ color: C.ladrillo }}>
+            Cierre de {a.mes} · {a.estado}
+          </strong>
+          {" — "}{a.alerta}
+          {a.casos_sin_tarea > 0 && (
+            <span style={{ display: "block", fontSize: 11.5, color: C.gris, marginTop: 2 }}>
+              {a.casos_sin_tarea} caso(s) de ese mes sin tarea: nadie apretó Notificar, así
+              que no entran al SLA de ningún supervisor.
+            </span>
+          )}
+        </div>
+      ))}
+
+      {/* ── BLOQUE 1 ─────────────────────────────────────────────────── */}
+      <Bloque n={1} titulo="PNR y montos" subtitulo="general y por centro">
+        <div style={{ display: "flex", gap: 9, flexWrap: "wrap", marginBottom: 13 }}>
+          <Cifra etiqueta="PNR en el rango" valor={num(total.pnr_total)}
+            nota={`${num(total.resueltos)} con desenlace`} />
+          <Cifra etiqueta="Anulados" valor={num(total.anulados)}
+            nota="se ganaron" color={C.verde} tinte={C.verdeTenue} />
+          <Cifra etiqueta="Facturados" valor={num(total.facturados)}
+            nota="se cobran" color={C.ladrillo} tinte={C.ladrilloTenue} />
+          <Cifra etiqueta="Monto perdido" valor={dinero(total.monto_facturado)}
+            color={C.ladrillo} tinte={C.ladrilloTenue} />
+          <Cifra etiqueta="Monto en riesgo" valor={dinero(total.monto_en_riesgo)}
+            nota="abiertos y en revisión" color={C.naranja} tinte={C.naranjaTenue} />
+          <Cifra etiqueta="% anulado" valor={total.pct_anulado != null
+              ? `${Number(total.pct_anulado).toFixed(1)}%` : "—"}
+            nota="sobre los resueltos"
+            color={Number(total.pct_anulado) >= META_PCT ? C.verde : C.naranja}
+            tinte={Number(total.pct_anulado) >= META_PCT ? C.verdeTenue : C.naranjaTenue} />
+        </div>
+
+        <Tabla claveFila={(f) => f.sc}
+          filas={b1}
+          columnas={[
+            { clave: "sc", titulo: "Centro" },
+            { clave: "pnr_total", titulo: "PNR", derecha: true, pinta: (f) => num(f.pnr_total) },
+            { clave: "anulados", titulo: "Anulados", derecha: true,
+              pinta: (f) => <span style={{ color: C.verde }}>{num(f.anulados)}</span> },
+            { clave: "facturados", titulo: "Facturados", derecha: true,
+              pinta: (f) => <span style={{ color: C.ladrillo }}>{num(f.facturados)}</span> },
+            { clave: "esperando", titulo: "Esperando", derecha: true, pinta: (f) => num(f.esperando) },
+            { clave: "abiertos", titulo: "Abiertos", derecha: true, pinta: (f) => num(f.abiertos) },
+            { clave: "monto_total", titulo: "Monto total", derecha: true, pinta: (f) => dinero(f.monto_total) },
+            { clave: "monto_facturado", titulo: "Perdido", derecha: true,
+              pinta: (f) => <span style={{ color: C.ladrillo }}>{dinero(f.monto_facturado)}</span> },
+            { clave: "monto_en_riesgo", titulo: "En riesgo", derecha: true,
+              pinta: (f) => <span style={{ color: C.naranja }}>{dinero(f.monto_en_riesgo)}</span> },
+            { clave: "pct_anulado", titulo: "% anulado", derecha: true,
+              pinta: (f) => <Pct v={f.pct_anulado} /> },
+          ]} />
+      </Bloque>
+
+      {/* ── BLOQUE 2 ─────────────────────────────────────────────────── */}
+      <Bloque n={2} titulo="Tareas por supervisor"
+        subtitulo="los dos SLA que le corresponden, reaperturas y tiempos">
+        {/* Los dos SLA se explican acá y no en un tooltip: son distintos y la
+            diferencia entre ellos es justamente lo que hay que mirar. */}
+        <div style={{ fontSize: 11.5, color: C.gris, marginBottom: 11, lineHeight: 1.45 }}>
+          <strong style={{ color: C.navy }}>SLA fotos</strong>: subir la evidencia a la
+          tarea que le crea The Eyes.{" "}
+          <strong style={{ color: C.navy }}>SLA comprobante</strong>: cargarlo en Mercado
+          Libre, que es lo que decide el caso. Un supervisor puede cumplir el primero y
+          perder igual si no hace el segundo. Los dos se miden desde que nació el PNR, con
+          plazo de 40 h.
+        </div>
+
+        <Tabla claveFila={(f) => `${f.supervisor}|${f.sc}`}
+          filas={b2}
+          columnas={[
+            { clave: "supervisor", titulo: "Supervisor" },
+            { clave: "sc", titulo: "SC" },
+            { clave: "pnr_total", titulo: "PNR", derecha: true, pinta: (f) => num(f.pnr_total) },
+            { clave: "tareas", titulo: "Tareas", derecha: true, pinta: (f) => num(f.tareas) },
+            { clave: "fotos_enviadas", titulo: "Con fotos", derecha: true,
+              pinta: (f) => <span style={{ color: C.verde }}>{num(f.fotos_enviadas)}</span> },
+            { clave: "tareas_vencidas", titulo: "Vencidas", derecha: true,
+              pinta: (f) => f.tareas_vencidas > 0
+                ? <span style={{ color: C.ladrillo, fontWeight: 700 }}>{num(f.tareas_vencidas)}</span>
+                : <span style={{ color: C.gris }}>0</span> },
+            { clave: "reaperturas", titulo: "Reaperturas", derecha: true,
+              pinta: (f) => num(f.reaperturas) },
+            { clave: "pct_sla_fotos", titulo: "% SLA fotos", derecha: true,
+              pinta: (f) => <Pct v={f.pct_sla_fotos} /> },
+            { clave: "pct_sla_comprobante", titulo: "% SLA compr.", derecha: true,
+              pinta: (f) => <Pct v={f.pct_sla_comprobante} /> },
+            // El promedio va con su denominador entre paréntesis. Un promedio de
+            // una sola tarea no es una medición, y quien lee tiene que poder ver
+            // de cuántas sale antes de sacar conclusiones.
+            { clave: "horas_prom_fotos", titulo: "h a fotos", derecha: true,
+              pinta: (f) => f.horas_prom_fotos == null
+                ? <span style={{ color: C.gris }}>—</span>
+                : <span>{f.horas_prom_fotos}
+                    <span style={{ color: C.gris, fontSize: 10 }}> ({f.n_horas_fotos})</span>
+                  </span> },
+            { clave: "horas_prom_comprobante", titulo: "h a compr.", derecha: true,
+              pinta: (f) => f.horas_prom_comprobante == null
+                ? <span style={{ color: C.gris }}>—</span>
+                : <span>{f.horas_prom_comprobante}
+                    <span style={{ color: C.gris, fontSize: 10 }}> ({f.n_horas_comprobante})</span>
+                  </span> },
+            { clave: "monto_en_riesgo", titulo: "En riesgo", derecha: true,
+              pinta: (f) => dinero(f.monto_en_riesgo) },
+          ]} />
+      </Bloque>
+
+      {/* ── BLOQUE 3 ─────────────────────────────────────────────────── */}
+      <Bloque n={3} titulo="Evidencia" subtitulo="con prueba cargada vs. respondido sin prueba">
+        <div style={{ display: "flex", gap: 9, flexWrap: "wrap", marginBottom: 13 }}>
+          <Cifra etiqueta="Con prueba" valor={num(t3.con_prueba)}
+            nota={`${num(t3.con_prueba_anulado)} anulados`} color={C.verde} tinte={C.verdeTenue} />
+          <Cifra etiqueta="Sin prueba" valor={num(t3.sin_prueba)}
+            nota="respondidos sin comprobante" color={C.ladrillo} tinte={C.ladrilloTenue} />
+          <Cifra etiqueta="Pendientes" valor={num(t3.pendiente)} nota="todavía se espera" />
+          <Cifra etiqueta="Monto sin prueba" valor={dinero(t3.monto_sin_prueba)}
+            color={C.ladrillo} tinte={C.ladrilloTenue} />
+          <Cifra etiqueta="Perdido sin prueba" valor={dinero(t3.monto_perdido_sin_prueba)}
+            nota="el costo de no cargar" color={C.ladrillo} tinte={C.ladrilloTenue} />
+        </div>
+
+        {/* La comparación de los dos porcentajes de éxito es el número más útil
+            del tablero: dice cuánto sirve de verdad cargar la evidencia. Si
+            fueran parecidos, el esfuerzo estaría mal dirigido. */}
+        <div style={{ display: "flex", gap: 9, flexWrap: "wrap", marginBottom: 13 }}>
+          <Cifra etiqueta="% éxito con prueba"
+            valor={t3.pct_exito_con_prueba != null
+              ? `${Number(t3.pct_exito_con_prueba).toFixed(1)}%` : "—"}
+            nota="anulados sobre resueltos" color={C.verde} tinte={C.verdeTenue} />
+          <Cifra etiqueta="% éxito sin prueba"
+            valor={t3.pct_exito_sin_prueba != null
+              ? `${Number(t3.pct_exito_sin_prueba).toFixed(1)}%` : "—"}
+            nota="anulados sobre resueltos" color={C.ladrillo} tinte={C.ladrilloTenue} />
+        </div>
+
+        <Tabla claveFila={(f) => f.sc}
+          filas={b3}
+          columnas={[
+            { clave: "sc", titulo: "Centro" },
+            { clave: "con_prueba", titulo: "Con prueba", derecha: true,
+              pinta: (f) => <span style={{ color: C.verde }}>{num(f.con_prueba)}</span> },
+            { clave: "sin_prueba", titulo: "Sin prueba", derecha: true,
+              pinta: (f) => f.sin_prueba > 0
+                ? <span style={{ color: C.ladrillo, fontWeight: 700 }}>{num(f.sin_prueba)}</span>
+                : <span style={{ color: C.gris }}>0</span> },
+            { clave: "pendiente", titulo: "Pendientes", derecha: true, pinta: (f) => num(f.pendiente) },
+            { clave: "con_prueba_anulado", titulo: "CP anulados", derecha: true,
+              pinta: (f) => num(f.con_prueba_anulado) },
+            { clave: "con_prueba_facturado", titulo: "CP facturados", derecha: true,
+              pinta: (f) => num(f.con_prueba_facturado) },
+            { clave: "sin_prueba_facturado", titulo: "SP facturados", derecha: true,
+              pinta: (f) => f.sin_prueba_facturado > 0
+                ? <span style={{ color: C.ladrillo, fontWeight: 700 }}>{num(f.sin_prueba_facturado)}</span>
+                : <span style={{ color: C.gris }}>0</span> },
+            { clave: "monto_sin_prueba", titulo: "Monto SP", derecha: true,
+              pinta: (f) => dinero(f.monto_sin_prueba) },
+            { clave: "pct_exito_con_prueba", titulo: "% éxito CP", derecha: true,
+              pinta: (f) => <Pct v={f.pct_exito_con_prueba} /> },
+            { clave: "pct_exito_sin_prueba", titulo: "% éxito SP", derecha: true,
+              pinta: (f) => <Pct v={f.pct_exito_sin_prueba} /> },
+          ]} />
+      </Bloque>
+    </div>
+  );
+}

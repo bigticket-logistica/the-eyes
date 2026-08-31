@@ -1,6 +1,7 @@
 import { Fragment, useState, useEffect, useMemo, useCallback } from "react";
 import { sb } from "../shared/supabase.js";
 import ChatPosventa from "./ChatPosventa.jsx";
+import TableroControl from "./TableroControl.jsx";
 
 // ── Posventa ───────────────────────────────────────────────────────────────
 // Hoy solo PNR; las devoluciones entran después como una segunda vista del
@@ -83,6 +84,7 @@ const VISTAS = [
   { clave: "pnr",          etiqueta: "PNR",           activa: true  },
   { clave: "devoluciones", etiqueta: "Devoluciones",  activa: false },
   { clave: "chat",         etiqueta: "Chat Posventa", activa: true  },
+  { clave: "tablero",      etiqueta: "Tablero de Control", activa: true },
 ];
 
 // Paleta. Navy y naranja son los institucionales; los otros tres se derivan
@@ -2255,6 +2257,12 @@ export default function Posventa() {
         <div style={{ height: "calc(100vh - 150px)", minHeight: 420 }}>
           <ChatPosventa />
         </div>
+      ) : vista === "tablero" ? (
+        /* El tablero tiene su propio rango de fechas y no usa el selector de
+           periodo de la barra: son dos preguntas distintas. El periodo sirve
+           para cuadrar contra el portal de MELI, el rango para ver si la semana
+           viene mejor que la anterior. */
+        <TableroControl />
       ) : (
       <Fragment>
 
