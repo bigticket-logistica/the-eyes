@@ -1083,7 +1083,10 @@ function Miniaturas({ fotos }) {
   );
 }
 
-function Pruebas({ tarea, vueltas, onRepedir }) {
+function Pruebas({ tarea, vueltas, onRepedir, onAprobar }) {
+  // Una vez aprobada no se vuelve a ofrecer la decisión: la tarea pasó a otra
+  // fase y lo que falta —cargar el comprobante— no lo hace el analista.
+  const yaAprobada = !!tarea?.aprobada_en;
   const [pidiendo, setPidiendo] = useState(false);
   const [motivo, setMotivo] = useState("");
   if (!tarea) return null;
@@ -1211,12 +1214,50 @@ function Pruebas({ tarea, vueltas, onRepedir }) {
             </div>
           </div>
         ) : (
-          <button onClick={() => setPidiendo(true)}
-            style={{ marginTop: 8, fontSize: 11.5, padding: "5px 11px", borderRadius: 8,
-              border: "1px solid var(--borde)", background: "#fff",
-              color: "var(--texto-suave)", cursor: "pointer" }}>
-            Estas pruebas no sirven, pedir otras
-          </button>
+          /* ── APROBADO Y RECHAZADO ──────────────────────────────────────
+             Los dos juntos y con el mismo peso visual: son las dos salidas de
+             la misma decisión y el analista elige una. Antes solo estaba el
+             rechazo, así que aprobar era no hacer nada — y no hacer nada no
+             manda el WhatsApp que le dice al supervisor que ahora le toca
+             cargar el comprobante en Logistic.
+
+             Aprobado pide confirmación porque no se puede deshacer desde acá y
+             además dispara un mensaje. Rechazado ya la tenía: exige el motivo. */
+          <div style={{ display: "flex", gap: 6, marginTop: 8, flexWrap: "wrap",
+            alignItems: "center" }}>
+            {yaAprobada ? (
+              <span style={{ fontSize: 11.5, fontWeight: 600, color: C.verde }}>
+                ✓ Pruebas aprobadas · el supervisor debe cargar el comprobante en Logistic
+              </span>
+            ) : (
+              <>
+                <button
+                  onClick={() => {
+                    if (window.confirm(
+                      "¿Aprobar estas pruebas?\n\n" +
+                      "Se le avisa al supervisor que ahora debe cargar el comprobante " +
+                      "en Logistic. No se puede deshacer desde acá.")) {
+                      onAprobar(tarea);
+                    }
+                  }}
+                  disabled={!hayAlgo}
+                  title={hayAlgo ? "" : "No hay pruebas que aprobar"}
+                  style={{ fontSize: 12, fontWeight: 600, padding: "6px 13px", borderRadius: 8,
+                    cursor: hayAlgo ? "pointer" : "default",
+                    border: `2px solid ${hayAlgo ? C.verde : "var(--borde)"}`,
+                    background: hayAlgo ? "#eaf5f1" : "#fff",
+                    color: hayAlgo ? C.verde : "var(--texto-tenue)" }}>
+                  Aprobado
+                </button>
+                <button onClick={() => setPidiendo(true)}
+                  style={{ fontSize: 12, fontWeight: 600, padding: "6px 13px", borderRadius: 8,
+                    border: `2px solid ${C.ladrillo}`, background: "#fff",
+                    color: C.ladrillo, cursor: "pointer" }}>
+                  Rechazado
+                </button>
+              </>
+            )}
+          </div>
         )
       )}
     </div>
@@ -1282,7 +1323,7 @@ function LineaTiempo({ movimientos }) {
   );
 }
 
-function Detalle({ c, ahora, onPedir, trayendo, supervisor, tarea, vueltas, movimientos, telefonos, telElegido, onElegirTel, onTelGuardado, onTareaCreada, onRepedir, onNotificar }) {
+function Detalle({ c, ahora, onPedir, trayendo, supervisor, tarea, vueltas, movimientos, telefonos, telElegido, onElegirTel, onTelGuardado, onTareaCreada, onRepedir, onAprobar, onNotificar }) {
   const [panel, setPanel] = useState(false);
   const [creando, setCreando] = useState(false);
   const [errorTarea, setErrorTarea] = useState("");
@@ -1489,7 +1530,7 @@ function Detalle({ c, ahora, onPedir, trayendo, supervisor, tarea, vueltas, movi
             </div>
           </div>
 
-          <Pruebas tarea={tarea} vueltas={vueltas} onRepedir={onRepedir} />
+          <Pruebas tarea={tarea} vueltas={vueltas} onRepedir={onRepedir} onAprobar={onAprobar} />
 
           <LineaTiempo movimientos={movimientos} />
         </div>
@@ -1685,7 +1726,7 @@ function Detalle({ c, ahora, onPedir, trayendo, supervisor, tarea, vueltas, movi
   );
 }
 
-function Fila({ c, abierta, onAbrir, onPedir, trayendo, ahora, supervisor, tarea, vueltas, movimientos, sinVer, fueraDePeriodo, telefonos, telElegido, onElegirTel, onTelGuardado, onTareaCreada, onRepedir, onNotificar }) {
+function Fila({ c, abierta, onAbrir, onPedir, trayendo, ahora, supervisor, tarea, vueltas, movimientos, sinVer, fueraDePeriodo, telefonos, telElegido, onElegirTel, onTelGuardado, onTareaCreada, onRepedir, onAprobar, onNotificar }) {
   const g = POR_CLAVE[clasificar(c)];
   const fondo = abierta ? C.grisTenue : "#fff";
   const sub = chipEstado(c.sub_estado);
@@ -1771,7 +1812,7 @@ function Fila({ c, abierta, onAbrir, onPedir, trayendo, ahora, supervisor, tarea
         tarea={tarea} vueltas={vueltas} movimientos={movimientos}
         telefonos={telefonos} telElegido={telElegido} onElegirTel={onElegirTel}
         onTelGuardado={onTelGuardado}
-        onTareaCreada={onTareaCreada} onRepedir={onRepedir} onNotificar={onNotificar} />}
+        onTareaCreada={onTareaCreada} onRepedir={onRepedir} onAprobar={onAprobar} onNotificar={onNotificar} />}
     </Fragment>
   );
 }
@@ -1819,7 +1860,7 @@ export default function Posventa() {
     // foto y en qué quedó, en vez de ofrecer crearla otra vez.
     const [tar, vlt] = await Promise.all([
       sb.from("pnr_tareas_mx")
-        .select("id, case_id, sc, estado, supervisor_nombre, creada_en, fotos, comentario, veces_pedida, motivo_reabrir")
+        .select("id, case_id, sc, estado, supervisor_nombre, creada_en, fotos, comentario, veces_pedida, motivo_reabrir, aprobada_en, aprobada_por")
         .in("estado", ["pendiente", "vista", "completada", "sin_pruebas"])
         .limit(5000),
       sb.from("pnr_tareas_vueltas").select("*").order("vuelta").limit(5000),
@@ -2210,6 +2251,28 @@ export default function Posventa() {
     if (!error && data) setTareas((prev) => ({ ...prev, [data.case_id]: data }));
   }
 
+  // Aprobar las pruebas. Va por RPC y no por un update directo porque la
+  // función además encola el WhatsApp al supervisor: si el front hiciera el
+  // update, la aprobación quedaría y el aviso no, y el supervisor no sabría que
+  // ahora le toca cargar el comprobante en Logistic.
+  async function aprobarPruebas(t) {
+    if (!t) return;
+    const { data, error } = await sb.rpc("fn_pnr_aprobar_pruebas",
+      { p_tarea_id: t.id, p_quien: "posventa", p_nota: null });
+    if (error) { setError("No se pudo aprobar: " + error.message); return; }
+
+    // Si la aprobación quedó pero el aviso falló, hay que decirlo: el
+    // supervisor no se enteró y alguien tiene que avisarle a mano. Callarlo
+    // haría creer que el mensaje salió.
+    if (data && data.aviso_encolado === false) {
+      setError("Pruebas aprobadas, pero el aviso al supervisor no salió: "
+        + (data.error_aviso || "la ventana de 24 h puede estar cerrada"));
+    }
+    const { data: fresca } = await sb.from("pnr_tareas_mx")
+      .select("*").eq("id", t.id).single();
+    if (fresca) setTareas((prev) => ({ ...prev, [fresca.case_id]: fresca }));
+  }
+
   // Los números conocidos de cada caso: MELI, el directorio de la torre y el
   // propio de Posventa. Se recarga al guardar uno nuevo para que aparezca sin
   // volver a cargar la pantalla.
@@ -2456,7 +2519,7 @@ export default function Posventa() {
                   onPedir={pedirDetalle} trayendo={trayendo.has(c.case_id)}
                   ahora={ahora} supervisor={supervisores[c.service_center]}
                   tarea={tareas[c.case_id]} vueltas={vueltas[c.case_id]}
-                  onTareaCreada={agregarTarea} onRepedir={repedirPruebas}
+                  onTareaCreada={agregarTarea} onRepedir={repedirPruebas} onAprobar={aprobarPruebas}
                   movimientos={historial[c.case_id]} sinVer={!vistos.has(c.case_id)}
                   fueraDePeriodo={!!periodo && c.periodo !== periodo}
                   telefonos={telefonos[c.case_id]} telElegido={telElegidos[c.case_id]}
