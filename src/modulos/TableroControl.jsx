@@ -303,6 +303,13 @@ export default function TableroControl() {
   const [error, setError] = useState(null);
   const [bajando, setBajando] = useState(false);
 
+  // Quincenas disponibles para el informe con formato del portal. Vienen de la
+  // base, no se calculan: solo se puede emitir el informe de una quincena que
+  // realmente tengamos capturada.
+  const [periodos, setPeriodos] = useState([]);
+  const [periodoSel, setPeriodoSel] = useState("");
+  const [bajandoReporte, setBajandoReporte] = useState(false);
+
   const cargar = useCallback(async () => {
     setCargando(true);
     setError(null);
@@ -323,6 +330,83 @@ export default function TableroControl() {
   }, [desde, hasta]);
 
   useEffect(() => { cargar(); }, [cargar]);
+
+  // ── Las quincenas disponibles ────────────────────────────────────────────
+  // Se piden una sola vez. La quincena en curso llega marcada y no se puede
+  // descargar: mientras está abierta MELI sigue moviendo casos dentro y fuera,
+  // así que un informe emitido hoy no es el mismo que mañana. Se emite cerrada.
+  useEffect(() => {
+    let vivo = true;
+    (async () => {
+      const { data, error: e } = await sb.rpc("fn_pnr_periodos");
+      if (!vivo || e) return;
+      const lista = data || [];
+      setPeriodos(lista);
+      const cerrada = lista.find((p) => !p.es_vigente);
+      if (cerrada) setPeriodoSel(cerrada.periodo);
+    })();
+    return () => { vivo = false; };
+  }, []);
+
+  // ── El informe con formato del portal ────────────────────────────────────
+  // Una fila por caso y las columnas con los nombres del portal, para que el
+  // archivo se pueda cruzar contra MELI sin renombrar nada.
+  //
+  // Las columnas salen en el orden en que las devuelve la función, no en un
+  // orden escrito acá: si mañana MELI agrega un campo se agrega en la función y
+  // el front no se toca.
+  async function bajarReporte() {
+    if (!periodoSel) return;
+    setBajandoReporte(true);
+    setError(null);
+    try {
+      const { data, error: e } = await sb.rpc("fn_pnr_reporte_meli",
+        { p_periodo: periodoSel });
+      if (e) throw new Error(e.message);
+      if (!data || !data.length) throw new Error(`No hay casos guardados en ${periodoSel}.`);
+
+      const cols = Object.keys(data[0]);
+      const nombre = `PNR_${periodoSel}.xlsx`;
+
+      // SheetJS se carga solo cuando alguien aprieta el botón: es la librería
+      // más pesada de la pantalla y el 95% de las visitas no descarga nada.
+      let XLSX;
+      try {
+        XLSX = await import("xlsx");
+      } catch {
+        throw new Error("Falta la librería xlsx. Instálala con: npm i xlsx");
+      }
+
+      const hoja = XLSX.utils.json_to_sheet(data, { header: cols });
+
+      // El valor va como número con formato de moneda, no como el texto
+      // "$ 725.00" que manda el portal. Es la única desviación a propósito:
+      // el texto se ve igual pero no se puede sumar ni pivotear, y el archivo
+      // existe justamente para que el analista lo trabaje.
+      const iValor = cols.indexOf("VALOR DE LA COMPRA");
+      if (iValor >= 0) {
+        for (let f = 1; f <= data.length; f++) {
+          const celda = hoja[XLSX.utils.encode_cell({ r: f, c: iValor })];
+          if (celda && typeof celda.v === "number") celda.z = '$#,##0.00';
+        }
+      }
+
+      // Ancho de columna a ojo del contenido: sin esto todo sale en 8 caracteres
+      // y el analista ajusta 23 columnas a mano cada vez que descarga.
+      hoja["!cols"] = cols.map((c) => ({
+        wch: Math.min(42, Math.max(c.length + 2,
+          ...data.slice(0, 200).map((f) => String(f[c] ?? "").length + 1))),
+      }));
+
+      const libro = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(libro, hoja, periodoSel);
+      XLSX.writeFile(libro, nombre);
+    } catch (e) {
+      setError(e.message);
+    } finally {
+      setBajandoReporte(false);
+    }
+  }
 
   // ── El CSV ───────────────────────────────────────────────────────────────
   // Baja el DETALLE, un caso por fila, no los totales. El analista agrupa como
@@ -373,42 +457,108 @@ export default function TableroControl() {
 
   return (
     <div>
-      {/* ── Rango y descarga ──────────────────────────────────────────── */}
-      <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap",
-        marginBottom: 14 }}>
-        <span style={{ fontSize: 11, color: C.gris, textTransform: "uppercase",
-          letterSpacing: 0.3, fontWeight: 700 }}>Rango</span>
-        <input type="date" value={desde} max={hasta} onChange={(e) => setDesde(e.target.value)}
-          style={{ fontSize: 12, padding: "5px 8px", borderRadius: 7,
-            border: "1px solid var(--borde)" }} />
-        <span style={{ fontSize: 12, color: C.gris }}>a</span>
-        <input type="date" value={hasta} min={desde} max={hoyMX()}
-          onChange={(e) => setHasta(e.target.value)}
-          style={{ fontSize: 12, padding: "5px 8px", borderRadius: 7,
-            border: "1px solid var(--borde)" }} />
+      {/* ── Controles ──────────────────────────────────────────────────────
+          Dos grupos que hacen cosas distintas y por eso están separados:
 
-        {/* Atajos: el día único es lo que más se pide y con dos calendarios
-            cuesta tres clics. Acá es uno. */}
-        <button onClick={() => { setDesde(hoyMX()); setHasta(hoyMX()); }}
-          style={{ fontSize: 11.5, padding: "5px 10px" }}>Hoy</button>
-        <button onClick={() => { setDesde(haceDiasMX(1)); setHasta(haceDiasMX(1)); }}
-          style={{ fontSize: 11.5, padding: "5px 10px" }}>Ayer</button>
-        <button onClick={() => { setDesde(haceDiasMX(7)); setHasta(hoyMX()); }}
-          style={{ fontSize: 11.5, padding: "5px 10px" }}>7 días</button>
-        <button onClick={() => { setDesde(haceDiasMX(30)); setHasta(hoyMX()); }}
-          style={{ fontSize: 11.5, padding: "5px 10px" }}>30 días</button>
+          IZQUIERDA · el rango manda sobre los tres bloques de la pantalla.
+          Sirve para un mes, una semana o un día suelto. No sirve para una
+          quincena de MELI, porque una quincena incluye casos nacidos semanas
+          antes: 100 de los 290 casos de 202608Q1 nacieron en junio y julio.
 
-        <button onClick={cargar} disabled={cargando}
-          style={{ fontSize: 11.5, padding: "5px 11px", marginLeft: 4 }}>
-          {cargando ? "…" : "Actualizar"}
-        </button>
+          DERECHA · la quincena manda solo sobre el archivo que se descarga.
+          Es otra pregunta — "dame el periodo tal como lo ve MELI" — y por eso
+          no comparte control con el rango.
 
-        <button onClick={bajarCsv} disabled={bajando} className="btn-navy"
-          title="Baja un caso por fila, para agrupar en la planilla"
-          style={{ fontSize: 12, fontWeight: 600, padding: "6px 14px", borderRadius: 8,
-            marginLeft: "auto" }}>
-          {bajando ? "Generando…" : "↓ Descargar CSV"}
-        </button>
+          Antes esto eran dos filas de calendarios que ocupaban media pantalla.
+          Ahora el rango es una sola pastilla. */}
+      <div style={{ display: "flex", alignItems: "flex-end", gap: 14,
+        flexWrap: "wrap", marginBottom: 14 }}>
+
+        {/* Grupo del rango */}
+        <div>
+          <div style={{ fontSize: 9.5, fontWeight: 700, letterSpacing: 0.3,
+            textTransform: "uppercase", color: C.gris, marginBottom: 4 }}>
+            Rango del tablero
+          </div>
+          <div style={{ display: "inline-flex", alignItems: "center", gap: 6,
+            border: "1px solid var(--borde)", borderRadius: 9, padding: "4px 8px",
+            background: "#fff" }}>
+            <input type="date" value={desde} max={hasta}
+              onChange={(e) => setDesde(e.target.value)}
+              style={{ fontSize: 12, border: "none", outline: "none", padding: 0,
+                background: "transparent", width: 112 }} />
+            <span style={{ fontSize: 11, color: C.gris }}>→</span>
+            <input type="date" value={hasta} min={desde} max={hoyMX()}
+              onChange={(e) => setHasta(e.target.value)}
+              style={{ fontSize: 12, border: "none", outline: "none", padding: 0,
+                background: "transparent", width: 112 }} />
+          </div>
+
+          {/* Atajos: el día único es lo que más se pide y con dos calendarios
+              cuesta tres clics. Acá es uno. */}
+          <div style={{ display: "flex", gap: 5, marginTop: 5, alignItems: "center" }}>
+            {[
+              ["Hoy", () => { setDesde(hoyMX()); setHasta(hoyMX()); }],
+              ["Ayer", () => { setDesde(haceDiasMX(1)); setHasta(haceDiasMX(1)); }],
+              ["7 días", () => { setDesde(haceDiasMX(7)); setHasta(hoyMX()); }],
+              ["30 días", () => { setDesde(haceDiasMX(30)); setHasta(hoyMX()); }],
+            ].map(([texto, accion]) => (
+              <button key={texto} onClick={accion}
+                style={{ fontSize: 11, padding: "3px 8px", borderRadius: 6 }}>
+                {texto}
+              </button>
+            ))}
+            <button onClick={cargar} disabled={cargando}
+              style={{ fontSize: 11, padding: "3px 8px", borderRadius: 6 }}>
+              {cargando ? "…" : "Actualizar"}
+            </button>
+            {/* La descarga del detalle pertenece al rango, no a la quincena, así
+                que vive en este grupo y en tamaño chico: es la salida de trabajo
+                del analista, no el entregable de gerencia. */}
+            <button onClick={bajarCsv} disabled={bajando}
+              title="Detalle del rango, un caso por fila, para agrupar en la planilla"
+              style={{ fontSize: 11, padding: "3px 8px", borderRadius: 6,
+                color: C.navy }}>
+              {bajando ? "Generando…" : "↓ detalle del rango"}
+            </button>
+          </div>
+        </div>
+
+        {/* Grupo de la quincena */}
+        <div style={{ marginLeft: "auto" }}>
+          <div style={{ fontSize: 9.5, fontWeight: 700, letterSpacing: 0.3,
+            textTransform: "uppercase", color: C.gris, marginBottom: 4 }}>
+            Informe del periodo MELI
+          </div>
+          <div style={{ display: "flex", alignItems: "center", gap: 7 }}>
+            <select value={periodoSel} onChange={(e) => setPeriodoSel(e.target.value)}
+              style={{ fontSize: 12.5, padding: "6px 9px", borderRadius: 8,
+                border: "1px solid var(--borde)", background: "#fff",
+                fontVariantNumeric: "tabular-nums" }}>
+              {!periodos.length && <option value="">cargando…</option>}
+              {periodos.map((p) => (
+                <option key={p.periodo} value={p.periodo} disabled={p.es_vigente}>
+                  {p.periodo}
+                  {p.es_vigente ? " · en curso" : ` · ${p.casos} casos`}
+                </option>
+              ))}
+            </select>
+            <button onClick={bajarReporte}
+              disabled={bajandoReporte || !periodoSel} className="btn-navy"
+              title="Una fila por caso, con las columnas y los nombres del portal MELI"
+              style={{ fontSize: 12, fontWeight: 600, padding: "7px 14px",
+                borderRadius: 8 }}>
+              {bajandoReporte ? "Generando…" : "↓ Descargar Excel"}
+            </button>
+          </div>
+          {/* Por qué la quincena en curso está bloqueada. Sin esta línea alguien
+              la elige, ve que no se puede y supone que está roto. */}
+          <div style={{ fontSize: 10.5, color: C.gris, marginTop: 4,
+            maxWidth: 300, textAlign: "right", marginLeft: "auto" }}>
+            La quincena en curso no se emite: MELI mueve casos dentro y fuera
+            hasta que cierra.
+          </div>
+        </div>
       </div>
 
       {error && (
