@@ -309,6 +309,8 @@ export default function TableroControl() {
   const [periodos, setPeriodos] = useState([]);
   const [periodoSel, setPeriodoSel] = useState("");
   const [bajandoReporte, setBajandoReporte] = useState(false);
+  // El analista elige el formato. Excel para mandar, CSV para trabajarlo.
+  const [formato, setFormato] = useState("xlsx");
 
   const cargar = useCallback(async () => {
     setCargando(true);
@@ -348,13 +350,73 @@ export default function TableroControl() {
     return () => { vivo = false; };
   }, []);
 
-  // ── El informe con formato del portal ────────────────────────────────────
-  // Una fila por caso y las columnas con los nombres del portal, para que el
-  // archivo se pueda cruzar contra MELI sin renombrar nada.
+  // ── Bajar un archivo ─────────────────────────────────────────────────────
+  // Las dos descargas de la pantalla comparten esto. Estaba duplicado y el CSV
+  // del rango y el del informe habían quedado con reglas distintas de escape.
+  //
+  // Punto y coma como separador y BOM al inicio: Excel en español lee la coma
+  // como decimal, así que con comas de separador mete todo en una columna, y
+  // sin el BOM los acentos salen rotos.
+  function bajarBlob(contenido, tipo, nombre) {
+    const url = URL.createObjectURL(new Blob([contenido], { type: tipo }));
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = nombre;
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
+  function filasACsv(filas, cols) {
+    const escapa = (v) => {
+      if (v == null) return "";
+      const s = String(v);
+      return /[";\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+    };
+    return "\uFEFF"
+      + cols.join(";") + "\n"
+      + filas.map((f) => cols.map((c) => escapa(f[c])).join(";")).join("\n");
+  }
+
+  // SheetJS se carga solo cuando alguien pide un xlsx: es la librería más pesada
+  // de la pantalla y la mayoría de las visitas no descarga nada.
+  async function filasAXlsx(filas, cols, hojaNombre) {
+    let XLSX;
+    try {
+      XLSX = await import("xlsx");
+    } catch {
+      throw new Error("Falta la librería xlsx. Instálala con: npm i xlsx — o elige CSV.");
+    }
+    const hoja = XLSX.utils.json_to_sheet(filas, { header: cols });
+
+    // El valor va como número con formato de moneda, no como el texto "$ 725.00"
+    // del portal: se ve igual y además suma.
+    const iValor = cols.indexOf("VALOR DE LA COMPRA");
+    if (iValor >= 0) {
+      for (let f = 1; f <= filas.length; f++) {
+        const celda = hoja[XLSX.utils.encode_cell({ r: f, c: iValor })];
+        if (celda && typeof celda.v === "number") celda.z = "$#,##0.00";
+      }
+    }
+
+    // Ancho a ojo del contenido: sin esto salen 23 columnas de 8 caracteres y
+    // el analista las ajusta a mano cada vez que descarga.
+    hoja["!cols"] = cols.map((c) => ({
+      wch: Math.min(42, Math.max(c.length + 2,
+        ...filas.slice(0, 200).map((f) => String(f[c] ?? "").length + 1))),
+    }));
+
+    const libro = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(libro, hoja, hojaNombre);
+    return XLSX.write(libro, { bookType: "xlsx", type: "array" });
+  }
+
+  // ── El informe del periodo MELI ──────────────────────────────────────────
+  // Una fila por caso, con los nombres de columna del portal, para poder cruzar
+  // el archivo contra MELI sin renombrar nada.
   //
   // Las columnas salen en el orden en que las devuelve la función, no en un
-  // orden escrito acá: si mañana MELI agrega un campo se agrega en la función y
-  // el front no se toca.
+  // orden escrito acá: si MELI agrega un campo se agrega en la función y el
+  // front no se toca.
   async function bajarReporte() {
     if (!periodoSel) return;
     setBajandoReporte(true);
@@ -366,41 +428,15 @@ export default function TableroControl() {
       if (!data || !data.length) throw new Error(`No hay casos guardados en ${periodoSel}.`);
 
       const cols = Object.keys(data[0]);
-      const nombre = `PNR_${periodoSel}.xlsx`;
-
-      // SheetJS se carga solo cuando alguien aprieta el botón: es la librería
-      // más pesada de la pantalla y el 95% de las visitas no descarga nada.
-      let XLSX;
-      try {
-        XLSX = await import("xlsx");
-      } catch {
-        throw new Error("Falta la librería xlsx. Instálala con: npm i xlsx");
+      if (formato === "csv") {
+        bajarBlob(filasACsv(data, cols), "text/csv;charset=utf-8",
+          `PNR_${periodoSel}.csv`);
+      } else {
+        const buf = await filasAXlsx(data, cols, periodoSel);
+        bajarBlob(buf,
+          "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+          `PNR_${periodoSel}.xlsx`);
       }
-
-      const hoja = XLSX.utils.json_to_sheet(data, { header: cols });
-
-      // El valor va como número con formato de moneda, no como el texto
-      // "$ 725.00" que manda el portal. Es la única desviación a propósito:
-      // el texto se ve igual pero no se puede sumar ni pivotear, y el archivo
-      // existe justamente para que el analista lo trabaje.
-      const iValor = cols.indexOf("VALOR DE LA COMPRA");
-      if (iValor >= 0) {
-        for (let f = 1; f <= data.length; f++) {
-          const celda = hoja[XLSX.utils.encode_cell({ r: f, c: iValor })];
-          if (celda && typeof celda.v === "number") celda.z = '$#,##0.00';
-        }
-      }
-
-      // Ancho de columna a ojo del contenido: sin esto todo sale en 8 caracteres
-      // y el analista ajusta 23 columnas a mano cada vez que descarga.
-      hoja["!cols"] = cols.map((c) => ({
-        wch: Math.min(42, Math.max(c.length + 2,
-          ...data.slice(0, 200).map((f) => String(f[c] ?? "").length + 1))),
-      }));
-
-      const libro = XLSX.utils.book_new();
-      XLSX.utils.book_append_sheet(libro, hoja, periodoSel);
-      XLSX.writeFile(libro, nombre);
     } catch (e) {
       setError(e.message);
     } finally {
@@ -408,7 +444,7 @@ export default function TableroControl() {
     }
   }
 
-  // ── El CSV ───────────────────────────────────────────────────────────────
+  // ── El CSV del rango ─────────────────────────────────────────────────────
   // Baja el DETALLE, un caso por fila, no los totales. El analista agrupa como
   // necesite en su planilla; con los totales ya sumados solo puede leerlos.
   async function bajarCsv() {
@@ -424,27 +460,8 @@ export default function TableroControl() {
       if (!data || !data.length) throw new Error("No hay casos en ese rango.");
 
       const cols = Object.keys(data[0]);
-
-      // Punto y coma como separador y BOM al inicio: Excel en español abre el
-      // CSV con coma como decimal, así que con comas de separador mete todo en
-      // una columna. Y sin el BOM los acentos salen rotos.
-      const escapa = (v) => {
-        if (v == null) return "";
-        const s = String(v);
-        return /[";\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
-      };
-      const csv = "\uFEFF"
-        + cols.join(";") + "\n"
-        + data.map((f) => cols.map((c) => escapa(f[c])).join(";")).join("\n");
-
-      const url = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8" }));
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = desde === hasta
-        ? `pnr_${desde}.csv`
-        : `pnr_${desde}_a_${hasta}.csv`;
-      a.click();
-      URL.revokeObjectURL(url);
+      bajarBlob(filasACsv(data, cols), "text/csv;charset=utf-8",
+        desde === hasta ? `pnr_${desde}.csv` : `pnr_${desde}_a_${hasta}.csv`);
     } catch (e) {
       setError(e.message);
     } finally {
@@ -452,112 +469,139 @@ export default function TableroControl() {
     }
   }
 
+  // Solo las cerradas llegan al selector. La vigente no se ofrece siquiera:
+  // ofrecerla deshabilitada invita a preguntar por qué está ahí.
+  const cerradas = periodos.filter((p) => !p.es_vigente);
+  const periodoElegido = periodos.find((p) => p.periodo === periodoSel);
+
   const total = b1.find((f) => f.es_total) || {};
   const t3 = b3.find((f) => f.es_total) || {};
 
   return (
     <div>
       {/* ── Controles ──────────────────────────────────────────────────────
-          Dos grupos que hacen cosas distintas y por eso están separados:
+          Dos tarjetas porque son dos preguntas distintas, no dos filtros del
+          mismo dato:
 
-          IZQUIERDA · el rango manda sobre los tres bloques de la pantalla.
-          Sirve para un mes, una semana o un día suelto. No sirve para una
-          quincena de MELI, porque una quincena incluye casos nacidos semanas
-          antes: 100 de los 290 casos de 202608Q1 nacieron en junio y julio.
+          IZQUIERDA · el rango manda sobre los tres bloques de la pantalla y
+          sobre el CSV de detalle. Sirve para un día suelto, una semana o un mes.
+          No sirve para pedir una quincena de MELI, porque una quincena incluye
+          casos nacidos semanas antes: 100 de los 290 casos de 202608Q1 nacieron
+          en junio y julio.
 
-          DERECHA · la quincena manda solo sobre el archivo que se descarga.
-          Es otra pregunta — "dame el periodo tal como lo ve MELI" — y por eso
-          no comparte control con el rango.
+          DERECHA · la quincena manda solo sobre el informe que se descarga. Es
+          la pregunta "dame el periodo tal como lo ve MELI".
 
-          Antes esto eran dos filas de calendarios que ocupaban media pantalla.
-          Ahora el rango es una sola pastilla. */}
-      <div style={{ display: "flex", alignItems: "flex-end", gap: 14,
-        flexWrap: "wrap", marginBottom: 14 }}>
+          Ponerlas juntas en una sola barra hacía que pareciera que el rango
+          filtraba el informe. Separadas, cada una se explica sola. */}
+      <div style={{ display: "flex", gap: 12, flexWrap: "wrap", marginBottom: 16,
+        alignItems: "stretch" }}>
 
-        {/* Grupo del rango */}
-        <div>
-          <div style={{ fontSize: 9.5, fontWeight: 700, letterSpacing: 0.3,
-            textTransform: "uppercase", color: C.gris, marginBottom: 4 }}>
-            Rango del tablero
+        {/* ── Tarjeta del rango ──────────────────────────────────────── */}
+        <div style={{ flex: "1 1 330px", border: "1px solid var(--borde)",
+          borderRadius: 14, background: "#fff", padding: "13px 15px" }}>
+          <div style={{ fontSize: 12.5, fontWeight: 700, color: C.navy }}>
+            Rango de fechas
           </div>
-          <div style={{ display: "inline-flex", alignItems: "center", gap: 6,
-            border: "1px solid var(--borde)", borderRadius: 9, padding: "4px 8px",
-            background: "#fff" }}>
-            <input type="date" value={desde} max={hasta}
-              onChange={(e) => setDesde(e.target.value)}
-              style={{ fontSize: 12, border: "none", outline: "none", padding: 0,
-                background: "transparent", width: 112 }} />
-            <span style={{ fontSize: 11, color: C.gris }}>→</span>
-            <input type="date" value={hasta} min={desde} max={hoyMX()}
-              onChange={(e) => setHasta(e.target.value)}
-              style={{ fontSize: 12, border: "none", outline: "none", padding: 0,
-                background: "transparent", width: 112 }} />
+          <div style={{ fontSize: 11, color: C.gris, marginTop: 2, marginBottom: 10,
+            lineHeight: 1.4 }}>
+            Manda sobre los tres bloques de abajo. Para un día específico, pon la
+            misma fecha en los dos campos.
           </div>
 
-          {/* Atajos: el día único es lo que más se pide y con dos calendarios
-              cuesta tres clics. Acá es uno. */}
-          <div style={{ display: "flex", gap: 5, marginTop: 5, alignItems: "center" }}>
-            {[
-              ["Hoy", () => { setDesde(hoyMX()); setHasta(hoyMX()); }],
-              ["Ayer", () => { setDesde(haceDiasMX(1)); setHasta(haceDiasMX(1)); }],
-              ["7 días", () => { setDesde(haceDiasMX(7)); setHasta(hoyMX()); }],
-              ["30 días", () => { setDesde(haceDiasMX(30)); setHasta(hoyMX()); }],
-            ].map(([texto, accion]) => (
-              <button key={texto} onClick={accion}
-                style={{ fontSize: 11, padding: "3px 8px", borderRadius: 6 }}>
-                {texto}
-              </button>
-            ))}
-            <button onClick={cargar} disabled={cargando}
-              style={{ fontSize: 11, padding: "3px 8px", borderRadius: 6 }}>
-              {cargando ? "…" : "Actualizar"}
+          <div style={{ display: "flex", alignItems: "center", gap: 8,
+            flexWrap: "wrap" }}>
+            <div style={{ display: "inline-flex", alignItems: "center", gap: 7,
+              border: "1px solid var(--borde)", borderRadius: 9, padding: "5px 9px" }}>
+              <input type="date" value={desde} max={hasta}
+                onChange={(e) => setDesde(e.target.value)}
+                style={{ fontSize: 12.5, border: "none", outline: "none", padding: 0,
+                  background: "transparent", width: 118 }} />
+              <span style={{ fontSize: 11, color: C.gris }}>→</span>
+              <input type="date" value={hasta} min={desde} max={hoyMX()}
+                onChange={(e) => setHasta(e.target.value)}
+                style={{ fontSize: 12.5, border: "none", outline: "none", padding: 0,
+                  background: "transparent", width: 118 }} />
+            </div>
+
+            <button onClick={bajarCsv} disabled={bajando} className="btn-navy"
+              title="Detalle del rango, un caso por fila"
+              style={{ fontSize: 12, fontWeight: 600, padding: "7px 13px",
+                borderRadius: 8 }}>
+              {bajando ? "Generando…" : "↓ Descargar CSV"}
             </button>
-            {/* La descarga del detalle pertenece al rango, no a la quincena, así
-                que vive en este grupo y en tamaño chico: es la salida de trabajo
-                del analista, no el entregable de gerencia. */}
-            <button onClick={bajarCsv} disabled={bajando}
-              title="Detalle del rango, un caso por fila, para agrupar en la planilla"
-              style={{ fontSize: 11, padding: "3px 8px", borderRadius: 6,
-                color: C.navy }}>
-              {bajando ? "Generando…" : "↓ detalle del rango"}
+
+            <button onClick={cargar} disabled={cargando}
+              title="Vuelve a pedir los números del rango"
+              style={{ fontSize: 11.5, padding: "6px 10px", borderRadius: 7 }}>
+              {cargando ? "…" : "Actualizar"}
             </button>
           </div>
         </div>
 
-        {/* Grupo de la quincena */}
-        <div style={{ marginLeft: "auto" }}>
-          <div style={{ fontSize: 9.5, fontWeight: 700, letterSpacing: 0.3,
-            textTransform: "uppercase", color: C.gris, marginBottom: 4 }}>
+        {/* ── Tarjeta del informe MELI ───────────────────────────────── */}
+        <div style={{ flex: "1 1 330px", border: "1px solid var(--borde)",
+          borderRadius: 14, background: "#fff", padding: "13px 15px" }}>
+          <div style={{ fontSize: 12.5, fontWeight: 700, color: C.navy }}>
             Informe del periodo MELI
           </div>
-          <div style={{ display: "flex", alignItems: "center", gap: 7 }}>
+          <div style={{ fontSize: 11, color: C.gris, marginTop: 2, marginBottom: 10,
+            lineHeight: 1.4 }}>
+            Una fila por caso con las columnas del portal. Solo quincenas
+            cerradas: mientras una está en curso MELI mueve casos dentro y fuera.
+          </div>
+
+          <div style={{ display: "flex", alignItems: "center", gap: 8,
+            flexWrap: "wrap" }}>
             <select value={periodoSel} onChange={(e) => setPeriodoSel(e.target.value)}
-              style={{ fontSize: 12.5, padding: "6px 9px", borderRadius: 8,
+              style={{ fontSize: 12.5, padding: "7px 9px", borderRadius: 8,
                 border: "1px solid var(--borde)", background: "#fff",
                 fontVariantNumeric: "tabular-nums" }}>
-              {!periodos.length && <option value="">cargando…</option>}
-              {periodos.map((p) => (
-                <option key={p.periodo} value={p.periodo} disabled={p.es_vigente}>
-                  {p.periodo}
-                  {p.es_vigente ? " · en curso" : ` · ${p.casos} casos`}
+              {!cerradas.length && (
+                <option value="">{periodos.length ? "sin quincenas cerradas" : "cargando…"}</option>
+              )}
+              {cerradas.map((p) => (
+                <option key={p.periodo} value={p.periodo}>
+                  {p.periodo} · {p.casos} casos
                 </option>
               ))}
             </select>
+
+            {/* El formato es del analista, no una decisión del sistema: Excel
+                para mandarlo, CSV para trabajarlo en su planilla. */}
+            <div style={{ display: "inline-flex", border: "1px solid var(--borde)",
+              borderRadius: 8, overflow: "hidden" }}>
+              {[["xlsx", "Excel"], ["csv", "CSV"]].map(([valor, texto]) => (
+                <button key={valor} onClick={() => setFormato(valor)}
+                  style={{ fontSize: 11.5, padding: "6px 11px", border: "none",
+                    borderRadius: 0, cursor: "pointer",
+                    fontWeight: formato === valor ? 700 : 400,
+                    background: formato === valor ? C.navyTenue : "#fff",
+                    color: formato === valor ? C.navy : C.gris }}>
+                  {texto}
+                </button>
+              ))}
+            </div>
+
             <button onClick={bajarReporte}
               disabled={bajandoReporte || !periodoSel} className="btn-navy"
-              title="Una fila por caso, con las columnas y los nombres del portal MELI"
-              style={{ fontSize: 12, fontWeight: 600, padding: "7px 14px",
+              style={{ fontSize: 12, fontWeight: 600, padding: "7px 13px",
                 borderRadius: 8 }}>
-              {bajandoReporte ? "Generando…" : "↓ Descargar Excel"}
+              {bajandoReporte ? "Generando…" : "↓ Descargar"}
             </button>
           </div>
-          {/* Por qué la quincena en curso está bloqueada. Sin esta línea alguien
-              la elige, ve que no se puede y supone que está roto. */}
-          <div style={{ fontSize: 10.5, color: C.gris, marginTop: 4,
-            maxWidth: 300, textAlign: "right", marginLeft: "auto" }}>
-            La quincena en curso no se emite: MELI mueve casos dentro y fuera
-            hasta que cierra.
-          </div>
+
+          {/* Una quincena con casos sin cerrar todavía no es definitiva: MELI
+              va a mover esos casos al periodo siguiente. Emitir el informe así
+              deja un archivo que mañana no cuadra, y nadie lo notaría. */}
+          {periodoElegido?.abiertos > 0 && (
+            <div style={{ fontSize: 11, color: C.ladrillo, marginTop: 8,
+              lineHeight: 1.4 }}>
+              {periodoElegido.abiertos} caso(s) de {periodoElegido.periodo} siguen
+              sin cerrar en nuestra base. Falta la pasada de cierre de la
+              quincena: el informe saldría con estados viejos.
+            </div>
+          )}
         </div>
       </div>
 
