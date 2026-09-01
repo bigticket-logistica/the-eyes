@@ -285,24 +285,31 @@ function fechaHito(iso) {
 // así se ven las dos cosas y la barra dice a simple vista cuánto falta.
 // LOS TRES SLA DE LA CASCADA, por orden de gerencia:
 //
-//     0 ─────────── 36 ────── 40 ──── 48
-//          chofer     superv.  analista
+//     0 ───────────────── 40 ──── 48
+//        chofer y superv.   Posventa
 //
 // No son tres relojes paralelos: el plazo se pasa de mano en mano y quien lo
 // deja vencer se lo entrega al siguiente. Si nadie resuelve, el monto se cobra
 // al tercero.
 //
-// El reloj de la fila muestra SOLO el del tramo activo, con la etiqueta de
-// quién tiene la pelota ahora. Los tres juntos no caben y además no hacen
-// falta: lo que el analista necesita de un vistazo es de quién es el caso y
-// cuánto le queda a esa persona. La cascada completa se ve al desplegar.
+// GERENCIA SUBIÓ EL SLA DEL CHOFER DE 36 A 40
+//   Con eso el chofer y el supervisor vencen a la misma hora, así que el primer
+//   tramo dejó de ser dos y pasó a ser uno. Se conservan las TRES barras a
+//   propósito y no se colapsan en dos: la barra del chofer y la del supervisor
+//   marcan lo mismo pero se refieren a personas distintas, y el día que
+//   gerencia los vuelva a separar —ya los movió una vez— la pantalla no hay que
+//   rehacerla, solo cambiar el número.
+//
+//   El efecto secundario es que "de quién es el caso" ya no lo decide el reloj
+//   entre 0 y 40: los dos lo tienen a la vez. El tramo activo devuelve 'chofer'
+//   en esa ventana por convención, y las dos barras se pintan iguales.
 //
 // Ojo: acá están fijos y en pnr_sla_config también. Si gerencia los mueve hay
 // que cambiarlos en los dos lados — el front no lee la config porque leerla
 // obligaría a un viaje más en cada carga para tres números que cambian una vez
 // al año.
 const SLA_H = 48;                      // el de MELI, el que se cuadra con el portal
-const SLA_CHOFER = 36;
+const SLA_CHOFER = 40;    // era 36 · gerencia lo igualó al del supervisor
 const SLA_SUPERVISOR = 40;
 
 // De quién es el caso ahora y cuánto le queda a esa persona.
@@ -325,7 +332,9 @@ const TRAMOS = [
   { quien: "chofer",     rotulo: "Chofer",     tope: SLA_CHOFER,
     titulo: "El plazo del chofer está corriendo" },
   { quien: "supervisor", rotulo: "Supervisor", tope: SLA_SUPERVISOR,
-    titulo: "El plazo del chofer venció: ahora es del supervisor" },
+    // Ya no dice "el plazo del chofer venció": con los dos en 40 h corren
+    // juntos, y el texto viejo afirmaba algo falso durante las primeras 40 h.
+    titulo: "El plazo del supervisor está corriendo" },
   { quien: "analista",   rotulo: "Posventa",   tope: SLA_H,
     titulo: "Vencieron los plazos del chofer y del supervisor: el caso es de Posventa" },
 ];
