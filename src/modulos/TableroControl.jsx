@@ -309,8 +309,6 @@ export default function TableroControl() {
   const [periodos, setPeriodos] = useState([]);
   const [periodoSel, setPeriodoSel] = useState("");
   const [bajandoReporte, setBajandoReporte] = useState(false);
-  // El analista elige el formato. Excel para mandar, CSV para trabajarlo.
-  const [formato, setFormato] = useState("xlsx");
 
   const cargar = useCallback(async () => {
     setCargando(true);
@@ -367,47 +365,18 @@ export default function TableroControl() {
   }
 
   function filasACsv(filas, cols) {
+    // Los números salen con coma decimal. Excel en español lee el punto como
+    // separador de miles, así que 725.00 le queda como 72500 y el analista suma
+    // una columna que está mal sin ninguna señal de que lo esté.
     const escapa = (v) => {
       if (v == null) return "";
+      if (typeof v === "number") return String(v).replace(".", ",");
       const s = String(v);
       return /[";\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
     };
     return "\uFEFF"
       + cols.join(";") + "\n"
       + filas.map((f) => cols.map((c) => escapa(f[c])).join(";")).join("\n");
-  }
-
-  // SheetJS se carga solo cuando alguien pide un xlsx: es la librería más pesada
-  // de la pantalla y la mayoría de las visitas no descarga nada.
-  async function filasAXlsx(filas, cols, hojaNombre) {
-    let XLSX;
-    try {
-      XLSX = await import("xlsx");
-    } catch {
-      throw new Error("Falta la librería xlsx. Instálala con: npm i xlsx — o elige CSV.");
-    }
-    const hoja = XLSX.utils.json_to_sheet(filas, { header: cols });
-
-    // El valor va como número con formato de moneda, no como el texto "$ 725.00"
-    // del portal: se ve igual y además suma.
-    const iValor = cols.indexOf("VALOR DE LA COMPRA");
-    if (iValor >= 0) {
-      for (let f = 1; f <= filas.length; f++) {
-        const celda = hoja[XLSX.utils.encode_cell({ r: f, c: iValor })];
-        if (celda && typeof celda.v === "number") celda.z = "$#,##0.00";
-      }
-    }
-
-    // Ancho a ojo del contenido: sin esto salen 23 columnas de 8 caracteres y
-    // el analista las ajusta a mano cada vez que descarga.
-    hoja["!cols"] = cols.map((c) => ({
-      wch: Math.min(42, Math.max(c.length + 2,
-        ...filas.slice(0, 200).map((f) => String(f[c] ?? "").length + 1))),
-    }));
-
-    const libro = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(libro, hoja, hojaNombre);
-    return XLSX.write(libro, { bookType: "xlsx", type: "array" });
   }
 
   // ── El informe del periodo MELI ──────────────────────────────────────────
@@ -428,15 +397,8 @@ export default function TableroControl() {
       if (!data || !data.length) throw new Error(`No hay casos guardados en ${periodoSel}.`);
 
       const cols = Object.keys(data[0]);
-      if (formato === "csv") {
-        bajarBlob(filasACsv(data, cols), "text/csv;charset=utf-8",
-          `PNR_${periodoSel}.csv`);
-      } else {
-        const buf = await filasAXlsx(data, cols, periodoSel);
-        bajarBlob(buf,
-          "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-          `PNR_${periodoSel}.xlsx`);
-      }
+      bajarBlob(filasACsv(data, cols), "text/csv;charset=utf-8",
+        `PNR_${periodoSel}.csv`);
     } catch (e) {
       setError(e.message);
     } finally {
@@ -547,7 +509,7 @@ export default function TableroControl() {
           </div>
           <div style={{ fontSize: 11, color: C.gris, marginTop: 2, marginBottom: 10,
             lineHeight: 1.4 }}>
-            Una fila por caso con las columnas del portal. Solo quincenas
+            CSV con una fila por caso y las columnas del portal. Solo quincenas
             cerradas: mientras una está en curso MELI mueve casos dentro y fuera.
           </div>
 
@@ -567,27 +529,11 @@ export default function TableroControl() {
               ))}
             </select>
 
-            {/* El formato es del analista, no una decisión del sistema: Excel
-                para mandarlo, CSV para trabajarlo en su planilla. */}
-            <div style={{ display: "inline-flex", border: "1px solid var(--borde)",
-              borderRadius: 8, overflow: "hidden" }}>
-              {[["xlsx", "Excel"], ["csv", "CSV"]].map(([valor, texto]) => (
-                <button key={valor} onClick={() => setFormato(valor)}
-                  style={{ fontSize: 11.5, padding: "6px 11px", border: "none",
-                    borderRadius: 0, cursor: "pointer",
-                    fontWeight: formato === valor ? 700 : 400,
-                    background: formato === valor ? C.navyTenue : "#fff",
-                    color: formato === valor ? C.navy : C.gris }}>
-                  {texto}
-                </button>
-              ))}
-            </div>
-
             <button onClick={bajarReporte}
               disabled={bajandoReporte || !periodoSel} className="btn-navy"
               style={{ fontSize: 12, fontWeight: 600, padding: "7px 13px",
                 borderRadius: 8 }}>
-              {bajandoReporte ? "Generando…" : "↓ Descargar"}
+              {bajandoReporte ? "Generando…" : "↓ Descargar CSV"}
             </button>
           </div>
 
