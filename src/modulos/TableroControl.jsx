@@ -307,6 +307,9 @@ export default function TableroControl() {
   // base, no se calculan: solo se puede emitir el informe de una quincena que
   // realmente tengamos capturada.
   const [periodos, setPeriodos] = useState([]);
+  // cargando · listo · error. Sin esto, cuando la RPC falla el selector se
+  // queda diciendo "cargando…" para siempre y parece que el front está colgado.
+  const [periodosEstado, setPeriodosEstado] = useState("cargando");
   const [periodoSel, setPeriodoSel] = useState("");
   const [bajandoReporte, setBajandoReporte] = useState(false);
 
@@ -339,9 +342,17 @@ export default function TableroControl() {
     let vivo = true;
     (async () => {
       const { data, error: e } = await sb.rpc("fn_pnr_periodos");
-      if (!vivo || e) return;
+      if (!vivo) return;
+      if (e) {
+        // El error se muestra. Un selector vacío sin explicación manda a alguien
+        // a revisar el navegador cuando el problema está en la base.
+        setPeriodosEstado("error");
+        setError(`No se pudieron cargar las quincenas: ${e.message}`);
+        return;
+      }
       const lista = data || [];
       setPeriodos(lista);
+      setPeriodosEstado("listo");
       const cerrada = lista.find((p) => !p.es_vigente);
       if (cerrada) setPeriodoSel(cerrada.periodo);
     })();
@@ -520,7 +531,11 @@ export default function TableroControl() {
                 border: "1px solid var(--borde)", background: "#fff",
                 fontVariantNumeric: "tabular-nums" }}>
               {!cerradas.length && (
-                <option value="">{periodos.length ? "sin quincenas cerradas" : "cargando…"}</option>
+                <option value="">
+                  {periodosEstado === "cargando" ? "cargando…"
+                    : periodosEstado === "error" ? "error al cargar"
+                    : "sin quincenas cerradas"}
+                </option>
               )}
               {cerradas.map((p) => (
                 <option key={p.periodo} value={p.periodo}>
