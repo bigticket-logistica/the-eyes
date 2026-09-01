@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import { sb } from "../shared/supabase.js";
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -139,8 +139,69 @@ function Bloque({ n, titulo, subtitulo, children }) {
 // ── Tabla ──────────────────────────────────────────────────────────────────
 // La fila TOTAL viene de la base, no sumada acá, y se pinta distinto para que no
 // se confunda con un centro más.
+//
+// ORDENAR POR COLUMNA
+//   Se ordena en el cliente y sobre el valor CRUDO de la fila, nunca sobre el
+//   texto pintado: "$1,809" comparado como texto deja $9,988 arriba de $19,733.
+//
+//   La fila TOTAL queda fija arriba, fuera del orden. Es el resumen del rango,
+//   no un centro más; si entrara al sort saldría siempre primera o última y se
+//   leería como un centro gigante.
+//
+//   Primer clic en una columna de números: de mayor a menor. Cuando alguien
+//   ordena por plata quiere ver quién pierde más, no quién pierde menos. En las
+//   columnas de texto el primer clic es alfabético. El segundo clic invierte.
+//
+//   Los nulos van al final en las dos direcciones: un centro sin dato no es ni
+//   el mejor ni el peor, y arriba desplazaría a los que sí tienen número.
+//
+//   Ordenar no vuelve a pedir datos: los montos ya están en la fila, así que el
+//   sort es local y no gasta una llamada a la base.
 
-function Tabla({ columnas, filas, claveFila }) {
+function Tabla({ columnas, filas, claveFila, ordenInicial = null }) {
+  // { clave, asc } o null para respetar el orden que devuelve la base.
+  const [orden, setOrden] = useState(ordenInicial);
+
+  function alOrdenar(col) {
+    if (col.ordenable === false) return;
+    setOrden((prev) =>
+      prev && prev.clave === col.clave
+        ? { clave: col.clave, asc: !prev.asc }
+        // Números arrancan descendente, texto ascendente.
+        : { clave: col.clave, asc: !col.derecha });
+  }
+
+  const ordenadas = useMemo(() => {
+    const totales = filas.filter((f) => f.es_total);
+    const resto = filas.filter((f) => !f.es_total);
+    if (!orden) return [...totales, ...resto];
+
+    const col = columnas.find((c) => c.clave === orden.clave);
+    // Las columnas alineadas a la derecha son las numéricas. Se comparan como
+    // número aunque la base las mande como string.
+    const numerica = !!col?.derecha;
+    const signo = orden.asc ? 1 : -1;
+
+    const valor = (f) => {
+      const v = f[orden.clave];
+      if (v == null || v === "") return null;
+      if (!numerica) return String(v);
+      const n = Number(v);
+      return Number.isFinite(n) ? n : null;
+    };
+
+    const ordenado = [...resto].sort((a, b) => {
+      const va = valor(a);
+      const vb = valor(b);
+      if (va == null && vb == null) return 0;
+      if (va == null) return 1;
+      if (vb == null) return -1;
+      return signo * (numerica ? va - vb : va.localeCompare(vb, "es"));
+    });
+
+    return [...totales, ...ordenado];
+  }, [filas, columnas, orden]);
+
   if (!filas.length) {
     return <div style={{ fontSize: 12, color: C.gris, padding: 8 }}>Sin datos en el rango.</div>;
   }
@@ -149,21 +210,42 @@ function Tabla({ columnas, filas, claveFila }) {
       <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
         <thead>
           <tr>
-            {columnas.map((col) => (
-              <th key={col.clave} style={{
-                textAlign: col.derecha ? "right" : "left",
-                padding: "6px 8px", borderBottom: `1px solid ${C.navy}33`,
-                fontSize: 9.5, fontWeight: 700, letterSpacing: 0.3,
-                textTransform: "uppercase", color: C.gris, whiteSpace: "nowrap",
-              }}>
+            {columnas.map((col) => {
+              const activa = orden?.clave === col.clave;
+              const sePuedeOrdenar = col.ordenable !== false;
+              return (
+              <th key={col.clave}
+                onClick={() => alOrdenar(col)}
+                aria-sort={activa ? (orden.asc ? "ascending" : "descending") : "none"}
+                style={{
+                  textAlign: col.derecha ? "right" : "left",
+                  padding: "6px 8px", borderBottom: `1px solid ${C.navy}33`,
+                  fontSize: 9.5, fontWeight: 700, letterSpacing: 0.3,
+                  textTransform: "uppercase",
+                  color: activa ? C.navy : C.gris, whiteSpace: "nowrap",
+                  cursor: sePuedeOrdenar ? "pointer" : "default",
+                  userSelect: "none",
+                }}>
                 {col.titulo}
+                {/* La flecha del orden va pegada al título. En la columna activa
+                    es sólida y navy; en las demás queda un ↕ apenas visible que
+                    avisa que la columna se puede ordenar sin ensuciar la
+                    cabecera. */}
+                {sePuedeOrdenar && (
+                  <span style={{ marginLeft: 3, fontSize: 8.5,
+                    color: activa ? C.navy : `${C.gris}55` }}>
+                    {activa ? (orden.asc ? "▲" : "▼") : "↕"}
+                  </span>
+                )}
                 {/* La (i) va en la CABECERA y no en un pie de tabla: la duda
                     aparece mirando la columna, y un texto al final obliga a
                     bajar, leer y volver a subir para saber qué se estaba
                     mirando. Es title nativo y no un tooltip propio porque no
-                    hay que descubrirlo: el cursor de ayuda ya lo anuncia. */}
+                    hay que descubrirlo: el cursor de ayuda ya lo anuncia.
+                    El clic en la (i) no ordena: se va a leer, no a reordenar. */}
                 {col.ayuda && (
                   <span title={col.ayuda}
+                    onClick={(e) => e.stopPropagation()}
                     style={{ display: "inline-block", marginLeft: 4, width: 12, height: 12,
                       borderRadius: "50%", border: `1px solid ${C.gris}`, color: C.gris,
                       fontSize: 8.5, lineHeight: "11px", textAlign: "center",
@@ -172,11 +254,12 @@ function Tabla({ columnas, filas, claveFila }) {
                   </span>
                 )}
               </th>
-            ))}
+              );
+            })}
           </tr>
         </thead>
         <tbody>
-          {filas.map((f, i) => {
+          {ordenadas.map((f, i) => {
             const total = !!f.es_total;
             return (
               <tr key={claveFila(f, i)} style={{
@@ -376,8 +459,13 @@ export default function TableroControl() {
             tinte={Number(total.pct_anulado) >= META_PCT ? C.verdeTenue : C.naranjaTenue} />
         </div>
 
+        {/* Abre ordenado por plata perdida, de mayor a menor: el centro que más
+            cuesta va arriba sin que nadie tenga que buscarlo. Para volver al
+            orden por volumen de PNR basta un clic en esa columna, o cambiar
+            ordenInicial a { clave: "pnr_total", asc: false }. */}
         <Tabla claveFila={(f) => f.sc}
           filas={b1}
+          ordenInicial={{ clave: "monto_facturado", asc: false }}
           columnas={[
             { clave: "sc", titulo: "Centro",
               ayuda: "Centro de servicio donde ocurrió la entrega reclamada." },
