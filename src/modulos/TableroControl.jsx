@@ -539,7 +539,7 @@ export default function TableroControl() {
               )}
               {cerradas.map((p) => (
                 <option key={p.periodo} value={p.periodo}>
-                  {p.periodo} · {p.casos} casos
+                  {p.periodo} · {p.casos} casos{p.listo ? "" : " · incompleto"}
                 </option>
               ))}
             </select>
@@ -552,16 +552,41 @@ export default function TableroControl() {
             </button>
           </div>
 
-          {/* Una quincena con casos sin cerrar todavía no es definitiva: MELI
-              va a mover esos casos al periodo siguiente. Emitir el informe así
-              deja un archivo que mañana no cuadra, y nadie lo notaría. */}
-          {periodoElegido?.abiertos > 0 && (
-            <div style={{ fontSize: 11, color: C.ladrillo, marginTop: 8,
-              lineHeight: 1.4 }}>
-              {periodoElegido.abiertos} caso(s) de {periodoElegido.periodo} siguen
-              sin cerrar en nuestra base. Falta la pasada de cierre de la
-              quincena: el informe saldría con estados viejos.
-            </div>
+          {/* SEMÁFORO DE LA QUINCENA
+              El archivo sale igual esté lista o no, pero con distinto contenido:
+              sin detalle capturado quedan vacías productos, fecha de entrega y
+              los comentarios. Antes eso solo se notaba al abrir el CSV, cuando
+              ya se había mandado. Acá se dice antes de descargar.
+
+              El botón NO se bloquea: puede que el analista quiera los montos y
+              los estados, que están correctos igual. Se informa, no se decide
+              por él. */}
+          {periodoElegido && (
+            periodoElegido.listo ? (
+              <div style={{ fontSize: 11.5, marginTop: 9, fontWeight: 600,
+                color: C.verde, display: "flex", alignItems: "center", gap: 5 }}>
+                <span style={{ fontSize: 13 }}>✓</span>
+                Informe listo para descargar · {periodoElegido.casos} casos
+              </div>
+            ) : (
+              <div style={{ fontSize: 11, marginTop: 9, color: C.ladrillo,
+                lineHeight: 1.45 }}>
+                <div style={{ fontWeight: 600 }}>Informe incompleto</div>
+                {periodoElegido.abiertos > 0 && (
+                  <div>
+                    {periodoElegido.abiertos} caso(s) siguen sin cerrar en nuestra
+                    base: falta la pasada de cierre de la quincena.
+                  </div>
+                )}
+                {periodoElegido.con_detalle < periodoElegido.casos && (
+                  <div>
+                    Detalle capturado en {periodoElegido.con_detalle} de{" "}
+                    {periodoElegido.casos} casos: van a salir vacías productos,
+                    fecha de entrega y los comentarios.
+                  </div>
+                )}
+              </div>
+            )
           )}
         </div>
       </div>
