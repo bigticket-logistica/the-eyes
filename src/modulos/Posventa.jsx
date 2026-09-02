@@ -1856,10 +1856,38 @@ export default function Posventa() {
   // aparecería recién al entrar, justo cuando ya no sirve para avisar.
   const [msjSinLeer, setMsjSinLeer] = useState(0);
 
+  // Trae una tabla completa en tandas de 1000, que es el maximo por respuesta.
+  // Para cuando llega una tanda incompleta: eso significa que ya no hay mas.
+  // El tope de 20 tandas es un seguro contra un bucle infinito si el servidor
+  // devolviera siempre 1000.
+  async function traerTodo(fuente, columnas = "*") {
+    const TANDA = 1000;
+    let filas = [];
+    for (let i = 0; i < 20; i++) {
+      const desde = i * TANDA;
+      const r = await sb.from(fuente).select(columnas).range(desde, desde + TANDA - 1);
+      if (r.error) return { data: filas, error: r.error };
+      const lote = r.data || [];
+      filas = filas.concat(lote);
+      if (lote.length < TANDA) break;
+    }
+    return { data: filas, error: null };
+  }
+
   async function cargar() {
     setError(null);
     const [tablero, sup] = await Promise.all([
-      sb.from("vw_pnr_detalle").select("*").limit(5000),
+      // PAGINADO OBLIGATORIO.
+      //   PostgREST corta en 1000 filas por respuesta y el .limit() no lo
+      //   sube: es un techo del servidor, no del cliente. Con la vista en 350
+      //   casos nunca se notó; al capturar seis quincenas paso a 1632 y la
+      //   respuesta empezo a llegar cortada.
+      //
+      //   El corte no avisa: no hay error ni advertencia, solo faltan filas. Y
+      //   como la vista ordena los no cerrados primero, lo que se perdia eran
+      //   justo los cerrados de la quincena en curso: la tabla de estados
+      //   mostraba 84 de 116 y el total dejaba de cuadrar contra MELI.
+      traerTodo("vw_pnr_detalle"),
       // Los supervisores se leen una vez por carga: son diez centros y cambian
       // poco. Sirven para saber a quién le va la tarea del escalamiento sin
       // pedirlo caso por caso.
@@ -1877,7 +1905,7 @@ export default function Posventa() {
 
     await cargarTelefonos();
 
-    const vis = await sb.from("pnr_vistos_mx").select("case_id").limit(10000);
+    const vis = await traerTodo("pnr_vistos_mx", "case_id");
     if (!vis.error && vis.data) setVistos(new Set(vis.data.map((x) => x.case_id)));
 
     // Últimos treinta días de movimientos, para que el selector de fecha sirva
@@ -2286,7 +2314,7 @@ export default function Posventa() {
   // propio de Posventa. Se recarga al guardar uno nuevo para que aparezca sin
   // volver a cargar la pantalla.
   const cargarTelefonos = useCallback(async () => {
-    const { data, error: e } = await sb.from("vw_pnr_telefonos").select("*").limit(5000);
+    const { data, error: e } = await traerTodo("vw_pnr_telefonos");
     if (e || !data) return;
     const m = {};
     for (const t of data) {
