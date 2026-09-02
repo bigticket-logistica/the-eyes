@@ -299,6 +299,8 @@ export default function TableroControl() {
   const [b2, setB2] = useState([]);
   const [b3, setB3] = useState([]);
   const [alertas, setAlertas] = useState([]);
+  const [verCierre, setVerCierre] = useState(false);
+  const [cerrando, setCerrando] = useState(null);
   const [cargando, setCargando] = useState(true);
   const [error, setError] = useState(null);
   const [bajando, setBajando] = useState(false);
@@ -358,6 +360,29 @@ export default function TableroControl() {
     })();
     return () => { vivo = false; };
   }, []);
+
+  // ── Calcular el cierre de un mes ─────────────────────────────────────────
+  // fn_pnr_cerrar_mes escribe: reconstruye las tareas del mes y actualiza su
+  // estado. Un mes ya definitivo lo protege la propia función y no se toca.
+  async function cerrarMes(mes) {
+    setCerrando(mes);
+    setError(null);
+    try {
+      const { data, error: e } = await sb.rpc("fn_pnr_cerrar_mes", { p_mes: mes });
+      if (e) throw new Error(e.message);
+      const r = data || {};
+      // El resultado se dice en la barra de mensajes: sin esto el botón parece
+      // no haber hecho nada, porque el cambio queda dentro de la fila plegada.
+      setError(`Cierre de ${mes}: ${r.estado || "?"}`
+        + (r.tareas != null ? ` · ${r.tareas} tarea(s)` : "")
+        + (r.pct != null ? ` · ${r.pct}% cumplido` : ""));
+      await cargar();
+    } catch (e) {
+      setError(`No se pudo calcular ${mes}: ${e.message}`);
+    } finally {
+      setCerrando(null);
+    }
+  }
 
   // ── Bajar un archivo ─────────────────────────────────────────────────────
   // Las dos descargas de la pantalla comparten esto. Estaba duplicado y el CSV
@@ -599,25 +624,58 @@ export default function TableroControl() {
         </div>
       )}
 
-      {/* ── La alerta del cierre ──────────────────────────────────────────
-          Un preliminar sin aviso se lee como definitivo, y de ese número salen
-          incentivos. Va arriba de todo y no se puede cerrar. */}
-      {alertas.map((a) => (
-        <div key={a.mes} style={{ background: C.naranjaTenue,
-          border: `1px solid ${C.naranja}`, borderRadius: 10, padding: "9px 14px",
-          fontSize: 12.5, marginBottom: 10, lineHeight: 1.4 }}>
-          <strong style={{ color: C.ladrillo }}>
-            Cierre de {a.mes} · {a.estado}
-          </strong>
-          {" — "}{a.alerta}
-          {a.casos_sin_tarea > 0 && (
-            <span style={{ display: "block", fontSize: 11.5, color: C.gris, marginTop: 2 }}>
-              {a.casos_sin_tarea} caso(s) de ese mes sin tarea: nadie apretó Notificar, así
-              que no entran al SLA de ningún supervisor.
-            </span>
+      {/* ── El cierre del SLA de supervisores ─────────────────────────────
+          Antes esto eran cuatro barras naranjas arriba de todo, una por mes sin
+          calcular. Ocupaban media pantalla con algo que no es del informe de
+          MELI ni del tablero: es la medición del SLA de los supervisores para
+          su incentivo, y solo importa cuando alguien la va a usar.
+
+          Ahora es UNA línea plegada. Los meses sin calcular no se anuncian
+          -no calcularlos es una decisión, no una falla-, y el mes preliminar sí
+          se menciona porque ahí el número puede cambiar y de él salen
+          incentivos. */}
+      {alertas.length > 0 && (
+        <div style={{ marginBottom: 12 }}>
+          <button onClick={() => setVerCierre((v) => !v)}
+            style={{ fontSize: 11.5, padding: "5px 10px", borderRadius: 7,
+              color: C.gris }}>
+            {verCierre ? "▾" : "▸"} Cierre del SLA de supervisores
+            {alertas.some((a) => a.estado === "preliminar")
+              && " · un mes preliminar"}
+          </button>
+
+          {verCierre && (
+            <div style={{ marginTop: 8 }}>
+              {alertas.map((a) => (
+                <div key={a.mes} style={{ display: "flex", alignItems: "center",
+                  gap: 10, flexWrap: "wrap", borderBottom: "1px solid var(--borde)",
+                  padding: "7px 2px", fontSize: 12 }}>
+                  <strong style={{ minWidth: 96, fontVariantNumeric: "tabular-nums" }}>
+                    {a.mes}
+                  </strong>
+                  <span style={{ color: a.estado === "preliminar" ? C.ladrillo : C.gris,
+                    minWidth: 74 }}>
+                    {a.estado}
+                  </span>
+                  <span style={{ color: C.gris, flex: 1, minWidth: 200 }}>
+                    {a.estado === "sin_cerrar"
+                      ? "sin calcular"
+                      : `${a.casos_sin_tarea || 0} caso(s) sin tarea`}
+                  </span>
+                  {/* Recalcular un mes preliminar solo lo vuelve a medir; un
+                      definitivo la función lo protege sola y no lo toca. */}
+                  <button onClick={() => cerrarMes(a.mes)}
+                    disabled={cerrando === a.mes}
+                    style={{ fontSize: 11, padding: "4px 9px", borderRadius: 6 }}>
+                    {cerrando === a.mes ? "…"
+                      : a.estado === "sin_cerrar" ? "Calcular" : "Recalcular"}
+                  </button>
+                </div>
+              ))}
+            </div>
           )}
         </div>
-      ))}
+      )}
 
       {/* ── BLOQUE 1 ─────────────────────────────────────────────────── */}
       <Bloque n={1} titulo="PNR y montos" subtitulo="general y por centro">
