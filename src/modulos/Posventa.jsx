@@ -2,6 +2,8 @@ import { Fragment, useState, useEffect, useMemo, useCallback } from "react";
 import { sb } from "../shared/supabase.js";
 import ChatPosventa from "./ChatPosventa.jsx";
 import TableroControl from "./TableroControl.jsx";
+import { useAuth } from "../shared/auth.jsx";
+import { puedeActuar } from "../shared/permisos.js";
 
 // ── Posventa ───────────────────────────────────────────────────────────────
 // Hoy solo PNR; las devoluciones entran después como una segunda vista del
@@ -712,6 +714,81 @@ function Cuadro({ titulo, extra, children }) {
 // El motivo de cada estado pasó a ser el tooltip del nombre. Es el texto de la
 // planilla del analista y vale tenerlo, pero ocupaba media tabla para decir algo
 // que ya se sabe de memoria después de la primera semana.
+// ── Aviso inicial automático ───────────────────────────────────────────────
+// El aviso inicial de un PNR lo dispara la ejecutiva desde el botón Notificar.
+// Pero sale a colación, termina turno o entra a una reunión, y el plazo de 40
+// horas ya está corriendo desde que el caso nació. Este interruptor deja que lo
+// haga Biggy cuando pasan 15 minutos y nadie avisó.
+//
+// Va acá arriba y no dentro de un panel plegable: es un interruptor que manda
+// mensajes reales a conductores y supervisores, y tiene que verse encendido sin
+// que nadie lo busque.
+//
+// Muestra quién lo dejó prendido y desde cuándo porque el olvido es el riesgo:
+// alguien lo prende un viernes a las 17:00 y el fin de semana entero avisa
+// Biggy sin que nadie sepa por qué. Con el nombre a la vista, el lunes se sabe
+// a quién preguntar.
+
+function BarraAvisoAuto({ cfg, casosBiggy, ocupado, onCambiar }) {
+  if (!cfg) return null;
+  const on = !!cfg.aviso_auto;
+
+  const desde = cfg.aviso_auto_desde ? new Date(cfg.aviso_auto_desde) : null;
+  const horas = desde ? (Date.now() - desde.getTime()) / 3600000 : null;
+  const hace = horas == null ? null
+    : horas < 1 ? `hace ${Math.max(1, Math.round(horas * 60))} min`
+    : `hace ${Math.round(horas)} h`;
+
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap",
+      marginBottom: 16, padding: "9px 14px", borderRadius: 11,
+      border: `1px solid ${on ? C.ladrillo : "var(--borde)"}`,
+      background: on ? C.ladrilloTenue : "#fff" }}>
+
+      <button onClick={() => onCambiar(!on)} disabled={ocupado}
+        title={on ? "Apagar el aviso automático" : "Dejar que Biggy avise si nadie lo hace"}
+        style={{ display: "flex", alignItems: "center", gap: 7, border: "none",
+          background: "transparent", cursor: ocupado ? "default" : "pointer", padding: 0 }}>
+        {/* Interruptor dibujado y no un checkbox: se lee encendido o apagado de
+            un vistazo desde el otro lado del escritorio. */}
+        <span style={{ width: 34, height: 19, borderRadius: 10, flexShrink: 0,
+          background: on ? C.ladrillo : "#cbd5e1", position: "relative",
+          transition: "background .15s" }}>
+          <span style={{ position: "absolute", top: 2, left: on ? 17 : 2,
+            width: 15, height: 15, borderRadius: "50%", background: "#fff",
+            transition: "left .15s" }} />
+        </span>
+        <span style={{ fontSize: 12.5, fontWeight: 700,
+          color: on ? C.ladrillo : "var(--texto-suave)" }}>
+          {ocupado ? "…" : on ? "Biggy está avisando" : "Aviso automático apagado"}
+        </span>
+      </button>
+
+      <span style={{ fontSize: 11, color: "var(--texto-suave)", lineHeight: 1.4 }}>
+        {on
+          ? `Notifica al chofer y al supervisor si nadie lo hizo en ${cfg.aviso_auto_min || 15} min.`
+          : "Préndelo al salir a colación o al terminar el turno."}
+      </span>
+
+      {on && cfg.aviso_auto_por && (
+        <span style={{ fontSize: 11, color: C.ladrillo, fontWeight: 600 }}>
+          Lo prendió {cfg.aviso_auto_por}{hace ? ` · ${hace}` : ""}
+        </span>
+      )}
+
+      {/* El contador sale de las tareas que creó Biggy, no de un número que
+          este componente lleve: si alguien recarga la pantalla, el dato sigue
+          ahí. */}
+      <span style={{ marginLeft: "auto", fontSize: 11, color: "var(--texto-tenue)",
+        whiteSpace: "nowrap" }}>
+        {casosBiggy === 0
+          ? "sin casos avisados aún"
+          : `${casosBiggy} caso${casosBiggy === 1 ? "" : "s"} avisado${casosBiggy === 1 ? "" : "s"} por Biggy`}
+      </span>
+    </div>
+  );
+}
+
 function TablaEstados({ casos, filtro, historial, dia, onDia, onFiltrar, onFiltrarMovidos }) {
   const total = casos.length;
   let totalMonto = 0;
@@ -1840,6 +1917,14 @@ export default function Posventa() {
   const [ahora, setAhora] = useState(() => Date.now());
   const [orden, setOrden] = useState({ campo: "sla", dir: "asc" });
   const [supervisores, setSupervisores] = useState({});
+  // El nombre de quien prende el aviso automático: sin esto el interruptor
+  // diría "lo prendió alguien" y el lunes nadie sabe a quién preguntar.
+  const { analista } = useAuth();
+  const puedeAvisar = puedeActuar(analista);
+
+  const [cfgAviso, setCfgAviso] = useState(null);
+  const [casosBiggy, setCasosBiggy] = useState(0);
+  const [avisoOcupado, setAvisoOcupado] = useState(false);
   const [tareas, setTareas] = useState({});
   const [vueltas, setVueltas] = useState({});
   const [historial, setHistorial] = useState({});
@@ -2226,6 +2311,41 @@ export default function Posventa() {
   // navegador: el recordatorio de las 15:00 y el aviso de cambio de estado
   // llaman a la misma función, y si cada uno los armara por su lado
   // terminarían mandando textos distintos.
+  // Guarda quién lo prendió y cuándo. Sin eso, un interruptor olvidado el
+  // viernes no tiene dueño el lunes.
+  async function cambiarAvisoAuto(nuevo) {
+    setAvisoOcupado(true);
+    const { error } = await sb.from("pnr_asistente_config").update({
+      aviso_auto: nuevo,
+      aviso_auto_por: nuevo ? (analista?.nombre || "alguien") : null,
+      aviso_auto_desde: nuevo ? new Date().toISOString() : null,
+      actualizado_en: new Date().toISOString(),
+    }).eq("id", 1);
+    setAvisoOcupado(false);
+    if (error) { setError("No se pudo cambiar el aviso automático: " + error.message); return; }
+    await cargarCfgAviso();
+  }
+
+  const cargarCfgAviso = useCallback(async () => {
+    const [c, t] = await Promise.all([
+      sb.from("pnr_asistente_config")
+        .select("aviso_auto,aviso_auto_min,aviso_auto_max_horas,aviso_auto_por,aviso_auto_desde")
+        .eq("id", 1).maybeSingle(),
+      sb.from("pnr_tareas_mx").select("id", { count: "exact", head: true })
+        .eq("creada_por", "biggy"),
+    ]);
+    if (!c.error) setCfgAviso(c.data || null);
+    if (!t.error) setCasosBiggy(t.count || 0);
+  }, []);
+
+  useEffect(() => {
+    cargarCfgAviso();
+    // Otra analista puede prenderlo o apagarlo desde su pantalla, así que se
+    // relee cada medio minuto en vez de confiar en lo que este navegador cree.
+    const t = setInterval(cargarCfgAviso, 30000);
+    return () => clearInterval(t);
+  }, [cargarCfgAviso]);
+
   async function notificar(caseId, tipo, datosCorreo, telefono) {
     const t = tipo || "inicial";
     let wa = { ok: false, error: "sin envío" };
@@ -2430,6 +2550,9 @@ export default function Posventa() {
           No se pudo leer vw_pnr_detalle: {error}
         </div>
       )}
+
+      <BarraAvisoAuto cfg={cfgAviso} casosBiggy={casosBiggy}
+        ocupado={avisoOcupado || !puedeAvisar} onCambiar={cambiarAvisoAuto} />
 
       {/* Las tarjetas son el filtro. Un tablero de plata donde el número y el
           botón que lo abre son la misma cosa: se toca el monto que interesa y
