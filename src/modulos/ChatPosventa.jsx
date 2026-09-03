@@ -102,7 +102,10 @@ function hace(iso) {
 //            él; es la ventana a lo que haría.
 //   auto   — responde de verdad, a quien sea que escriba. Si un analista
 //            contesta en el hilo, el asistente no habla encima.
-const MINUTOS_TURNO = [30, 60, 120, 240];
+// Mismos tramos que el panel de Biggy en la torre, para que quien salta entre
+// las dos pantallas no tenga que recalcular: 240 minutos de turno son cuatro
+// horas sin nadie mirando, y eso ya no es una colación.
+const MINUTOS_TURNO = [30, 45, 60, 90];
 
 function PanelAsistente({ estado, onActivar, onApagar, ocupado, puede, onRefrescar }) {
   const [abierto, setAbierto] = useState(false);
@@ -191,26 +194,31 @@ function PanelAsistente({ estado, onActivar, onApagar, ocupado, puede, onRefresc
             </div>
           ) : (
             <>
-              <div style={{ fontSize: 9.5, color: "var(--texto-tenue)", marginBottom: 3 }}>
-                Escribe el borrador y no lo envía:
+              {/* AUTO PRIMERO.
+                  Es la razon por la que existe el panel: alguien sale y quiere
+                  que Biggy conteste. Sombra estaba arriba y era lo primero que
+                  se apretaba por estar a mano, cuando en realidad es la prueba,
+                  no el uso. */}
+              <div style={{ fontSize: 9.5, color: C.ladrillo, marginBottom: 3 }}>
+                Responde de verdad, a quien escriba:
               </div>
               <div style={{ display: "flex", gap: 4, flexWrap: "wrap", marginBottom: 7 }}>
                 {MINUTOS_TURNO.map((m) => (
-                  <button key={m} onClick={() => onActivar(m, "sombra")} disabled={ocupado}
-                    style={{ fontSize: 10.5, padding: "4px 9px" }}>
+                  <button key={m} className="btn-navy"
+                    onClick={() => onActivar(m, "auto")} disabled={ocupado}
+                    style={{ fontSize: 10.5, padding: "4px 10px" }}>
                     {m} min
                   </button>
                 ))}
               </div>
-              <div style={{ fontSize: 9.5, color: C.ladrillo, marginBottom: 3 }}>
-                Responde de verdad, a quien escriba:
+              <div style={{ fontSize: 9.5, color: "var(--texto-tenue)", marginBottom: 3 }}>
+                Solo prueba, sin enviar nada:
               </div>
               <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
                 {[30, 60].map((m) => (
-                  <button key={m} className="btn-navy"
-                    onClick={() => onActivar(m, "auto")} disabled={ocupado}
-                    style={{ fontSize: 10.5, padding: "4px 10px" }}>
-                    {m} min en auto
+                  <button key={m} onClick={() => onActivar(m, "sombra")} disabled={ocupado}
+                    style={{ fontSize: 10.5, padding: "4px 9px" }}>
+                    {m} min en sombra
                   </button>
                 ))}
               </div>
