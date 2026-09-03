@@ -2055,14 +2055,23 @@ export default function Posventa() {
             setTareas((prev) => ({ ...prev, [fila.case_id]: fila }));
           }
 
+          // Se releen también los tres hitos del aviso. Viven en pnr_casos_mx,
+          // que no se publica por Realtime, así que el chip del aviso solo se
+          // llenaba al refrescar la página a mano: el analista apretaba
+          // Notificar y no veía pasar nada.
+          //
+          // El evento de la tarea sirve de disparador porque todo aviso toca su
+          // tarea: el manual la crea, el automático también. Un caso avisado
+          // sin tarea no existe.
           const { data } = await sb.from("vw_pnr_detalle")
-            .select("case_id, pruebas_recibidas_en, sub_estado")
+            .select("case_id, pruebas_recibidas_en, sub_estado," +
+                    " avisado_inicial_en, avisado_24h_en, avisado_final_en," +
+                    " comprobante_en, recordatorios")
             .eq("case_id", fila.case_id)
             .maybeSingle();
           if (data) {
             setCasos((prev) => prev.map((x) => x.case_id === data.case_id
-              ? { ...x, pruebas_recibidas_en: data.pruebas_recibidas_en, sub_estado: data.sub_estado }
-              : x));
+              ? { ...x, ...data } : x));
           }
         })
       .on("postgres_changes",
