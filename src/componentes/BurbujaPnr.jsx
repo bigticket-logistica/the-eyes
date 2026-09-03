@@ -206,7 +206,7 @@ function Transcripcion({ m }) {
 }
 
 // ── Burbuja ─────────────────────────────────────────────────────────────────
-export default function BurbujaPnr({ m }) {
+export default function BurbujaPnr({ m, horaTexto }) {
   const saliente = m.direccion === "saliente";
   const esIA = m.emisor === "ia";
   const esTexto = TEXTO_PLANO.includes(m.tipo_contenido);
@@ -240,8 +240,14 @@ export default function BurbujaPnr({ m }) {
           </>
         )}
 
+        {/* horaTexto permite a quien usa la burbuja imponer la zona. Posventa
+            trabaja en CDMX y antes dibujaba su hora en un recuadro opaco ENCIMA
+            de esta, para taparla: bastaba que el texto de abajo fuera más ancho
+            o que el fondo no calzara para que se vieran las dos superpuestas.
+            Sin la prop, se comporta igual que siempre. */}
         <div style={{ fontSize: 10, opacity: 0.6, marginTop: 3, textAlign: "right" }}>
-          {fechaHora(m.creado_en)}{saliente && m.estado_entrega ? ` · ${m.estado_entrega}` : ""}
+          {horaTexto || fechaHora(m.creado_en)}
+          {saliente && m.estado_entrega ? ` · ${m.estado_entrega}` : ""}
         </div>
       </div>
     </div>
