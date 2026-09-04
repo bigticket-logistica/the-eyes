@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
 import { sb } from "../shared/supabase.js";
+import TareasPorSupervisor from "./TareasPorSupervisor.jsx";
 
 // ═══════════════════════════════════════════════════════════════════════════
 // TABLERO DE CONTROL · PNR
@@ -676,6 +677,15 @@ export default function TableroControl() {
           )}
         </div>
       )}
+
+      {/* ── Tareas abiertas ────────────────────────────────────────────
+          Va arriba de los bloques y NO responde al rango de fechas: los tres
+          bloques de abajo son análisis del periodo, esto es lo que hay que
+          hacer ahora. Un rango de agosto no cambia a quién le quedan tres
+          horas hoy. */}
+      <div style={{ marginBottom: 18 }}>
+        <TareasPorSupervisor />
+      </div>
 
       {/* ── BLOQUE 1 ─────────────────────────────────────────────────── */}
       <Bloque n={1} titulo="PNR y montos" subtitulo="general y por centro">
