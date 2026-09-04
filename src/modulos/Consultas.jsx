@@ -1483,6 +1483,9 @@ export default function Consultas() {
   const [avisoPanel, setAvisoPanel] = useState("");
   const leidosRef = useRef(new Set());
   const finRef = useRef(null);
+  // Mientras esté en true, el hilo se mantiene pegado al final aunque el
+  // contenido crezca. Se apaga si el usuario toca el scroll o a los 6 s.
+  const fijadoRef = useRef(false);
   const hiloRef = useRef(null);          // contenedor con scroll del hilo
   const convVistaRef = useRef(null);     // qué conversación se mostró la última vez
   const selRef = useRef(null);
@@ -1620,11 +1623,42 @@ export default function Consultas() {
     if (cambioDeConversacion) {
       // Recién abierta: al final de inmediato, sin animación, y reintentos
       // cortos para absorber la carga de imágenes y audios.
+      //
+      // Los reintentos llegaban hasta 1200 ms y no alcanzaban en un hilo con
+      // varias capturas grandes: cada imagen que termina de cargar empuja el
+      // contenido, y cuando los timeouts se acababan el hilo quedaba a media
+      // altura. Se veía como que la pantalla subía, bajaba y se quedaba ahí,
+      // mostrando mensajes de hace días mientras los de hoy estaban abajo.
       irAlFinal(false);
-      const t1 = setTimeout(() => irAlFinal(false), 120);
-      const t2 = setTimeout(() => irAlFinal(false), 450);
-      const t3 = setTimeout(() => irAlFinal(false), 1200);
-      return () => { clearTimeout(t1); clearTimeout(t2); clearTimeout(t3); };
+      const ts = [120, 450, 1200, 2000, 3000]
+        .map((ms) => setTimeout(() => irAlFinal(false), ms));
+
+      // Y además se sigue al final cada vez que el contenido crece, hasta que
+      // el usuario toque el scroll. Esto reemplaza al margen de 220 px del
+      // listener de abajo, que es el que falla acá: una sola captura mide más
+      // que eso, así que al cargar la primera el hilo ya quedaba "lejos del
+      // final" y nadie lo volvía a bajar.
+      fijadoRef.current = true;
+      const c = hiloRef.current;
+      const soltar = () => { fijadoRef.current = false; };
+      c?.addEventListener("wheel", soltar, { passive: true });
+      c?.addEventListener("touchstart", soltar, { passive: true });
+
+      const obs = new ResizeObserver(() => { if (fijadoRef.current) irAlFinal(false); });
+      if (c) for (const hijo of c.children) obs.observe(hijo);
+
+      // Seis segundos de tope: si un adjunto no carga, el hilo no puede quedar
+      // secuestrado para siempre.
+      const tFin = setTimeout(() => { fijadoRef.current = false; obs.disconnect(); }, 6000);
+
+      return () => {
+        ts.forEach(clearTimeout);
+        clearTimeout(tFin);
+        obs.disconnect();
+        fijadoRef.current = false;
+        c?.removeEventListener("wheel", soltar);
+        c?.removeEventListener("touchstart", soltar);
+      };
     }
     // Mensaje nuevo en la conversación que ya estabas viendo: animado.
     irAlFinal(true);
