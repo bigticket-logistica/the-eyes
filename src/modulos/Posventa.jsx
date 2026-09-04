@@ -238,6 +238,69 @@ function chipEstado(sub) {
 // el caso siga abierto. Por eso lleva contador en vez de círculo, y la fecha del
 // último debajo. Un caso con tres recordatorios y sin comprobante es un
 // supervisor que no está respondiendo, y eso el riel ahora lo dice.
+// ── Historial de avisos ────────────────────────────────────────────────────
+// El riel de hitos dice que hubo aviso y cuántos recordatorios, pero no cuándo
+// salió cada uno ni a quién. Con eso no se podía notar que al chofer le llegó
+// uno solo de cuatro: en el caso 192665936 el supervisor recibió el inicial y
+// los dos recordatorios, y el conductor nada, porque no había teléfono. La
+// ficha decía "3 avisos" y parecía todo en orden.
+//
+// El tipo NO se deduce de raw->>'aviso': ese campo dice 'recordatorio' tanto
+// para los de horario fijo como para la alerta final, y esa ambigüedad fue la
+// que provocó un bucle de 28 mensajes al mismo conductor. La vista lo separa
+// por emisor.
+function HistorialAvisos({ caseId }) {
+  const [avisos, setAvisos] = useState(null);
+  const [abierto, setAbierto] = useState(false);
+
+  useEffect(() => {
+    if (!abierto || avisos) return;
+    let vivo = true;
+    (async () => {
+      const { data } = await sb.from("vw_pnr_avisos_historial")
+        .select("tipo,destino,creado_en,horas_restantes,estado_entrega")
+        .eq("case_id", caseId);
+      if (vivo) setAvisos(data || []);
+    })();
+    return () => { vivo = false; };
+  }, [abierto, avisos, caseId]);
+
+  // Se pide al desplegar y no al abrir la ficha: son varias filas por caso y la
+  // mayoría de las veces nadie las mira.
+  return (
+    <div style={{ borderTop: "1px solid var(--borde)", marginTop: 5, paddingTop: 5 }}>
+      <button onClick={() => setAbierto((v) => !v)}
+        style={{ fontSize: 10.5, padding: "2px 6px", borderRadius: 6,
+          color: "var(--texto-suave)", background: "transparent",
+          border: "none", cursor: "pointer" }}>
+        {abierto ? "▾" : "▸"} historial de avisos
+      </button>
+
+      {abierto && (avisos === null ? (
+        <div style={{ fontSize: 10, color: "var(--texto-tenue)", padding: "3px 0" }}>…</div>
+      ) : avisos.length === 0 ? (
+        <div style={{ fontSize: 10, color: "var(--texto-tenue)", padding: "3px 0" }}>
+          Ningún aviso salió de este caso.
+        </div>
+      ) : (
+        avisos.map((a, i) => (
+          <div key={i} style={{ display: "flex", justifyContent: "space-between",
+            alignItems: "baseline", gap: 6, padding: "1.5px 0", fontSize: 10 }}>
+            <span style={{ color: "var(--texto-suave)" }}>
+              {a.tipo} · {a.destino === "conductor" ? "chofer" : "supervisor"}
+            </span>
+            <span style={{ fontVariantNumeric: "tabular-nums",
+              color: a.estado_entrega === "leido" ? C.verde : "var(--texto-suave)" }}>
+              {fechaHito(a.creado_en)}
+              {a.horas_restantes != null ? ` · ${a.horas_restantes} h` : ""}
+            </span>
+          </div>
+        ))
+      ))}
+    </div>
+  );
+}
+
 const HITOS = [
   { clave: "avisado_inicial_en",   etiqueta: "Aviso",    titulo: "Primer aviso al chofer y al supervisor" },
   { clave: "recordatorio_ultimo",  etiqueta: "Recuerdos", titulo: "Recordatorios diarios enviados",
@@ -1653,6 +1716,8 @@ function Detalle({ c, ahora, onPedir, trayendo, supervisor, tarea, vueltas, movi
                 </div>
               );
             })}
+
+            <HistorialAvisos caseId={c.case_id} />
           </div>
 
           <button onClick={() => setPanel((v) => !v)}
