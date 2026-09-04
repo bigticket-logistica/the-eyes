@@ -2,6 +2,7 @@ import { Fragment, useState, useEffect, useMemo, useCallback } from "react";
 import { sb } from "../shared/supabase.js";
 import ChatPosventa from "./ChatPosventa.jsx";
 import TableroControl from "./TableroControl.jsx";
+import NotasPosventa from "./NotasPosventa.jsx";
 import { useAuth } from "../shared/auth.jsx";
 import { puedeActuar } from "../shared/permisos.js";
 
@@ -87,6 +88,7 @@ const VISTAS = [
   { clave: "devoluciones", etiqueta: "Devoluciones",  activa: false },
   { clave: "chat",         etiqueta: "Chat Posventa", activa: true  },
   { clave: "tablero",      etiqueta: "Tablero de Control", activa: true },
+  { clave: "notas",        etiqueta: "Notas",         activa: true },
 ];
 
 // Paleta. Navy y naranja son los institucionales; los otros tres se derivan
@@ -1940,6 +1942,7 @@ export default function Posventa() {
   // dibuja antes de que el chat monte: si el contador viviera allá, el número
   // aparecería recién al entrar, justo cuando ya no sirve para avisar.
   const [msjSinLeer, setMsjSinLeer] = useState(0);
+  const [notasSinLeer, setNotasSinLeer] = useState(0);
 
   // Trae una tabla completa en tandas de 1000, que es el maximo por respuesta.
   // Para cuando llega una tanda incompleta: eso significa que ya no hay mas.
@@ -2122,12 +2125,31 @@ export default function Posventa() {
       if (vivo) setMsjSinLeer((data || []).reduce((s, c) => s + (c.no_leidos || 0), 0));
     };
     contarMsj();
-    const t = setInterval(() => { if (!document.hidden) contarMsj(); }, 30000);
+
+    // Notas sin leer POR ESTE analista, no sin leer por nadie: con varios
+    // turnos, una nota que otro ya vio sigue siendo pendiente para quien entra.
+    const contarNotas = async () => {
+      if (!analista?.id) return;
+      const { data } = await sb.from("vw_pnr_notas").select("id,autor_id,lecturas");
+      if (!vivo) return;
+      setNotasSinLeer((data || []).filter((n) =>
+        n.autor_id !== analista.id &&
+        !(n.lecturas || []).some((l) => l.analista_id === analista.id)).length);
+    };
+    contarNotas();
+
+    const t = setInterval(() => {
+      if (!document.hidden) { contarMsj(); contarNotas(); }
+    }, 30000);
     const canal = sb.channel("pnr-chat-badge")
       .on("postgres_changes", { event: "*", schema: "public", table: "pnr_conversaciones_mx" }, contarMsj)
+      .on("postgres_changes", { event: "*", schema: "public", table: "pnr_notas" }, contarNotas)
+      .on("postgres_changes", { event: "*", schema: "public", table: "pnr_notas_lecturas" }, contarNotas)
       .subscribe();
     return () => { vivo = false; clearInterval(t); sb.removeChannel(canal); };
-  }, []);
+    // Depende de analista: al montar suele venir null, y sin esto el contador
+    // de notas se queda en cero para siempre.
+  }, [analista?.id]);
 
   useEffect(() => {
     cargar();
@@ -2502,6 +2524,13 @@ export default function Posventa() {
                 color: vista === v.clave ? "#fff" : v.activa ? "var(--texto)" : "var(--texto-tenue)",
               }}>
               {v.etiqueta}
+              {v.clave === "notas" && notasSinLeer > 0 && (
+                <span style={{ marginLeft: 6, fontSize: 10, fontWeight: 700,
+                  background: C.naranja, color: "#fff", borderRadius: 10,
+                  padding: "1px 7px", verticalAlign: "middle" }}>
+                  {notasSinLeer}
+                </span>
+              )}
               {v.clave === "chat" && msjSinLeer > 0 && (
                 <span style={{ marginLeft: 6, fontSize: 10, fontWeight: 700,
                   background: C.naranja, color: "#fff", borderRadius: 10,
@@ -2519,7 +2548,7 @@ export default function Posventa() {
             sin relación entre ellos. */}
         <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 8 }}>
           {aviso && <span style={{ fontSize: 11.5, color: C.verde }}>{aviso}</span>}
-          {vista === "chat" || vista === "tablero" ? null : <Fragment>
+          {vista === "chat" || vista === "tablero" || vista === "notas" ? null : <Fragment>
           <input value={busqueda} onChange={(e) => { setBusqueda(e.target.value); setAbiertas(new Set()); }}
             placeholder="Buscar caso, guía, ruta o conductor"
             style={{ fontSize: 12.5, padding: "5px 10px", borderRadius: 7,
@@ -2544,6 +2573,8 @@ export default function Posventa() {
         <div style={{ height: "calc(100vh - 150px)", minHeight: 420 }}>
           <ChatPosventa />
         </div>
+      ) : vista === "notas" ? (
+        <NotasPosventa />
       ) : vista === "tablero" ? (
         /* El tablero tiene su propio rango de fechas y no usa el selector de
            periodo de la barra: son dos preguntas distintas. El periodo sirve
