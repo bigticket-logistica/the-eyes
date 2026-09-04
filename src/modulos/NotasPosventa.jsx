@@ -119,13 +119,34 @@ export default function NotasPosventa() {
   const [error, setError] = useState(null);
   const [verBiggy, setVerBiggy] = useState(false);
 
+  // Rango de fechas. Arranca en los últimos 7 días y no en "todo": con 18 notas
+  // el primer día, en una semana son más de cien y buscar algo se vuelve
+  // scroll. El rango aplica a las dos secciones — las del equipo y las de
+  // Biggy— porque una nota de turno de hace un mes tampoco sirve de nada.
+  const [desde, setDesde] = useState(() => {
+    const d = new Date(Date.now() - 7 * 86400000);
+    return d.toLocaleDateString("en-CA", { timeZone: "America/Mexico_City" });
+  });
+  const [hasta, setHasta] = useState(() =>
+    new Date().toLocaleDateString("en-CA", { timeZone: "America/Mexico_City" }));
+
   const cargar = useCallback(async () => {
+    // El rango se aplica en la consulta y no al pintar: traer todo para mostrar
+    // una semana carga la pantalla con datos que nadie va a mirar.
+    //
+    // El "hasta" incluye el día completo en hora de México. Sin el ajuste, una
+    // nota de las 18:00 del día elegido quedaba fuera porque la comparación
+    // corta a las 00:00 UTC.
+    const finDia = new Date(`${hasta}T23:59:59.999`);
     const { data, error: e } = await sb.from("vw_pnr_notas")
-      .select("*").limit(200);
+      .select("*")
+      .gte("creada_en", new Date(`${desde}T00:00:00`).toISOString())
+      .lte("creada_en", finDia.toISOString())
+      .limit(500);
     if (e) { setError(e.message); setCargando(false); return; }
     setNotas(data || []);
     setCargando(false);
-  }, []);
+  }, [desde, hasta]);
 
   useEffect(() => {
     cargar();
@@ -193,6 +214,34 @@ export default function NotasPosventa() {
           {error}
         </div>
       )}
+
+      {/* ── Rango ─────────────────────────────────────────────────────── */}
+      <div style={{ display: "flex", alignItems: "center", gap: 8,
+        marginBottom: 14, flexWrap: "wrap" }}>
+        <span style={{ fontSize: 11, fontWeight: 700, letterSpacing: 0.3,
+          textTransform: "uppercase", color: C.gris }}>
+          Notas de
+        </span>
+        <div style={{ display: "inline-flex", alignItems: "center", gap: 6,
+          border: "1px solid var(--borde)", borderRadius: 9, padding: "4px 9px",
+          background: "#fff" }}>
+          <input type="date" value={desde} max={hasta}
+            onChange={(e) => setDesde(e.target.value)}
+            style={{ fontSize: 12, border: "none", outline: "none", padding: 0,
+              background: "transparent", width: 116 }} />
+          <span style={{ fontSize: 11, color: C.gris }}>→</span>
+          <input type="date" value={hasta} min={desde}
+            onChange={(e) => setHasta(e.target.value)}
+            style={{ fontSize: 12, border: "none", outline: "none", padding: 0,
+              background: "transparent", width: 116 }} />
+        </div>
+        <button onClick={() => {
+          const hoy = new Date().toLocaleDateString("en-CA", { timeZone: "America/Mexico_City" });
+          setDesde(hoy); setHasta(hoy);
+        }} style={{ fontSize: 11.5, padding: "5px 10px", borderRadius: 7 }}>
+          Hoy
+        </button>
+      </div>
 
       {/* ── Dejar una nota ────────────────────────────────────────────── */}
       <div style={{ border: "1px solid var(--borde)", borderRadius: 12,
