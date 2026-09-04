@@ -90,9 +90,20 @@ export async function mensajesDeConversacion(conversacionId) {
     .select("id, case_id, direccion, emisor, tipo_contenido, texto, media_url, estado_entrega, creado_en, "
             + "media_path, media_mime, media_bytes, media_estado, transcripcion, transcriptor, lat, lng")
     .eq("conversacion_id", conversacionId)
-    .order("creado_en", { ascending: true });
+    // Los ÚLTIMOS 400, no la conversación completa, y descendente.
+    //   PostgREST corta las respuestas en 1000 filas y el .limit() no lo sube:
+    //   es un techo del servidor. Pidiendo todo en orden ascendente, una
+    //   conversación de 1056 mensajes devolvía los primeros mil —desde el 11 de
+    //   agosto— y los 56 recientes quedaban fuera del corte. El hilo terminaba
+    //   tres días atrás, sin nada abajo y sin ningún error: el analista escribía
+    //   y su mensaje llegaba al conductor, pero no aparecía en pantalla.
+    //
+    //   Descendente para que el corte deje afuera lo viejo y no lo nuevo, y se
+    //   da vuelta el arreglo antes de devolverlo para pintar en orden.
+    .order("creado_en", { ascending: false })
+    .limit(400);
   if (error) throw error;
-  return data || [];
+  return (data || []).reverse();
 }
 
 // Crea (o reusa) un caso de consulta desde una conversación. Devuelve el case_id.
