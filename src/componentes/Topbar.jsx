@@ -227,6 +227,13 @@ export default function Topbar() {
               operativo ya cerró, a diferencia de las primeras que se usan en
               vivo. El badge cuenta los casos que nadie abrió. */}
           <Tab to="/posventa" badge={pnrSinVer}>Posventa</Tab>
+          {/* Devoluciones va pegada a Posventa: las dos se revisan sobre el día
+              ya cerrado. Pestaña propia y no una vista dentro de Posventa
+              porque es otro circuito y otro canal — el analista de devoluciones
+              no necesita pasar por los PNR para llegar acá. Sin badge por
+              ahora: el aviso al conductor todavía no sale, así que un contador
+              mediría captura y no trabajo pendiente. */}
+          <Tab to="/devoluciones">Devoluciones</Tab>
           {/* Salud es una pantalla de infraestructura, no de operación: se
               muestra solo a quien la mantiene. La lista está acá y no en la base
               porque cambia poco y así no hay una consulta más en cada carga. */}
