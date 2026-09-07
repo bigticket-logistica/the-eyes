@@ -955,6 +955,12 @@ function TablaEstados({ casos, filtro, historial, dia, onDia, onFiltrar, onFiltr
                 color: COLOR_ESTADO[e.clave] || "var(--texto)", overflow: "hidden",
                 textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                 {e.etiqueta}
+                {/* Su propia cuenta al lado del nombre: sin ella, la fila decía
+                    18 total y "Con Penalidad 1", y para saber cuántos eran de
+                    comprobante había que restar. */}
+                {fusiona && pen.n > 0 && (
+                  <span style={{ fontWeight: 600 }}> {d.n}</span>
+                )}
                 {fusiona && pen.n > 0 && (
                   <>
                     <span style={{ color: "var(--texto-tenue)", fontWeight: 400 }}> · </span>
