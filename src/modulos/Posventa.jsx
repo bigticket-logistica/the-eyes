@@ -922,9 +922,30 @@ function TablaEstados({ casos, filtro, historial, dia, onDia, onFiltrar, onFiltr
           <span style={{ textAlign: "right" }}>%</span>
         </div>
         {ESTADOS_PNR.map((e) => {
+          // ESPERANDO COMPROBANTE Y CON PENALIDAD EN UNA SOLA FILA.
+          //   Los dos esperan lo mismo del supervisor: comprobante, o prórroga
+          //   con documentación. Y comparten el reloj. En filas separadas el
+          //   analista tenía que sumar mentalmente cuánto hay por trabajar, y
+          //   una penalidad suelta abajo se leía como algo de otro mundo.
+          //
+          //   Se juntan en la cifra y se separan en el desglose: el total dice
+          //   cuánto está en juego, el desglose dice de qué tipo es cada caso y
+          //   cada mitad filtra por su cuenta. Con Penalidad conserva su color,
+          //   así que se identifica sin leer.
+          if (e.clave === "TO_BILL") return null;
+
+          const fusiona = e.clave === "WAITING_RECEIPT";
+          const pen = por.TO_BILL || { n: 0, monto: 0 };
+          const ePen = POR_ESTADO.TO_BILL;
+
           const d = por[e.clave] || { n: 0, monto: 0 };
-          const activa = filtro.tipo === "estado" && filtro.valor === e.clave;
-          const vacia = d.n === 0;
+          const n = d.n + (fusiona ? pen.n : 0);
+          const monto = d.monto + (fusiona ? pen.monto : 0);
+
+          const activa = filtro.tipo === "estado"
+            && (filtro.valor === e.clave || (fusiona && filtro.valor === "TO_BILL"));
+          const vacia = n === 0;
+
           return (
             <div key={e.clave} onClick={() => !vacia && onFiltrar(e.clave)} title={e.motivo}
               style={{ display: "grid", gridTemplateColumns: GRID_A, gap: 8, padding: "6px 14px",
@@ -932,13 +953,29 @@ function TablaEstados({ casos, filtro, historial, dia, onDia, onFiltrar, onFiltr
                 background: activa ? C.naranjaTenue : "#fff", opacity: vacia ? 0.45 : 1 }}>
               <span style={{ fontSize: 12, fontWeight: activa ? 600 : 500,
                 color: COLOR_ESTADO[e.clave] || "var(--texto)", overflow: "hidden",
-                textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{e.etiqueta}</span>
+                textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                {e.etiqueta}
+                {fusiona && pen.n > 0 && (
+                  <>
+                    <span style={{ color: "var(--texto-tenue)", fontWeight: 400 }}> · </span>
+                    <span role="button" tabIndex={0}
+                      onClick={(ev) => { ev.stopPropagation(); onFiltrar("TO_BILL"); }}
+                      onKeyDown={(ev) => { if (ev.key === "Enter") { ev.stopPropagation(); onFiltrar("TO_BILL"); } }}
+                      title={ePen.motivo}
+                      style={{ color: COLOR_ESTADO.TO_BILL, fontWeight: 600, cursor: "pointer",
+                        borderBottom: filtro.valor === "TO_BILL"
+                          ? `2px solid ${COLOR_ESTADO.TO_BILL}` : "none" }}>
+                      {ePen.etiqueta} {pen.n}
+                    </span>
+                  </>
+                )}
+              </span>
               <span style={{ textAlign: "right", fontSize: 12, fontWeight: 600, color: "var(--texto)",
-                fontVariantNumeric: "tabular-nums" }}>{d.n}</span>
+                fontVariantNumeric: "tabular-nums" }}>{n}</span>
               <span style={{ textAlign: "right", fontSize: 12, color: "var(--texto)",
-                fontVariantNumeric: "tabular-nums" }}>{dinero(d.monto)}</span>
+                fontVariantNumeric: "tabular-nums" }}>{dinero(monto)}</span>
               <span style={{ textAlign: "right", fontSize: 11, color: "var(--texto-tenue)",
-                fontVariantNumeric: "tabular-nums" }}>{pct(d.n, total)}</span>
+                fontVariantNumeric: "tabular-nums" }}>{pct(n, total)}</span>
             </div>
           );
         })}
@@ -2303,7 +2340,10 @@ export default function Posventa() {
 
   const subEstadosDelGrupo = useMemo(
     () => filtro.tipo === "grupo"
-      ? ESTADOS_PNR.filter((e) => e.grupo === filtro.valor)
+      // Igual que la lista: "responder" abarca los dos grupos, así que sus
+      // sub-estados son los de ambos.
+      ? ESTADOS_PNR.filter((e) => e.grupo === filtro.valor
+          || (filtro.valor === "responder" && e.grupo === "penalidad"))
       : [],
     [filtro]
   );
@@ -2331,6 +2371,18 @@ export default function Posventa() {
           // En ruta ya no es un grupo: es una marca sobre el caso, así que se
           // pregunta por la marca y no por la clasificación.
           if (filtro.valor === "rescatable") return !!c.rescatable;
+          // "Por responder" trae también los de penalidad. Las dos esperan lo
+          // mismo del supervisor —comprobante o documentación con prórroga— y
+          // partirlas obligaba al analista a cambiar de filtro para revisar un
+          // caso más, con el mismo reloj corriendo en los dos. En la lista se
+          // distinguen por el chip, que se pinta del color del sub-estado.
+          //
+          // Filtrar "penalidad" sola sigue funcionando desde el desglose de la
+          // tarjeta: acá se suma, no se reemplaza.
+          if (filtro.valor === "responder") {
+            const g = clasificar(c);
+            return g === "responder" || g === "penalidad";
+          }
           return clasificar(c) === filtro.valor;
         });
 
@@ -2778,6 +2830,11 @@ export default function Posventa() {
                 ? `Pasaron hoy a ${(POR_ESTADO[filtro.valor] || {}).etiqueta || filtro.valor}`
               : filtro.tipo === "movidos" ? "Movidos hoy"
               : filtro.tipo === "todos" ? "Todos"
+              // El grupo "responder" trae también los de penalidad, así que el
+              // título los nombra a los dos: decir solo "Por responder" sobre
+              // una lista que incluye penalidades hace dudar de si están todos.
+              : filtro.valor === "responder"
+                ? `${POR_CLAVE.responder.etiqueta} y ${POR_CLAVE.penalidad.etiqueta.toLowerCase()}`
               : (POR_CLAVE[filtro.valor] || {}).etiqueta || "Casos"}
           </span>
           {/* Sub-filtros del grupo abierto. "Cerrados" junta anulados y cobrados,
