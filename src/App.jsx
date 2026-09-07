@@ -11,6 +11,7 @@ import Correos from "./modulos/Correos.jsx";
 import Mensajes from "./modulos/Mensajes.jsx";
 import Anomalias from "./modulos/Anomalias.jsx";
 import Posventa from "./modulos/Posventa.jsx";
+import Devoluciones from "./modulos/Devoluciones.jsx";
 import Salud from "./modulos/Salud.jsx";
 import Topbar from "./componentes/Topbar.jsx";
 import { AlertasProvider, ContenedorToasts } from "./shared/alertas.jsx";
@@ -67,11 +68,13 @@ export default function App() {
             <Route path="/consultas" element={<Consultas />} />
             <Route path="/mensajes" element={<Mensajes />} />
             <Route path="/anomalias" element={<Anomalias />} />
-            {/* Posventa nace con PNR. Las devoluciones entran después como una
-                segunda vista dentro del mismo módulo, por eso la ruta es
-                /posventa y no /pnr: la pestaña no tiene que cambiar de nombre
-                cuando llegue lo que sigue. */}
+            {/* Posventa nace con PNR. La ruta es /posventa y no /pnr porque el
+                módulo iba a crecer con más vistas adentro. Devoluciones
+                terminó saliendo como pestaña propia: es otro circuito, otro
+                canal de WhatsApp y otras tablas, y meterlo acá adentro obligaba
+                a mirar PNR para llegar a algo que no tiene nada que ver. */}
             <Route path="/posventa" element={<Posventa />} />
+            <Route path="/devoluciones" element={<Devoluciones />} />
             <Route path="/salud" element={<Salud />} />
             <Route path="/login" element={<Navigate to="/" replace />} />
             <Route path="*" element={<Navigate to="/" replace />} />
