@@ -615,7 +615,7 @@ function ColOrden({ campo, orden, onClick, derecha, children }) {
   );
 }
 
-function Tarjeta({ grupo, monto, casos, activa, onClick }) {
+function Tarjeta({ grupo, monto, casos, activa, onClick, partes }) {
   return (
     <button onClick={onClick} title={`Ver solo ${grupo.etiqueta.toLowerCase()}`}
       style={{
@@ -636,6 +636,27 @@ function Tarjeta({ grupo, monto, casos, activa, onClick }) {
       <div style={{ fontSize: 11, color: "var(--texto-tenue)" }}>
         {casos} {casos === 1 ? "caso" : "casos"} · {grupo.nota}
       </div>
+
+      {/* El desglose de una tarjeta que junta dos grupos. Cada parte filtra por
+          su cuenta: el total dice cuánta plata está en juego, y el desglose
+          deja ir a la mitad que interesa sin perder de vista la otra. */}
+      {partes && (
+        <div style={{ display: "flex", gap: 10, marginTop: 7,
+          paddingTop: 6, borderTop: "1px solid var(--borde)", flexWrap: "wrap" }}>
+          {partes.map((p) => (
+            <span key={p.clave} role="button" tabIndex={0}
+              onClick={(e) => { e.stopPropagation(); p.onClick(); }}
+              onKeyDown={(e) => { if (e.key === "Enter") { e.stopPropagation(); p.onClick(); } }}
+              title={`Ver solo ${p.etiqueta.toLowerCase()}`}
+              style={{ fontSize: 10.5, cursor: "pointer",
+                color: p.activa ? p.color : "var(--texto-suave)",
+                fontWeight: p.activa ? 700 : 500,
+                borderBottom: `2px solid ${p.activa ? p.color : "transparent"}` }}>
+              {p.etiqueta} <strong style={{ color: p.color }}>{p.casos}</strong>
+            </span>
+          ))}
+        </div>
+      )}
     </button>
   );
 }
@@ -2364,6 +2385,10 @@ export default function Posventa() {
       return;
     }
     setTrayendo((prev) => new Set(prev).add(caseId));
+    // Se declara acá y no dentro del try para que el return de abajo la vea sin
+    // depender del hoisting: notificar() necesita el detalle de inmediato y
+    // esperar a que React repinte el estado no sirve.
+    let recien = null;
     try {
       const r = await fetch(`${API_PNR}/pnr-detalle/${caseId}${forzar ? "?forzar=1" : ""}`,
         { headers: { "x-api-secret": SECRETO_PNR } });
@@ -2376,6 +2401,9 @@ export default function Posventa() {
             detalle_capturado_en: j.detalle.capturado_en,
             detalle_error: j.detalle.error || null }
         : x));
+      // Se devuelve además de guardarlo en el estado: notificar() lo necesita
+      // ya mismo para armar el correo, y esperar a que React repinte no sirve.
+      recien = j.detalle;
 
       // La ficha de teléfonos lee vw_pnr_telefonos, que se carga una sola vez al
       // abrir la pantalla. El teléfono del chofer llega recién ahora, con el
@@ -2389,6 +2417,7 @@ export default function Posventa() {
     } finally {
       setTrayendo((prev) => { const n = new Set(prev); n.delete(caseId); return n; });
     }
+    return recien;
   }
 
   // Varias filas pueden quedar abiertas: el analista compara casos del mismo
@@ -2445,6 +2474,32 @@ export default function Posventa() {
   async function notificar(caseId, tipo, datosCorreo, telefono) {
     const t = tipo || "inicial";
     let wa = { ok: false, error: "sin envío" };
+
+    // EL DETALLE PRIMERO, y solo en el aviso inicial.
+    //   El correo al supervisor lleva producto, quién recibió, la distancia y
+    //   la fecha de entrega: todo eso vive en pnr_detalle_mx y se captura
+    //   cuando alguien abre la ficha, no cuando nace el caso. Notificando sin
+    //   traerlo, el correo sale con los campos vacíos aunque la bitácora los
+    //   muestre bien después, porque la bitácora lee en vivo y el correo es una
+    //   foto del momento del envío.
+    //
+    //   Al medirlo: de 75 casos avisados en una semana, 56 tenían el detalle
+    //   capturado DESPUÉS del aviso. Tres de cada cuatro correos salieron
+    //   vacíos.
+    //
+    //   Tarda entre 5 y 30 segundos y por eso el botón queda en espera con su
+    //   texto. Es preferible a mandar rápido algo que no sirve.
+    //
+    //   Si falla, se sigue igual: el WhatsApp al chofer y al supervisor importa
+    //   más que un correo completo, y el detalle se recupera después.
+    if (t === "inicial" && datosCorreo && !datosCorreo.producto) {
+      try {
+        const fresco = await pedirDetalle(caseId, false);
+        if (fresco) datosCorreo = { ...datosCorreo, ...soloDetalle(fresco) };
+      } catch (e) {
+        // Silencio a propósito: pedirDetalle ya deja el error en la fila.
+      }
+    }
 
     try {
       // El teléfono elegido va solo si el analista eligió uno. Si no, la
@@ -2663,11 +2718,48 @@ export default function Posventa() {
           botón que lo abre son la misma cosa: se toca el monto que interesa y
           la lista de abajo queda con esos casos. */}
       <div style={{ display: "flex", gap: 12, flexWrap: "wrap", marginBottom: 8 }}>
-        {GRUPOS.map((g) => (
-          <Tarjeta key={g.clave} grupo={g} monto={totales[g.clave].monto} casos={totales[g.clave].n}
-            activa={!buscando && filtro.tipo === "grupo" && filtro.valor === g.clave}
-            onClick={() => { setBusqueda(""); setFiltro({ tipo: "grupo", valor: g.clave }); setAbiertas(new Set()); }} />
-        ))}
+        {GRUPOS.map((g) => {
+          const ir = (clave) => {
+            setBusqueda("");
+            setFiltro({ tipo: "grupo", valor: clave });
+            setAbiertas(new Set());
+          };
+
+          // POR RESPONDER Y CON PENALIDAD EN UNA SOLA TARJETA.
+          //   Iban separadas porque la acción era distinta: en una se subía el
+          //   comprobante y en la otra se pedía revisión. Pero en penalidad el
+          //   supervisor también puede pedir prórroga y cargar documentación,
+          //   así que las dos esperan lo mismo de él y comparten el SLA.
+          //
+          //   Se juntan en el total —la plata en riesgo es una sola cifra— y se
+          //   mantienen distinguibles en el desglose, con su color. Que
+          //   "penalidad" siga siendo un grupo aparte es lo que permite
+          //   filtrarla sola desde ahí.
+          if (g.clave === "penalidad") return null;
+
+          const fusiona = g.clave === "responder";
+          const pen = totales.penalidad || { monto: 0, n: 0 };
+          const gPen = POR_CLAVE.penalidad;
+
+          return (
+            <Tarjeta key={g.clave} grupo={g}
+              monto={totales[g.clave].monto + (fusiona ? pen.monto : 0)}
+              casos={totales[g.clave].n + (fusiona ? pen.n : 0)}
+              activa={!buscando && filtro.tipo === "grupo"
+                && (filtro.valor === g.clave || (fusiona && filtro.valor === "penalidad"))}
+              onClick={() => ir(g.clave)}
+              partes={!fusiona ? null : [
+                { clave: "responder", etiqueta: g.etiqueta, color: g.color,
+                  casos: totales.responder.n,
+                  activa: !buscando && filtro.tipo === "grupo" && filtro.valor === "responder",
+                  onClick: () => ir("responder") },
+                { clave: "penalidad", etiqueta: gPen.etiqueta, color: gPen.color,
+                  casos: pen.n,
+                  activa: !buscando && filtro.tipo === "grupo" && filtro.valor === "penalidad",
+                  onClick: () => ir("penalidad") },
+              ]} />
+          );
+        })}
       </div>
 
       {/* Mismo formato que el panel de MELI, con los números de nuestra base. */}
