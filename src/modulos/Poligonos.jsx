@@ -61,6 +61,26 @@ const TIPOS = ["Peligroso", "Difícil acceso", "Sin estacionamiento",
 
 const CENTRO_MX = [23.6345, -102.5528];
 
+// Cuántas camionetas están a menos de un kilómetro de una entrega en zona.
+//   Alimenta el badge de la pestaña en el topbar. Se cuenta cada minuto y no
+//   por Realtime porque lo que cambia no es una fila: es la distancia, que se
+//   recalcula sola cuando el scraper guarda una posición nueva.
+export function useSegAlertas() {
+  const [n, setN] = useState(0);
+  useEffect(() => {
+    let vivo = true;
+    const contar = async () => {
+      const { count } = await sb.from("vw_seg_alertas")
+        .select("ruta_id", { count: "exact", head: true });
+      if (vivo) setN(count || 0);
+    };
+    contar();
+    const t = setInterval(() => { if (!document.hidden) contar(); }, 60000);
+    return () => { vivo = false; clearInterval(t); };
+  }, []);
+  return n;
+}
+
 // Buscador de lugares contra Nominatim, el geocodificador de OpenStreetMap.
 //   Sin esto había que arrastrar el mapa desde todo México hasta el barrio, y
 //   con 12 centros repartidos en el país eso son varios minutos por zona.
@@ -551,14 +571,29 @@ function Monitoreo({ refresco }) {
 
   const cargar = useCallback(async () => {
     setCargando(true);
-    const { data, error: e } = await sb.from("vw_seg_rutas_en_zona")
-      .select("*").eq("fecha", dia).order("paradas_en_zona", { ascending: false });
+    // Las rutas y las alertas en un viaje: la alerta es "esta camioneta está
+    // llegando a una zona AHORA", y sin ella la lista solo dice qué rutas
+    // tienen entregas marcadas, sin decir cuál es urgente.
+    const [r, a] = await Promise.all([
+      sb.from("vw_seg_rutas_en_zona")
+        .select("*").eq("fecha", dia).order("paradas_en_zona", { ascending: false }),
+      sb.from("vw_seg_alertas").select("*"),
+    ]);
     setCargando(false);
-    if (e) { setError(e.message); return; }
-    setRutas(data || []);
+    if (r.error) { setError(r.error.message); return; }
+    const alertas = new Map((a.data || []).map((x) => [String(x.ruta_id), x]));
+    setRutas((r.data || []).map((x) => ({
+      ...x, alerta: alertas.get(String(x.ruta_id)) || null,
+    })));
   }, [dia]);
 
-  useEffect(() => { cargar(); }, [cargar, refresco]);
+  useEffect(() => {
+    cargar();
+    // Las posiciones se guardan cada 5 minutos, así que releer cada minuto
+    // mantiene la distancia razonablemente al día sin castigar la base.
+    const t = setInterval(() => { if (!document.hidden) cargar(); }, 60000);
+    return () => clearInterval(t);
+  }, [cargar, refresco]);
 
   // Una ruta a la vez, como se pidió: mostrar las 22 juntas en el mapa deja un
   // borrón de puntos donde no se distingue de quién es cada uno.
@@ -581,11 +616,19 @@ function Monitoreo({ refresco }) {
     const g = new L.FeatureGroup().addTo(m);
     mapa.current = m;
 
+    // Verde las entregadas, ladrillo las que faltan.
+    //   Sobre el mapa se ve el avance de la ruta de un vistazo: qué tramo de
+    //   la zona ya pasó y cuál le queda. Sin eso, 34 puntos rojos no dicen si
+    //   el riesgo ya ocurrió o está por venir.
     for (const p of sel.paradas || []) {
+      const hecha = p.estado === "complete" || p.estado === "delivered";
       L.circleMarker([p.lat, p.lng], {
-        radius: 7, color: "#fff", weight: 2, fillColor: C.ladrillo, fillOpacity: 0.95,
+        radius: hecha ? 6 : 7, color: "#fff", weight: 2,
+        fillColor: hecha ? C.verde : C.ladrillo,
+        fillOpacity: hecha ? 0.75 : 0.95,
       }).bindTooltip(
-        `<strong>Parada ${p.secuencia}</strong><br>${p.zona}<br>envío ${p.envio_id}`,
+        `<strong>Parada ${p.secuencia}</strong> · ${hecha ? "entregada" : "pendiente"}`
+        + `<br>${p.zona}<br>envío ${p.envio_id}`,
         { sticky: true },
       ).addTo(g);
     }
@@ -601,9 +644,19 @@ function Monitoreo({ refresco }) {
       const edad = sel.veh_medido_en
         ? Math.round((Date.now() - new Date(sel.veh_medido_en)) / 60000)
         : null;
-      L.circleMarker([sel.veh_lat, sel.veh_lng], {
-        radius: 11, color: "#fff", weight: 3,
-        fillColor: C.navy, fillOpacity: 1,
+      // Un icono de camioneta y no un círculo: entre 34 puntos redondos, otro
+      // punto redondo más grande no se lee como "el vehículo". La silueta sí.
+      L.marker([sel.veh_lat, sel.veh_lng], {
+        icon: L.divIcon({
+          className: "",
+          html: `<div style="width:30px;height:30px;border-radius:50%;`
+              + `background:${C.navy};border:2.5px solid #fff;`
+              + `box-shadow:0 1px 4px rgba(0,0,0,.35);display:flex;`
+              + `align-items:center;justify-content:center;color:#fff;`
+              + `font-size:17px;line-height:1">&#128666;</div>`,
+          iconSize: [30, 30], iconAnchor: [15, 15],
+        }),
+        zIndexOffset: 1000,
       }).bindTooltip(
         `<strong>Camioneta ${sel.placa || ""}</strong><br>`
         + (edad == null ? "sin hora de medición"
@@ -625,6 +678,7 @@ function Monitoreo({ refresco }) {
   }, [sel]);
 
   const total = rutas.reduce((s, r) => s + Number(r.paradas_en_zona || 0), 0);
+  const conAlerta = rutas.filter((r) => r.alerta).length;
 
   return (
     <div>
@@ -643,6 +697,12 @@ function Monitoreo({ refresco }) {
           {cargando ? "cargando…"
             : `${rutas.length} ruta(s) con ${total} entrega(s) en zona`}
         </span>
+        {conAlerta > 0 && (
+          <span style={{ fontSize: 11.5, fontWeight: 700, color: "#fff",
+            background: C.ladrillo, borderRadius: 10, padding: "2px 9px" }}>
+            {conAlerta} llegando a una zona
+          </span>
+        )}
         <button onClick={cargar} style={{ fontSize: 11.5, padding: "5px 10px",
           borderRadius: 7 }}>Actualizar</button>
       </div>
@@ -657,7 +717,11 @@ function Monitoreo({ refresco }) {
           alignItems: "flex-start" }}>
           <div style={{ flex: "1 1 340px", minWidth: 300, border: "1px solid var(--borde)",
             borderRadius: 12, background: "#fff", overflow: "hidden" }}>
-            {rutas.map((r) => {
+            {/* Las que tienen alerta primero: una camioneta a 24 metros de una
+                zona no puede estar debajo de otra que tiene más paradas
+                marcadas pero está a 20 km. */}
+            {[...rutas].sort((a, b) => (b.alerta ? 1 : 0) - (a.alerta ? 1 : 0)
+              || (a.alerta?.metros ?? 9e9) - (b.alerta?.metros ?? 9e9)).map((r) => {
               const activa = sel?.ruta_id === r.ruta_id;
               return (
                 <button key={r.ruta_id} onClick={() => setSel(activa ? null : r)}
@@ -666,6 +730,15 @@ function Monitoreo({ refresco }) {
                     background: activa ? "#F7F9FC" : "#fff", cursor: "pointer" }}>
                   <div style={{ display: "flex", alignItems: "baseline", gap: 8,
                     flexWrap: "wrap" }}>
+                    {/* El globo: rojo si la zona más cercana es de nivel alto,
+                        naranja si no. Solo aparece con la camioneta a menos de
+                        un kilómetro y con posición medida hace poco. */}
+                    {r.alerta && (
+                      <span title={`A ${r.alerta.metros} m de ${r.alerta.zonas}`}
+                        style={{ width: 9, height: 9, borderRadius: "50%",
+                          flexShrink: 0,
+                          background: r.alerta.tiene_alto ? C.ladrillo : C.naranja }} />
+                    )}
                     <strong style={{ fontSize: 12.5, color: C.navy,
                       fontVariantNumeric: "tabular-nums" }}>{r.ruta_id}</strong>
                     <span style={{ fontSize: 11.5, fontWeight: 700 }}>
@@ -681,7 +754,13 @@ function Monitoreo({ refresco }) {
                     {/* Qué tan cerca está la camioneta AHORA. Es el dato que
                         decide si hay que llamar: una ruta con 34 entregas en
                         zona pero el vehículo a 20 km todavía no es urgente. */}
-                    {r.veh_metros_a_zona != null && (
+                    {r.alerta && (
+                      <span style={{ fontSize: 11.5, fontWeight: 700,
+                        color: r.alerta.tiene_alto ? C.ladrillo : C.naranja }}>
+                        llegando · a {r.alerta.metros} m
+                      </span>
+                    )}
+                    {!r.alerta && r.veh_metros_a_zona != null && (
                       <span style={{ fontSize: 11, fontWeight: 700,
                         color: r.veh_metros_a_zona < 500 ? C.ladrillo : C.gris }}>
                         {r.veh_metros_a_zona < 1000
@@ -711,6 +790,18 @@ function Monitoreo({ refresco }) {
                 <div style={{ marginTop: 8, border: "1px solid var(--borde)",
                   borderRadius: 11, background: "#fff", padding: "4px 10px",
                   maxHeight: 200, overflowY: "auto" }}>
+                  {/* Encabezado: el primer número es la SECUENCIA de la parada
+                      en la ruta, no un identificador. Sin rótulo se confunde
+                      con el número de envío que va al lado. */}
+                  <div style={{ display: "flex", gap: 9, alignItems: "baseline",
+                    padding: "5px 2px", fontSize: 10.5, fontWeight: 700,
+                    letterSpacing: 0.3, textTransform: "uppercase",
+                    color: C.gris, borderBottom: "1px solid var(--borde)" }}>
+                    <span style={{ minWidth: 30 }}>Parada</span>
+                    <span style={{ minWidth: 140 }}>Zona</span>
+                    <span style={{ flex: 1 }}>Envío</span>
+                    <span>Estado</span>
+                  </div>
                   {(sel.paradas || []).map((p) => (
                     <div key={p.envio_id} style={{ display: "flex", gap: 9,
                       alignItems: "baseline", padding: "5px 2px", fontSize: 12,
@@ -719,7 +810,12 @@ function Monitoreo({ refresco }) {
                         fontVariantNumeric: "tabular-nums" }}>{p.secuencia}</span>
                       <span style={{ color: C.ladrillo, minWidth: 140 }}>{p.zona}</span>
                       <span style={{ color: C.gris, flex: 1 }}>envío {p.envio_id}</span>
-                      <span style={{ fontSize: 10.5, color: C.gris }}>{p.estado}</span>
+                      <span style={{ fontSize: 10.5, fontWeight: 600,
+                        color: (p.estado === "complete" || p.estado === "delivered")
+                          ? C.verde : C.gris }}>
+                        {(p.estado === "complete" || p.estado === "delivered")
+                          ? "entregada" : p.estado}
+                      </span>
                     </div>
                   ))}
                 </div>
