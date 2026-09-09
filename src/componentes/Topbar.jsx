@@ -4,6 +4,7 @@ import { NavLink } from "react-router-dom";
 import { useAlertas } from "../shared/alertas.jsx";
 import { useChatNoLeidos } from "../modulos/Mensajes.jsx";
 import { usePnrSinVer } from "../modulos/Posventa.jsx";
+import { useSegAlertas } from "../modulos/Poligonos.jsx";
 import { useSonidoPnr } from "../shared/sonido-pnr.js";
 
 function iniciales(nombre) {
@@ -185,6 +186,9 @@ export default function Topbar() {
           nivelSonido, setNivelSonido, probarSonido } = useAlertas();
   const chatNoLeidos = useChatNoLeidos();
   const pnrSinVer = usePnrSinVer();
+  // Camionetas llegando a una zona de riesgo. El badge es lo que hace que la
+  // torre mire la pestaña sin tenerla abierta.
+  const segAlertas = useSegAlertas();
 
   return (
     <header style={{
@@ -223,7 +227,7 @@ export default function Topbar() {
           <Tab to="/bitacora">Bitácora</Tab>
           <Tab to="/directorio">Directorio</Tab>
           <Tab to="/anomalias">Anomalías</Tab>
-          <Tab to="/poligonos">Polígonos</Tab>
+          <Tab to="/poligonos" badge={segAlertas}>Polígonos</Tab>
           {/* Posventa va después de Anomalías: las dos se miran cuando el día
               operativo ya cerró, a diferencia de las primeras que se usan en
               vivo. El badge cuenta los casos que nadie abrió. */}
