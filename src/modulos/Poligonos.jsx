@@ -601,8 +601,20 @@ export default function Poligonos() {
 
   return (
     <div style={{ padding: "14px 18px" }}>
+      {/* El encabezado queda FIJO al hacer scroll.
+          Leaflet captura la rueda del mouse para hacer zoom, así que con el
+          cursor sobre el mapa la página no se mueve. Y como el mapa mide 520 px
+          más el listado, las subpestañas quedaban arriba fuera de la pantalla y
+          no había forma de volver a ellas: había que recargar.
+
+          Se fija el encabezado en vez de achicar el mapa porque el zoom con la
+          rueda es lo que hace usable el dibujo, y el mapa grande es justamente
+          lo que funciona bien. */}
       <div style={{ display: "flex", alignItems: "center", gap: 8,
-        marginBottom: 14, flexWrap: "wrap" }}>
+        marginBottom: 14, flexWrap: "wrap",
+        position: "sticky", top: 0, zIndex: 500,
+        background: "var(--fondo, #F7F9FC)",
+        padding: "8px 0 10px" }}>
         <h2 style={{ fontSize: 16, fontWeight: 700, color: C.navy, margin: 0 }}>
           Polígonos
         </h2>
