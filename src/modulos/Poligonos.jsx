@@ -649,19 +649,19 @@ function AvisoChofer({ ruta, analista }) {
 
   return (
     <div style={{ border: "1px solid var(--borde)", borderRadius: 11,
-      padding: "10px 12px", marginTop: 8, background: "#fff" }}>
+      padding: "8px 11px", marginTop: 8, background: "#fff" }}>
       <div style={{ fontSize: 12, fontWeight: 700, color: C.navy, marginBottom: 3 }}>
         Avisar al chofer · {secuencias.length} paradas pendientes en zona
       </div>
       {/* Quién y en qué camioneta: el analista está por escribirle a alguien y
           necesita saber a quién sin volver al listado. */}
-      <div style={{ fontSize: 11.5, color: "var(--texto-suave)", marginBottom: 8 }}>
+      <div style={{ fontSize: 11.5, color: "var(--texto-suave)", marginBottom: 6 }}>
         {ruta.conductor_nombre || "conductor sin nombre"}
         {ruta.placa ? ` · ${ruta.placa}` : ""}
         {` · ruta ${ruta.ruta_id}`}
       </div>
 
-      <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 7 }}>
+      <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
         <input value={nombre} onChange={(e) => setNombre(e.target.value)}
           placeholder="Nombre del chofer"
           style={{ flex: "1 1 150px", fontSize: 12.5, padding: "6px 9px",
@@ -923,8 +923,14 @@ function Monitoreo({ refresco }) {
           <div style={{ flex: "1 1 460px", minWidth: 320 }}>
             {sel ? (
               <>
+                {/* 300 px y no 420.
+                    Con el mapa alto más el bloque de aviso, la lista de paradas
+                    quedaba fuera de la pantalla — y como Leaflet se queda la
+                    rueda del mouse, no había forma de bajar a verla. El mapa
+                    sigue siendo usable a esta altura y ahora las tres cosas
+                    caben juntas. */}
                 <div ref={cajaMapa}
-                  style={{ height: 420, borderRadius: 12,
+                  style={{ height: 300, borderRadius: 12,
                     border: "1px solid var(--borde)", overflow: "hidden" }} />
                 <AvisoChofer ruta={sel} analista={analista} />
                 {/* El encabezado va FUERA del contenedor con scroll.
