@@ -141,12 +141,21 @@ function Dibujo({ puede, onCambio }) {
       const control = new L.Control.Draw({
         position: "topright",
         draw: {
-          polygon: { allowIntersection: false, showArea: true,
+          // Sin allowIntersection: false. Con esa validación leaflet-draw
+          // cerraba el polígono al tercer vértice y no dejaba pasar de un
+          // triángulo. Un polígono que se cruza a sí mismo es raro pero no
+          // rompe nada: PostGIS lo acepta y el cruce sigue funcionando.
+          polygon: { showArea: true,
                      shapeOptions: { color: C.ladrillo, weight: 2 } },
           circle: { shapeOptions: { color: C.ladrillo, weight: 2 } },
-          // Lo demás no: una zona es un área, y dejar dibujar líneas o puntos
-          // solo produce geometrías que el cruce no puede usar.
-          rectangle: false, marker: false, circlemarker: false, polyline: false,
+          // El rectángulo va porque para marcar una cuadra son dos clics en vez
+          // de cuatro esquinas a mano. Se guarda como polígono igual que los
+          // demás: L.Rectangle extiende de L.Polygon y su getLatLngs devuelve
+          // lo mismo, así que capaAWkt lo procesa sin un caso aparte.
+          rectangle: { shapeOptions: { color: C.ladrillo, weight: 2 } },
+          // Líneas y puntos no: una zona es un área, y una geometría sin
+          // superficie no puede contener una parada.
+          marker: false, circlemarker: false, polyline: false,
         },
         edit: false,
       });
