@@ -61,6 +61,42 @@ const TIPOS = ["Peligroso", "Difícil acceso", "Sin estacionamiento",
 
 const CENTRO_MX = [23.6345, -102.5528];
 
+// Buscador de lugares contra Nominatim, el geocodificador de OpenStreetMap.
+//   Sin esto había que arrastrar el mapa desde todo México hasta el barrio, y
+//   con 12 centros repartidos en el país eso son varios minutos por zona.
+//
+//   Gratis y sin clave, pero pide identificarse y limita a una consulta por
+//   segundo, así que se dispara al enviar el formulario y no mientras se
+//   escribe. Con búsqueda incremental se pasaría el límite en dos palabras.
+async function buscarLugar(texto) {
+  const url = "https://nominatim.openstreetmap.org/search"
+    + `?format=json&limit=5&countrycodes=mx&q=${encodeURIComponent(texto)}`;
+  const r = await fetch(url, { headers: { "Accept-Language": "es" } });
+  if (!r.ok) throw new Error("el buscador no respondió");
+  return (await r.json()).map((x) => ({
+    nombre: x.display_name,
+    lat: Number(x.lat),
+    lng: Number(x.lon),
+  }));
+}
+
+// El nombre del lugar de unas coordenadas. Se pide UNA vez, al guardar la
+// zona, y se queda en la nota: así el listado no depende de un servicio
+// externo cada vez que alguien abre la pestaña.
+async function nombreDelLugar(lat, lng) {
+  try {
+    const r = await fetch("https://nominatim.openstreetmap.org/reverse"
+      + `?format=json&zoom=14&lat=${lat}&lon=${lng}`,
+      { headers: { "Accept-Language": "es" } });
+    if (!r.ok) return null;
+    const j = await r.json();
+    const a = j.address || {};
+    // De lo más específico a lo más general: colonia, pueblo, municipio.
+    return [a.suburb || a.neighbourhood || a.village || a.town || a.city,
+            a.state].filter(Boolean).join(", ") || null;
+  } catch { return null; }
+}
+
 function cuando(iso) {
   if (!iso) return "—";
   return new Date(iso).toLocaleString("es-MX", {
@@ -113,6 +149,12 @@ function Dibujo({ puede, onCambio }) {
   const [guardando, setGuardando] = useState(false);
   const [nueva, setNueva] = useState(null);
   const [form, setForm] = useState({ nombre: "", nivel: "alto", tipo: "", nota: "", scs: "" });
+  const [busca, setBusca] = useState("");
+  const [buscando, setBuscando] = useState(false);
+  const [hallados, setHallados] = useState([]);
+  // Se recuerda dónde estaba el mapa para no devolverlo a todo México cada vez
+  // que el listado de zonas cambia. Ver el efecto de repintado.
+  const encuadrado = useRef(false);
   const { analista } = useAuth();
 
   const cargar = useCallback(async () => {
@@ -202,12 +244,19 @@ function Dibujo({ puede, onCambio }) {
       ).addTo(g);
     }
 
-    // Encuadra en lo dibujado. Sin esto el mapa arranca en todo México y hay
-    // que buscar las zonas a mano cada vez que se abre la pestaña.
-    if (zonas.length && mapa.current) {
+    // Encuadra UNA sola vez, al abrir la pestaña.
+    //   Antes reencuadraba en cada repintado, y como el repintado se dispara al
+    //   guardar, borrar o descartar una zona, el mapa saltaba de vuelta al
+    //   conjunto completo — normalmente Ciudad de México, donde están las
+    //   primeras zonas. Si te equivocabas dibujando en Tabasco, el descarte te
+    //   mandaba a 700 km de donde estabas trabajando.
+    if (!encuadrado.current && zonas.length && mapa.current) {
       try {
         const b = g.getBounds();
-        if (b.isValid()) mapa.current.fitBounds(b, { padding: [40, 40], maxZoom: 14 });
+        if (b.isValid()) {
+          mapa.current.fitBounds(b, { padding: [40, 40], maxZoom: 14 });
+          encuadrado.current = true;
+        }
       } catch {}
     }
   }, [zonas, nueva]);
@@ -216,12 +265,25 @@ function Dibujo({ puede, onCambio }) {
     if (!nueva || !form.nombre.trim()) { setError("Ponle un nombre a la zona."); return; }
     setGuardando(true);
     setError(null);
+
+    // Dónde queda la zona, resuelto al guardar y no al mostrarla.
+    //   El nombre del lugar sale de Nominatim y las coordenadas del centro de
+    //   la forma. Van dentro de la nota porque es texto libre y no obliga a
+    //   otra columna, y sobre todo porque así el listado nunca depende de que
+    //   un servicio externo responda.
+    let ubic = "";
+    try {
+      const c = nueva.capa.getBounds().getCenter();
+      const lugar = await nombreDelLugar(c.lat, c.lng);
+      ubic = `${lugar ? lugar + " · " : ""}${c.lat.toFixed(4)}, ${c.lng.toFixed(4)}`;
+    } catch {}
+
     const { error: e } = await sb.rpc("fn_seg_zona_guardar", {
       p_id: null,
       p_nombre: form.nombre.trim(),
       p_nivel: form.nivel,
       p_tipo: form.tipo.trim() || null,
-      p_nota: form.nota.trim() || null,
+      p_nota: [ubic, form.nota.trim()].filter(Boolean).join(" — ") || null,
       p_wkt: nueva.wkt,
       p_scs: form.scs.trim()
         ? form.scs.split(",").map((s) => s.trim().toUpperCase()).filter(Boolean)
@@ -272,6 +334,49 @@ function Dibujo({ puede, onCambio }) {
         alignItems: "flex-start" }}>
 
         <div style={{ flex: "1 1 560px", minWidth: 320 }}>
+          {/* Buscador de lugares. Escribir "Huimanguillo" y llegar es mucho más
+              rápido que arrastrar el mapa por medio país. */}
+          <form onSubmit={async (e) => {
+            e.preventDefault();
+            if (!busca.trim()) return;
+            setBuscando(true); setError(null); setHallados([]);
+            try {
+              const res = await buscarLugar(busca.trim());
+              if (!res.length) { setError(`No encontré "${busca.trim()}".`); }
+              else if (res.length === 1) {
+                mapa.current?.setView([res[0].lat, res[0].lng], 15);
+              } else setHallados(res);
+            } catch (err) { setError(err.message); }
+            setBuscando(false);
+          }} style={{ display: "flex", gap: 6, marginBottom: 8 }}>
+            <input value={busca} onChange={(e) => setBusca(e.target.value)}
+              placeholder="Buscar lugar · Huimanguillo, Veracruz, Nezahualcóyotl…"
+              style={{ flex: 1, fontSize: 12.5, padding: "7px 10px", borderRadius: 8,
+                border: "1px solid var(--borde)" }} />
+            <button type="submit" disabled={buscando || !busca.trim()}
+              style={{ fontSize: 12, padding: "7px 13px", borderRadius: 8 }}>
+              {buscando ? "…" : "Ir"}
+            </button>
+          </form>
+
+          {/* Varios resultados: se elige, no se adivina. "Veracruz" es un
+              estado, una ciudad y varias colonias. */}
+          {hallados.length > 0 && (
+            <div style={{ border: "1px solid var(--borde)", borderRadius: 9,
+              background: "#fff", marginBottom: 8, overflow: "hidden" }}>
+              {hallados.map((h, i) => (
+                <button key={i} onClick={() => {
+                  mapa.current?.setView([h.lat, h.lng], 15);
+                  setHallados([]);
+                }} style={{ width: "100%", textAlign: "left", border: "none",
+                  borderBottom: "1px solid var(--borde)", padding: "6px 10px",
+                  fontSize: 11.5, background: "#fff", cursor: "pointer" }}>
+                  {h.nombre}
+                </button>
+              ))}
+            </div>
+          )}
+
           <div ref={cajaMapa}
             style={{ height: 520, borderRadius: 12, border: "1px solid var(--borde)",
               overflow: "hidden" }} />
@@ -367,8 +472,11 @@ function Dibujo({ puede, onCambio }) {
               Ninguna zona todavía.
             </div>
           ) : (
+            /* Alto máximo con scroll propio: con una docena de zonas el listado
+               empujaba el contenido más allá de la pantalla, y como Leaflet se
+               queda la rueda del mouse no había forma de bajar. */
             <div style={{ border: "1px solid var(--borde)", borderRadius: 12,
-              background: "#fff", overflow: "hidden" }}>
+              background: "#fff", overflow: "hidden auto", maxHeight: 520 }}>
               {zonas.map((z) => (
                 <div key={z.id} style={{ padding: "9px 12px",
                   borderBottom: "1px solid var(--borde)" }}>
