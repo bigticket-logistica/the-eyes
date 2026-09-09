@@ -548,7 +548,6 @@ function Monitoreo({ refresco }) {
   const [error, setError] = useState(null);
   const cajaMapa = useRef(null);
   const mapa = useRef(null);
-  const capas = useRef(null);
 
   const cargar = useCallback(async () => {
     setCargando(true);
@@ -563,21 +562,24 @@ function Monitoreo({ refresco }) {
 
   // Una ruta a la vez, como se pidió: mostrar las 22 juntas en el mapa deja un
   // borrón de puntos donde no se distingue de quién es cada uno.
+  //
+  // EL MAPA SE DESTRUYE Y SE VUELVE A CREAR CON CADA RUTA.
+  //   Antes se creaba una sola vez y se guardaba en un ref. Pero al cambiar a
+  //   la pestaña de Dibujo el contenedor se desmonta, y al volver Leaflet
+  //   seguía apuntando a un div que ya no existe: el mapa quedaba en blanco y
+  //   solo se arreglaba recargando la página.
+  //
+  //   Recrearlo cuesta unos milisegundos y elimina la clase entera de errores
+  //   de sincronización entre el ciclo de vida de React y el de Leaflet.
   useEffect(() => {
     if (!sel || !cajaMapa.current) return;
 
-    if (!mapa.current) {
-      const m = L.map(cajaMapa.current, { center: CENTRO_MX, zoom: 5 });
-      L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
-        maxZoom: 19, attribution: "© OpenStreetMap",
-      }).addTo(m);
-      capas.current = new L.FeatureGroup().addTo(m);
-      mapa.current = m;
-      setTimeout(() => m.invalidateSize(), 200);
-    }
-
-    const g = capas.current;
-    g.clearLayers();
+    const m = L.map(cajaMapa.current, { center: CENTRO_MX, zoom: 5 });
+    L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+      maxZoom: 19, attribution: "© OpenStreetMap",
+    }).addTo(m);
+    const g = new L.FeatureGroup().addTo(m);
+    mapa.current = m;
 
     for (const p of sel.paradas || []) {
       L.circleMarker([p.lat, p.lng], {
@@ -588,13 +590,39 @@ function Monitoreo({ refresco }) {
       ).addTo(g);
     }
 
+    // La camioneta, con su hora de medición.
+    //   Va en azul y más grande que las paradas: es lo único móvil del mapa y
+    //   tiene que distinguirse de un vistazo entre 34 puntos rojos.
+    //
+    //   La hora importa tanto como la posición: MELI a veces reporta una
+    //   medición de hace rato, y un pin sin hora se lee como "está ahí ahora"
+    //   cuando puede ser de hace media hora.
+    if (sel.veh_lat != null && sel.veh_lng != null) {
+      const edad = sel.veh_medido_en
+        ? Math.round((Date.now() - new Date(sel.veh_medido_en)) / 60000)
+        : null;
+      L.circleMarker([sel.veh_lat, sel.veh_lng], {
+        radius: 11, color: "#fff", weight: 3,
+        fillColor: C.navy, fillOpacity: 1,
+      }).bindTooltip(
+        `<strong>Camioneta ${sel.placa || ""}</strong><br>`
+        + (edad == null ? "sin hora de medición"
+           : edad < 1 ? "posición de hace menos de un minuto"
+           : `posición de hace ${edad} min`)
+        + (sel.veh_metros_a_zona != null
+           ? `<br>a ${sel.veh_metros_a_zona} m de la zona más cercana` : ""),
+        { sticky: true, direction: "top" },
+      ).addTo(g).openTooltip();
+    }
+
     try {
       const b = g.getBounds();
-      if (b.isValid()) mapa.current.fitBounds(b, { padding: [40, 40], maxZoom: 15 });
+      if (b.isValid()) m.fitBounds(b, { padding: [40, 40], maxZoom: 15 });
     } catch {}
-  }, [sel]);
+    setTimeout(() => m.invalidateSize(), 150);
 
-  useEffect(() => () => { if (mapa.current) { mapa.current.remove(); mapa.current = null; } }, []);
+    return () => { m.remove(); mapa.current = null; };
+  }, [sel]);
 
   const total = rutas.reduce((s, r) => s + Number(r.paradas_en_zona || 0), 0);
 
@@ -650,6 +678,17 @@ function Monitoreo({ refresco }) {
                     <span style={{ fontSize: 11, color: C.gris }}>
                       de {r.paradas_total}
                     </span>
+                    {/* Qué tan cerca está la camioneta AHORA. Es el dato que
+                        decide si hay que llamar: una ruta con 34 entregas en
+                        zona pero el vehículo a 20 km todavía no es urgente. */}
+                    {r.veh_metros_a_zona != null && (
+                      <span style={{ fontSize: 11, fontWeight: 700,
+                        color: r.veh_metros_a_zona < 500 ? C.ladrillo : C.gris }}>
+                        {r.veh_metros_a_zona < 1000
+                          ? `a ${r.veh_metros_a_zona} m`
+                          : `a ${(r.veh_metros_a_zona / 1000).toFixed(1)} km`}
+                      </span>
+                    )}
                     {r.placa && (
                       <span style={{ fontSize: 10.5, color: C.gris,
                         marginLeft: "auto" }}>{r.placa}</span>
