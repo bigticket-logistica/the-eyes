@@ -2,6 +2,7 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import { sb } from "../shared/supabase.js";
 import { useAuth } from "../shared/auth.jsx";
 import { puedeActuar } from "../shared/permisos.js";
+import { enviarMensaje } from "../shared/mensajes.js";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 import "leaflet-draw";
@@ -559,6 +560,132 @@ function Dibujo({ puede, onCambio }) {
 }
 
 // ── Subpestaña de monitoreo ────────────────────────────────────────────────
+// ── Aviso al chofer ────────────────────────────────────────────────────────
+// El analista escribe el número y decide cuándo avisar.
+//   Se descartó ofrecer los números del padrón: meli_drivers_master.phone está
+//   vacío para los 65 conductores de hoy, y el directorio y Posventa cruzan por
+//   NOMBRE en mayúsculas, que falla en cuanto un nombre está escrito distinto.
+//   Un desplegable que casi nunca tiene opciones es peor que un campo vacío.
+//
+// Sale por la torre y NO por Posventa: la plantilla está aprobada en el número
+// de la torre, y un aviso de ruta no es un caso PNR. El mensaje aparece en
+// Consultas como uno más del hilo, así que si el chofer responde, la respuesta
+// llega donde el analista la va a ver.
+const PLANTILLA = "seg_ruta_zona_riesgo";
+
+// 52 + 1 + diez dígitos es el formato que Meta acepta para México. Un número
+// mal armado se rechaza del lado de Meta y nadie se entera hasta que alguien
+// revisa por qué el chofer no contestó.
+function normalizarTel(v) {
+  const d = String(v || "").replace(/\D/g, "");
+  if (d.length === 10) return "521" + d;
+  if (d.length === 12 && d.startsWith("52")) return "521" + d.slice(2);
+  if (d.length === 13 && d.startsWith("521")) return d;
+  return null;
+}
+
+function AvisoChofer({ ruta, analista }) {
+  const [tel, setTel] = useState("");
+  const [nombre, setNombre] = useState("");
+  const [enviando, setEnviando] = useState(false);
+  const [resultado, setResultado] = useState(null);
+
+  const paradas = (ruta.paradas || []).filter(
+    (p) => p.estado !== "complete" && p.estado !== "delivered");
+  const secuencias = paradas.map((p) => p.secuencia);
+
+  // Meta corta los parámetros largos, y 34 números no entran. Se mandan las
+  // primeras 15 y el resto como cuenta: al chofer le sirve saber cuáles son las
+  // próximas, no tener la lista completa en un WhatsApp.
+  const lista = secuencias.length <= 15
+    ? secuencias.join(", ")
+    : `${secuencias.slice(0, 15).join(", ")} y ${secuencias.length - 15} más`;
+
+  const limpio = normalizarTel(tel);
+
+  async function enviar() {
+    if (!limpio) return;
+    setEnviando(true);
+    setResultado(null);
+    try {
+      await enviarMensaje({
+        telefono: limpio,
+        texto: `Hola ${nombre.trim() || "conductor"}, te hablamos de la torre. `
+          + `Identificamos que tu ruta ${ruta.ruta_id} de hoy tiene `
+          + `${secuencias.length} paradas en zonas marcadas como peligrosas o `
+          + `de difícil acceso.\n\nParadas: ${lista}\n\n`
+          + `Cualquier cosa avísanos si necesitas ayuda. Saludos.`,
+        emisorId: analista?.id || null,
+        plantilla: {
+          nombre: PLANTILLA,
+          idioma: "es_MX",
+          variables: [
+            nombre.trim() || "conductor",
+            String(ruta.ruta_id),
+            String(secuencias.length),
+            lista,
+          ],
+        },
+      });
+      setResultado({ ok: true });
+      setTel("");
+    } catch (e) {
+      setResultado({ ok: false, error: e.message });
+    }
+    setEnviando(false);
+  }
+
+  if (!secuencias.length) {
+    return (
+      <div style={{ fontSize: 11.5, color: C.gris, marginTop: 8 }}>
+        Todas las paradas en zona de esta ruta ya están entregadas.
+      </div>
+    );
+  }
+
+  return (
+    <div style={{ border: "1px solid var(--borde)", borderRadius: 11,
+      padding: "10px 12px", marginTop: 8, background: "#fff" }}>
+      <div style={{ fontSize: 12, fontWeight: 700, color: C.navy, marginBottom: 7 }}>
+        Avisar al chofer · {secuencias.length} paradas pendientes en zona
+      </div>
+
+      <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 7 }}>
+        <input value={nombre} onChange={(e) => setNombre(e.target.value)}
+          placeholder="Nombre del chofer"
+          style={{ flex: "1 1 150px", fontSize: 12.5, padding: "6px 9px",
+            borderRadius: 7, border: "1px solid var(--borde)" }} />
+        <input value={tel} onChange={(e) => setTel(e.target.value)}
+          placeholder="Teléfono · 10 dígitos"
+          style={{ flex: "1 1 130px", fontSize: 12.5, padding: "6px 9px",
+            borderRadius: 7,
+            border: `1px solid ${tel && !limpio ? C.ladrillo : "var(--borde)"}` }} />
+        <button onClick={enviar} disabled={enviando || !limpio} className="btn-navy"
+          style={{ fontSize: 12, fontWeight: 600, padding: "6px 14px", borderRadius: 7 }}>
+          {enviando ? "Enviando…" : "Enviar aviso"}
+        </button>
+      </div>
+
+      {/* Se muestra el número tal como va a salir: el analista escribe diez
+          dígitos y conviene que vea el 521 antes de mandar. */}
+      {tel && (
+        <div style={{ fontSize: 11, color: limpio ? C.verde : C.ladrillo }}>
+          {limpio ? `Sale a +${limpio}` : "Ese número no tiene el formato de México"}
+        </div>
+      )}
+
+      {resultado && (
+        <div style={{ fontSize: 11.5, marginTop: 5,
+          color: resultado.ok ? C.verde : C.ladrillo }}>
+          {resultado.ok
+            ? "Aviso enviado · queda en el hilo del chofer en Consultas"
+            : `No se pudo enviar: ${resultado.error}`}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function Monitoreo({ refresco }) {
   const [dia, setDia] = useState(() =>
     new Date().toLocaleDateString("en-CA", { timeZone: "America/Mexico_City" }));
@@ -566,6 +693,7 @@ function Monitoreo({ refresco }) {
   const [cargando, setCargando] = useState(true);
   const [sel, setSel] = useState(null);
   const [error, setError] = useState(null);
+  const { analista } = useAuth();
   const cajaMapa = useRef(null);
   const mapa = useRef(null);
 
@@ -787,6 +915,7 @@ function Monitoreo({ refresco }) {
                 <div ref={cajaMapa}
                   style={{ height: 420, borderRadius: 12,
                     border: "1px solid var(--borde)", overflow: "hidden" }} />
+                <AvisoChofer ruta={sel} analista={analista} />
                 <div style={{ marginTop: 8, border: "1px solid var(--borde)",
                   borderRadius: 11, background: "#fff", padding: "4px 10px",
                   maxHeight: 200, overflowY: "auto" }}>
