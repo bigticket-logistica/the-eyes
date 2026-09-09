@@ -148,12 +148,12 @@ function Dibujo({ puede, onCambio }) {
           polygon: { showArea: true,
                      shapeOptions: { color: C.ladrillo, weight: 2 } },
           circle: { shapeOptions: { color: C.ladrillo, weight: 2 } },
-          // El rectángulo va porque para marcar una cuadra son dos clics en vez
-          // de cuatro esquinas a mano. Se guarda como polígono igual que los
-          // demás: L.Rectangle extiende de L.Polygon y su getLatLngs devuelve
-          // lo mismo, así que capaAWkt lo procesa sin un caso aparte.
-          rectangle: { shapeOptions: { color: C.ladrillo, weight: 2 } },
-          // Líneas y puntos no: una zona es un área, y una geometría sin
+          // El rectángulo queda fuera: en esta versión de leaflet-draw se
+          // dibuja arrastrando y no responde, dejaba una sola línea en vez de
+          // la caja. Un botón que no hace nada es peor que no tenerlo, y entre
+          // el polígono libre y el círculo está cubierto todo el uso real.
+          rectangle: false,
+          // Líneas y puntos tampoco: una zona es un área, y una geometría sin
           // superficie no puede contener una parada.
           marker: false, circlemarker: false, polyline: false,
         },
