@@ -586,7 +586,11 @@ function normalizarTel(v) {
 
 function AvisoChofer({ ruta, analista }) {
   const [tel, setTel] = useState("");
-  const [nombre, setNombre] = useState("");
+  // El nombre viene precargado del que MELI registra en la ruta, y queda
+  // editable: los nombres del padrón a veces traen dos apellidos y el saludo
+  // se lee mejor con el primero.
+  const [nombre, setNombre] = useState(
+    (ruta.conductor_nombre || "").split(" ").slice(0, 2).join(" "));
   const [enviando, setEnviando] = useState(false);
   const [resultado, setResultado] = useState(null);
 
@@ -646,8 +650,15 @@ function AvisoChofer({ ruta, analista }) {
   return (
     <div style={{ border: "1px solid var(--borde)", borderRadius: 11,
       padding: "10px 12px", marginTop: 8, background: "#fff" }}>
-      <div style={{ fontSize: 12, fontWeight: 700, color: C.navy, marginBottom: 7 }}>
+      <div style={{ fontSize: 12, fontWeight: 700, color: C.navy, marginBottom: 3 }}>
         Avisar al chofer · {secuencias.length} paradas pendientes en zona
+      </div>
+      {/* Quién y en qué camioneta: el analista está por escribirle a alguien y
+          necesita saber a quién sin volver al listado. */}
+      <div style={{ fontSize: 11.5, color: "var(--texto-suave)", marginBottom: 8 }}>
+        {ruta.conductor_nombre || "conductor sin nombre"}
+        {ruta.placa ? ` · ${ruta.placa}` : ""}
+        {` · ruta ${ruta.ruta_id}`}
       </div>
 
       <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 7 }}>
@@ -916,21 +927,24 @@ function Monitoreo({ refresco }) {
                   style={{ height: 420, borderRadius: 12,
                     border: "1px solid var(--borde)", overflow: "hidden" }} />
                 <AvisoChofer ruta={sel} analista={analista} />
+                {/* El encabezado va FUERA del contenedor con scroll.
+                    Adentro se iba con el desplazamiento y a las tres filas ya
+                    no se sabía qué era cada columna: el número de parada se
+                    confundía con el de envío, que es lo que estaba pasando. */}
                 <div style={{ marginTop: 8, border: "1px solid var(--borde)",
-                  borderRadius: 11, background: "#fff", padding: "4px 10px",
-                  maxHeight: 200, overflowY: "auto" }}>
-                  {/* Encabezado: el primer número es la SECUENCIA de la parada
-                      en la ruta, no un identificador. Sin rótulo se confunde
-                      con el número de envío que va al lado. */}
-                  <div style={{ display: "flex", gap: 9, alignItems: "baseline",
-                    padding: "5px 2px", fontSize: 10.5, fontWeight: 700,
-                    letterSpacing: 0.3, textTransform: "uppercase",
-                    color: C.gris, borderBottom: "1px solid var(--borde)" }}>
-                    <span style={{ minWidth: 30 }}>Parada</span>
-                    <span style={{ minWidth: 140 }}>Zona</span>
-                    <span style={{ flex: 1 }}>Envío</span>
-                    <span>Estado</span>
-                  </div>
+                  borderBottom: "none", borderRadius: "11px 11px 0 0",
+                  background: "#F7F9FC", padding: "6px 10px",
+                  display: "flex", gap: 9, alignItems: "baseline",
+                  fontSize: 10.5, fontWeight: 700, letterSpacing: 0.3,
+                  textTransform: "uppercase", color: C.gris }}>
+                  <span style={{ minWidth: 30 }}>Parada</span>
+                  <span style={{ minWidth: 140 }}>Zona</span>
+                  <span style={{ flex: 1 }}>Envío</span>
+                  <span>Estado</span>
+                </div>
+                <div style={{ border: "1px solid var(--borde)",
+                  borderRadius: "0 0 11px 11px", background: "#fff",
+                  padding: "0 10px 4px", maxHeight: 220, overflowY: "auto" }}>
                   {(sel.paradas || []).map((p) => (
                     <div key={p.envio_id} style={{ display: "flex", gap: 9,
                       alignItems: "baseline", padding: "5px 2px", fontSize: 12,
