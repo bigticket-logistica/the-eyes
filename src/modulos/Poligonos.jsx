@@ -60,6 +60,14 @@ const COLOR_NIVEL = Object.fromEntries(NIVELES.map((n) => [n.clave, n.color]));
 const TIPOS = ["Peligroso", "Difícil acceso", "Sin estacionamiento",
                "Calle cerrada", "Zona con reclamos"];
 
+// Los tres estados que MELI reporta para una parada. Medido sobre 4.743
+// paradas de un día: 2.906 complete, 1.774 pending y 63 incomplete.
+const ESTADO_PARADA = {
+  complete:   { etiqueta: "entregada",     color: "#1a7f5a" },
+  pending:    { etiqueta: "pendiente",     color: "#B54634" },
+  incomplete: { etiqueta: "no entregada",  color: "#7C3AED" },
+};
+
 const CENTRO_MX = [23.6345, -102.5528];
 
 // Cuántas camionetas están a menos de un kilómetro de una entrega en zona.
@@ -705,6 +713,10 @@ function Monitoreo({ refresco }) {
   const [sel, setSel] = useState(null);
   const [error, setError] = useState(null);
   const { analista } = useAuth();
+  // La lista arranca plegada y se cierra al cambiar de ruta: desplegada empuja
+  // el contenido fuera de la pantalla, y con Leaflet quedandose la rueda del
+  // mouse no hay forma de bajar a verla.
+  const [verParadas, setVerParadas] = useState(false);
   const cajaMapa = useRef(null);
   const mapa = useRef(null);
 
@@ -755,18 +767,22 @@ function Monitoreo({ refresco }) {
     const g = new L.FeatureGroup().addTo(m);
     mapa.current = m;
 
-    // Verde las entregadas, ladrillo las que faltan.
-    //   Sobre el mapa se ve el avance de la ruta de un vistazo: qué tramo de
-    //   la zona ya pasó y cuál le queda. Sin eso, 34 puntos rojos no dicen si
-    //   el riesgo ya ocurrió o está por venir.
+    // Los tres estados que MELI usa de verdad, cada uno con su color:
+    //   complete   verde   · entregada, el riesgo ya pasó
+    //   pending    ladrillo · todavía le falta llegar ahí
+    //   incomplete morado  · llegó y no pudo entregar
+    //
+    // El incomplete es el que más importa en una zona de riesgo: significa que
+    // el chofer estuvo ahí y volvió con el paquete. Pintarlo igual que una
+    // entregada esconde justo el caso que hay que revisar.
     for (const p of sel.paradas || []) {
-      const hecha = p.estado === "complete" || p.estado === "delivered";
+      const e = ESTADO_PARADA[p.estado] || ESTADO_PARADA.pending;
       L.circleMarker([p.lat, p.lng], {
-        radius: hecha ? 6 : 7, color: "#fff", weight: 2,
-        fillColor: hecha ? C.verde : C.ladrillo,
-        fillOpacity: hecha ? 0.75 : 0.95,
+        radius: p.estado === "complete" ? 6 : 7, color: "#fff", weight: 2,
+        fillColor: e.color,
+        fillOpacity: p.estado === "complete" ? 0.7 : 0.95,
       }).bindTooltip(
-        `<strong>Parada ${p.secuencia}</strong> · ${hecha ? "entregada" : "pendiente"}`
+        `<strong>Parada ${p.secuencia}</strong> · ${e.etiqueta}`
         + `<br>${p.zona}<br>envío ${p.envio_id}`,
         { sticky: true },
       ).addTo(g);
@@ -817,7 +833,8 @@ function Monitoreo({ refresco }) {
   }, [sel]);
 
   const total = rutas.reduce((s, r) => s + Number(r.paradas_en_zona || 0), 0);
-  const conAlerta = rutas.filter((r) => r.alerta).length;
+  const conAlerta = rutas.filter(
+    (r) => r.alerta && Number(r.en_zona_pendientes) > 0).length;
 
   return (
     <div>
@@ -859,20 +876,34 @@ function Monitoreo({ refresco }) {
             {/* Las que tienen alerta primero: una camioneta a 24 metros de una
                 zona no puede estar debajo de otra que tiene más paradas
                 marcadas pero está a 20 km. */}
-            {[...rutas].sort((a, b) => (b.alerta ? 1 : 0) - (a.alerta ? 1 : 0)
-              || (a.alerta?.metros ?? 9e9) - (b.alerta?.metros ?? 9e9)).map((r) => {
+            {[...rutas].sort((a, b) => {
+              // Urgencia real: alerta viva primero, después las que tienen
+              // pendientes, y al final las terminadas.
+              const va = (a.alerta && Number(a.en_zona_pendientes) > 0) ? 0
+                       : Number(a.en_zona_pendientes) > 0 ? 1 : 2;
+              const vb = (b.alerta && Number(b.en_zona_pendientes) > 0) ? 0
+                       : Number(b.en_zona_pendientes) > 0 ? 1 : 2;
+              return va - vb
+                || (a.alerta?.metros ?? 9e9) - (b.alerta?.metros ?? 9e9);
+            }).map((r) => {
               const activa = sel?.ruta_id === r.ruta_id;
               return (
-                <button key={r.ruta_id} onClick={() => setSel(activa ? null : r)}
+                <button key={r.ruta_id} onClick={() => { setVerParadas(false); setSel(activa ? null : r); }}
                   style={{ width: "100%", textAlign: "left", border: "none",
                     borderBottom: "1px solid var(--borde)", padding: "9px 12px",
-                    background: activa ? "#F7F9FC" : "#fff", cursor: "pointer" }}>
+                    background: activa ? "#F7F9FC" : "#fff", cursor: "pointer",
+                    opacity: r.estado_ruta === "close" ? 0.6 : 1 }}>
                   <div style={{ display: "flex", alignItems: "baseline", gap: 8,
                     flexWrap: "wrap" }}>
                     {/* El globo: rojo si la zona más cercana es de nivel alto,
                         naranja si no. Solo aparece con la camioneta a menos de
                         un kilómetro y con posición medida hace poco. */}
-                    {r.alerta && (
+                    {/* El globo solo si QUEDA algo pendiente en zona.
+                        Una ruta cerrada con sus 34 paradas entregadas seguía
+                        marcada en rojo horas después de que la camioneta
+                        estacionara: la alerta decía "está llegando" cuando ya
+                        había pasado y vuelto. */}
+                    {r.alerta && Number(r.en_zona_pendientes) > 0 && (
                       <span title={`A ${r.alerta.metros} m de ${r.alerta.zonas}`}
                         style={{ width: 9, height: 9, borderRadius: "50%",
                           flexShrink: 0,
@@ -893,13 +924,29 @@ function Monitoreo({ refresco }) {
                     {/* Qué tan cerca está la camioneta AHORA. Es el dato que
                         decide si hay que llamar: una ruta con 34 entregas en
                         zona pero el vehículo a 20 km todavía no es urgente. */}
-                    {r.alerta && (
+                    {/* Qué está pasando con esta ruta, en una sola frase.
+                        Antes decía "34 en zona" y nada más, así que una ruta
+                        terminada se leía igual que una que va entrando. */}
+                    {r.estado_ruta === "close" ? (
+                      <span style={{ fontSize: 11.5, color: C.gris }}>
+                        ruta terminada
+                        {Number(r.en_zona_no_entregadas) > 0
+                          && ` · ${r.en_zona_no_entregadas} sin entregar`}
+                      </span>
+                    ) : Number(r.en_zona_pendientes) === 0 ? (
+                      <span style={{ fontSize: 11.5, color: C.verde }}>
+                        zona completada
+                        {Number(r.en_zona_no_entregadas) > 0
+                          && ` · ${r.en_zona_no_entregadas} sin entregar`}
+                      </span>
+                    ) : r.alerta ? (
                       <span style={{ fontSize: 11.5, fontWeight: 700,
                         color: r.alerta.tiene_alto ? C.ladrillo : C.naranja }}>
                         llegando · a {r.alerta.metros} m
                       </span>
-                    )}
-                    {!r.alerta && r.veh_metros_a_zona != null && (
+                    ) : null}
+                    {r.estado_ruta !== "close" && Number(r.en_zona_pendientes) > 0
+                      && !r.alerta && r.veh_metros_a_zona != null && (
                       <span style={{ fontSize: 11, fontWeight: 700,
                         color: r.veh_metros_a_zona < 500 ? C.ladrillo : C.gris }}>
                         {r.veh_metros_a_zona < 1000
@@ -923,51 +970,60 @@ function Monitoreo({ refresco }) {
           <div style={{ flex: "1 1 460px", minWidth: 320 }}>
             {sel ? (
               <>
-                {/* 300 px y no 420.
-                    Con el mapa alto más el bloque de aviso, la lista de paradas
-                    quedaba fuera de la pantalla — y como Leaflet se queda la
-                    rueda del mouse, no había forma de bajar a verla. El mapa
-                    sigue siendo usable a esta altura y ahora las tres cosas
-                    caben juntas. */}
-                <div ref={cajaMapa}
-                  style={{ height: 300, borderRadius: 12,
+<div ref={cajaMapa}
+                  style={{ height: 420, borderRadius: 12,
                     border: "1px solid var(--borde)", overflow: "hidden" }} />
                 <AvisoChofer ruta={sel} analista={analista} />
-                {/* El encabezado va FUERA del contenedor con scroll.
-                    Adentro se iba con el desplazamiento y a las tres filas ya
-                    no se sabía qué era cada columna: el número de parada se
-                    confundía con el de envío, que es lo que estaba pasando. */}
-                <div style={{ marginTop: 8, border: "1px solid var(--borde)",
-                  borderBottom: "none", borderRadius: "11px 11px 0 0",
-                  background: "#F7F9FC", padding: "6px 10px",
-                  display: "flex", gap: 9, alignItems: "baseline",
-                  fontSize: 10.5, fontWeight: 700, letterSpacing: 0.3,
-                  textTransform: "uppercase", color: C.gris }}>
-                  <span style={{ minWidth: 30 }}>Parada</span>
-                  <span style={{ minWidth: 140 }}>Zona</span>
-                  <span style={{ flex: 1 }}>Envío</span>
-                  <span>Estado</span>
-                </div>
-                <div style={{ border: "1px solid var(--borde)",
-                  borderRadius: "0 0 11px 11px", background: "#fff",
-                  padding: "0 10px 4px", maxHeight: 220, overflowY: "auto" }}>
-                  {(sel.paradas || []).map((p) => (
-                    <div key={p.envio_id} style={{ display: "flex", gap: 9,
-                      alignItems: "baseline", padding: "5px 2px", fontSize: 12,
-                      borderBottom: "1px solid var(--borde)" }}>
-                      <span style={{ fontWeight: 700, minWidth: 30,
-                        fontVariantNumeric: "tabular-nums" }}>{p.secuencia}</span>
-                      <span style={{ color: C.ladrillo, minWidth: 140 }}>{p.zona}</span>
-                      <span style={{ color: C.gris, flex: 1 }}>envío {p.envio_id}</span>
-                      <span style={{ fontSize: 10.5, fontWeight: 600,
-                        color: (p.estado === "complete" || p.estado === "delivered")
-                          ? C.verde : C.gris }}>
-                        {(p.estado === "complete" || p.estado === "delivered")
-                          ? "entregada" : p.estado}
-                      </span>
+                {/* La lista va PLEGADA.
+                    El mapa ya muestra donde estan las paradas y su estado por
+                    color, asi que la lista sirve para cuando hace falta el
+                    numero de envio o la secuencia exacta. Desplegada empujaba
+                    todo fuera de la pantalla.
+
+                    El encabezado va fuera del contenedor con scroll: adentro se
+                    iba con el desplazamiento y a las tres filas ya no se sabia
+                    que era cada columna. */}
+                <button onClick={() => setVerParadas((v) => !v)}
+                  style={{ width: "100%", textAlign: "left", marginTop: 8,
+                    border: "1px solid var(--borde)", borderRadius: 11,
+                    background: "#fff", padding: "8px 12px", cursor: "pointer",
+                    fontSize: 12, color: C.navy, fontWeight: 600 }}>
+                  {verParadas ? "\u25be" : "\u25b8"} Detalle de las {(sel.paradas || []).length} paradas en zona
+                </button>
+
+                {verParadas && (
+                  <>
+                    <div style={{ marginTop: 6, border: "1px solid var(--borde)",
+                      borderBottom: "none", borderRadius: "11px 11px 0 0",
+                      background: "#F7F9FC", padding: "6px 10px",
+                      display: "flex", gap: 9, alignItems: "baseline",
+                      fontSize: 10.5, fontWeight: 700, letterSpacing: 0.3,
+                      textTransform: "uppercase", color: C.gris }}>
+                      <span style={{ minWidth: 30 }}>Parada</span>
+                      <span style={{ minWidth: 140 }}>Zona</span>
+                      <span style={{ flex: 1 }}>Env\u00edo</span>
+                      <span>Estado</span>
                     </div>
-                  ))}
-                </div>
+                    <div style={{ border: "1px solid var(--borde)",
+                      borderRadius: "0 0 11px 11px", background: "#fff",
+                      padding: "0 10px 4px", maxHeight: 260, overflowY: "auto" }}>
+                      {(sel.paradas || []).map((p) => (
+                        <div key={p.envio_id} style={{ display: "flex", gap: 9,
+                          alignItems: "baseline", padding: "5px 2px", fontSize: 12,
+                          borderBottom: "1px solid var(--borde)" }}>
+                          <span style={{ fontWeight: 700, minWidth: 30,
+                            fontVariantNumeric: "tabular-nums" }}>{p.secuencia}</span>
+                          <span style={{ color: C.ladrillo, minWidth: 140 }}>{p.zona}</span>
+                          <span style={{ color: C.gris, flex: 1 }}>env\u00edo {p.envio_id}</span>
+                          <span style={{ fontSize: 10.5, fontWeight: 600,
+                            color: (ESTADO_PARADA[p.estado] || {}).color || C.gris }}>
+                            {(ESTADO_PARADA[p.estado] || {}).etiqueta || p.estado}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  </>
+                )}
               </>
             ) : (
               <div style={{ fontSize: 12.5, color: C.gris, padding: "40px 0",
