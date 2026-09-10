@@ -872,7 +872,8 @@ function Monitoreo({ refresco }) {
         <div style={{ display: "flex", gap: 12, flexWrap: "wrap",
           alignItems: "flex-start" }}>
           <div style={{ flex: "1 1 340px", minWidth: 300, border: "1px solid var(--borde)",
-            borderRadius: 12, background: "#fff", overflow: "hidden" }}>
+            borderRadius: 12, background: "#fff",
+            overflow: "hidden auto", maxHeight: "calc(100vh - 220px)" }}>
             {/* Las que tienen alerta primero: una camioneta a 24 metros de una
                 zona no puede estar debajo de otra que tiene más paradas
                 marcadas pero está a 20 km. */}
@@ -967,7 +968,18 @@ function Monitoreo({ refresco }) {
             })}
           </div>
 
-          <div style={{ flex: "1 1 460px", minWidth: 320 }}>
+          {/* La columna del detalle tiene su PROPIO scroll.
+              El mapa mide 420, más el bloque de aviso y las 34 paradas del
+              detalle: el contenido pasaba de la pantalla y como Leaflet se
+              queda la rueda del mouse, la lista quedaba inalcanzable. Con el
+              scroll acotado a la altura de la ventana, todo se puede ver sin
+              depender del scroll de la página.
+
+              calc(100vh - 220px) deja espacio para el topbar, el encabezado
+              fijo de la pestaña y la barra de la fecha. */}
+          <div style={{ flex: "1 1 460px", minWidth: 320,
+            maxHeight: "calc(100vh - 220px)", overflowY: "auto",
+            paddingRight: 4 }}>
             {sel ? (
               <>
 <div ref={cajaMapa}
@@ -988,7 +1000,7 @@ function Monitoreo({ refresco }) {
                     border: "1px solid var(--borde)", borderRadius: 11,
                     background: "#fff", padding: "8px 12px", cursor: "pointer",
                     fontSize: 12, color: C.navy, fontWeight: 600 }}>
-                  {verParadas ? "\u25be" : "\u25b8"} Detalle de las {(sel.paradas || []).length} paradas en zona
+                  {verParadas ? "▾" : "▸"} Detalle de las {(sel.paradas || []).length} paradas en zona
                 </button>
 
                 {verParadas && (
@@ -1001,7 +1013,7 @@ function Monitoreo({ refresco }) {
                       textTransform: "uppercase", color: C.gris }}>
                       <span style={{ minWidth: 30 }}>Parada</span>
                       <span style={{ minWidth: 140 }}>Zona</span>
-                      <span style={{ flex: 1 }}>Env\u00edo</span>
+                      <span style={{ flex: 1 }}>Envío</span>
                       <span>Estado</span>
                     </div>
                     <div style={{ border: "1px solid var(--borde)",
@@ -1014,7 +1026,7 @@ function Monitoreo({ refresco }) {
                           <span style={{ fontWeight: 700, minWidth: 30,
                             fontVariantNumeric: "tabular-nums" }}>{p.secuencia}</span>
                           <span style={{ color: C.ladrillo, minWidth: 140 }}>{p.zona}</span>
-                          <span style={{ color: C.gris, flex: 1 }}>env\u00edo {p.envio_id}</span>
+                          <span style={{ color: C.gris, flex: 1 }}>envío {p.envio_id}</span>
                           <span style={{ fontSize: 10.5, fontWeight: 600,
                             color: (ESTADO_PARADA[p.estado] || {}).color || C.gris }}>
                             {(ESTADO_PARADA[p.estado] || {}).etiqueta || p.estado}
