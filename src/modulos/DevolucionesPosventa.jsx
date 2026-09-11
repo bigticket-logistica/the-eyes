@@ -6,8 +6,18 @@ import { sb } from "../shared/supabase.js";
 //
 // QUÉ MUESTRA
 //   Por día operativo, cada ruta que quedó 100% gestionada con paquetes a
-//   devolver. Una fila por ruta; al desplegar, un renglón por folio con las
-//   tres marcas: foto, georreferencia y registro en MELI.
+//   devolver. Una fila por ruta con su inicio real, su cierre real y sus
+//   entregas; al desplegar, un renglón por folio con las tres marcas: foto,
+//   georreferencia y registro en MELI.
+//
+// POR QUÉ ABRE EN AYER Y NO EN HOY
+//   El día operativo no termina a medianoche: termina a las 10:00 del día
+//   siguiente, cuando vencen los SleepOver. Una ruta que partió ayer con
+//   SleepOver cierra hoy a las 08:27 entregando o devolviendo, y ese cierre
+//   es parte del cuadro de AYER. Abrir en hoy escondía justo eso: las dos de
+//   SleepOver del 10 no aparecían el 11 aunque el 11 a las 10:00 era cuando
+//   había que mirarlas. Con ayer se ve el día completo con su estado real.
+//   El día se puede cambiar.
 //
 // DE DÓNDE SALE CADA COSA
 //   Rutas, conductor, placa, SC     → rutas_monitoreo_mx (la torre), última
@@ -50,6 +60,24 @@ const C = {
 
 function hoyMX() {
   return new Date().toLocaleDateString("en-CA", { timeZone: "America/Mexico_City" });
+}
+
+function ayerMX() {
+  const d = new Date();
+  d.setDate(d.getDate() - 1);
+  return d.toLocaleDateString("en-CA", { timeZone: "America/Mexico_City" });
+}
+
+// Hora en 24 h, y si el evento es de otro día que el operativo se antepone el
+// día: un cierre "08:27" de una ruta del 10 es del 11, y eso hay que verlo.
+function horaConDia(ts, diaOperativo) {
+  if (!ts) return null;
+  const d = new Date(ts);
+  if (Number.isNaN(d.getTime())) return null;
+  const dia = d.toLocaleDateString("en-CA", { timeZone: "America/Mexico_City" });
+  const hora = horaMX(ts);
+  if (dia === diaOperativo) return hora;
+  return `${dia.slice(8)}/${dia.slice(5, 7)} ${hora}`;
 }
 
 function horaMX(ts) {
@@ -158,11 +186,13 @@ function Marca({ estado, titulo }) {
   );
 }
 
-const GRID_RUTA = "18px 104px minmax(160px,1fr) 62px 160px 190px";
+const GRID_RUTA = "18px 100px minmax(150px,1fr) 56px 150px 150px 92px 190px";
 const GRID_FOLIO = "120px minmax(140px,1fr) 78px 110px 110px";
 
-function FilaRuta({ r, folios, sup, pruebas, abierta, alternar, ahora }) {
+function FilaRuta({ r, folios, sup, pruebas, abierta, alternar, ahora, dia }) {
   const est = estadoRuta(r, folios, ahora);
+  const inicio = horaConDia(r.init_date, dia);
+  const cierre = horaConDia(r.cierre_en, dia);
   return (
     <div style={{ borderTop: "1px solid var(--borde)" }}>
       <button onClick={alternar} style={{
@@ -189,6 +219,32 @@ function FilaRuta({ r, folios, sup, pruebas, abierta, alternar, ahora }) {
         <span style={{ fontSize: 12, overflow: "hidden", textOverflow: "ellipsis",
           whiteSpace: "nowrap" }} title={sup ? `${sup.nombre || ""} ${sup.telefono || ""}`.trim() : ""}>
           {sup && sup.nombre ? sup.nombre : <span style={{ color: C.gris }}>sin supervisor</span>}
+        </span>
+        {/* Inicio y cierre REALES de la ruta. Si el cierre cae en otro día que el
+            operativo —el SleepOver que cierra a la mañana siguiente— se ve el
+            día delante de la hora. Sin cierre, la ruta sigue abierta en MELI. */}
+        <span style={{ fontSize: 11.5, fontVariantNumeric: "tabular-nums", whiteSpace: "nowrap" }}
+          title={`Inicio ${fechaHoraMX(r.init_date)} · Cierre ${r.cierre_en ? fechaHoraMX(r.cierre_en) : "abierta"}`}>
+          <span>{inicio || "—"}</span>
+          <span style={{ color: C.gris, margin: "0 4px" }}>→</span>
+          {cierre
+            ? <span style={{ fontWeight: 600 }}>{cierre}</span>
+            : <span style={{ color: C.naranja, fontWeight: 600 }}>abierta</span>}
+        </span>
+        {/* Entregas al cierre según la torre: cuántos de cuántos, y los fallidos.
+            Es el "estado real de cierre" de la ruta, distinto del de sus
+            devoluciones. */}
+        <span style={{ fontSize: 11.5, fontVariantNumeric: "tabular-nums", whiteSpace: "nowrap" }}
+          title={`${r.pkg_delivered ?? "?"} entregados de ${r.pkg_total ?? "?"} · ${r.pkg_not_delivered ?? "?"} fallidos`}>
+          {r.pkg_total != null
+            ? <Fragment>
+                <span style={{ fontWeight: 600 }}>{r.pkg_delivered ?? "?"}</span>
+                <span style={{ color: C.gris }}>/{r.pkg_total}</span>
+                {r.pkg_not_delivered != null && (
+                  <span style={{ color: C.ladrillo, marginLeft: 5 }}>· {r.pkg_not_delivered} fall.</span>
+                )}
+              </Fragment>
+            : <span style={{ color: C.gris }}>—</span>}
         </span>
         <span style={{ display: "flex", justifyContent: "flex-end" }}>
           <Pill color={est.color} tinte={est.tinte}
@@ -252,7 +308,7 @@ function FilaRuta({ r, folios, sup, pruebas, abierta, alternar, ahora }) {
 // ── Vista ──────────────────────────────────────────────────────────────────
 
 export default function DevolucionesPosventa() {
-  const [dia, setDia] = useState(() => hoyMX());
+  const [dia, setDia] = useState(() => ayerMX());
   const [bloque, setBloque] = useState("devoluciones");
   const [folios, setFolios] = useState([]);
   const [rutasDev, setRutasDev] = useState({});
@@ -297,7 +353,8 @@ export default function DevolucionesPosventa() {
         .select("id_ruta, sleep_over_en, vence_en, cierre_en, driver_name, service_center_id")
         .in("id_ruta", ids),
       sb.from("rutas_monitoreo_mx")
-        .select("id_ruta, driver_name, vehicle_license, service_center_id, status, substatus, capturado_at")
+        .select("id_ruta, driver_name, vehicle_license, service_center_id, status, substatus, " +
+                "init_date, final_date, pkg_total, pkg_delivered, pkg_not_delivered, capturado_at")
         .in("id_ruta", ids).order("capturado_at", { ascending: false }).limit(ids.length * 12),
       sb.from("vw_pnr_supervisor").select("*"),
       sb.from("dev_pruebas_mx").select("*").in("folio_guia", filas.map((f) => f.folio_guia)),
@@ -350,7 +407,13 @@ export default function DevolucionesPosventa() {
         service_center_id: t.service_center_id || d.service_center_id || fs[0].service_center_id || null,
         sleep_over_en: d.sleep_over_en || null,
         vence_en: d.vence_en || null,
-        cierre_en: d.cierre_en || null,
+        // El cierre: dev_rutas_mx lo tiene desde la torre; si por lo que sea
+        // falta ahí, la torre misma lo trae en final_date.
+        cierre_en: d.cierre_en || t.final_date || null,
+        init_date: t.init_date || null,
+        pkg_total: t.pkg_total ?? null,
+        pkg_delivered: t.pkg_delivered ?? null,
+        pkg_not_delivered: t.pkg_not_delivered ?? null,
         folios: fs,
         estado: estadoRuta(d, fs, ahora),
       });
@@ -417,6 +480,7 @@ export default function DevolucionesPosventa() {
         <span style={{ fontSize: 11, color: C.gris }}>Día operativo</span>
         <input type="date" value={dia} max={hoyMX()} onChange={(e) => setDia(e.target.value)}
           style={{ fontSize: 12.5, padding: "5px 9px", borderRadius: 7, border: "1px solid var(--borde)" }} />
+        <button onClick={() => setDia(ayerMX())} style={{ fontSize: 11.5, padding: "5px 10px" }}>Ayer</button>
         <button onClick={() => setDia(hoyMX())} style={{ fontSize: 11.5, padding: "5px 10px" }}>Hoy</button>
 
         <span style={{ width: 1, height: 20, background: "var(--borde)", margin: "0 4px" }} />
@@ -445,7 +509,8 @@ export default function DevolucionesPosventa() {
           padding: "8px 12px", fontSize: 10.5, fontWeight: 700, letterSpacing: 0.3,
           textTransform: "uppercase", color: C.gris, background: C.navyTenue }}>
           <span></span><span>Ruta</span><span>Conductor</span><span>SC</span>
-          <span>Supervisor</span><span style={{ textAlign: "right" }}>Estado</span>
+          <span>Supervisor</span><span>Inicio → cierre</span><span>Entregas</span>
+          <span style={{ textAlign: "right" }}>Estado</span>
         </div>
 
         {cargando ? (
@@ -460,7 +525,7 @@ export default function DevolucionesPosventa() {
             pruebas={pruebas}
             abierta={abiertas.has(String(r.id_ruta))}
             alternar={() => alternar(r.id_ruta)}
-            ahora={ahora} />
+            ahora={ahora} dia={dia} />
         ))}
       </div>
 
