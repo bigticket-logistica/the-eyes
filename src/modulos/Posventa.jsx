@@ -3,12 +3,13 @@ import { sb } from "../shared/supabase.js";
 import ChatPosventa from "./ChatPosventa.jsx";
 import TableroControl from "./TableroControl.jsx";
 import NotasPosventa from "./NotasPosventa.jsx";
+import DevolucionesPosventa from "./DevolucionesPosventa.jsx";
 import { useAuth } from "../shared/auth.jsx";
 import { puedeActuar } from "../shared/permisos.js";
 
 // ── Posventa ───────────────────────────────────────────────────────────────
-// Hoy solo PNR; las devoluciones entran después como una segunda vista del
-// mismo módulo. Lee vw_pnr_tablero completa (155 filas hoy, unos pocos miles
+// PNR y Devoluciones, como dos vistas del mismo módulo. La de PNR lee
+// vw_pnr_tablero completa (155 filas hoy, unos pocos miles
 // en el peor caso) y agrega en el cliente: una consulta por carga en vez de
 // tres RPC de totales que después habría que mantener sincronizadas a mano
 // con la misma regla de clasificación.
@@ -85,7 +86,7 @@ export function usePnrSinVer() {
 
 const VISTAS = [
   { clave: "pnr",          etiqueta: "PNR",           activa: true  },
-  { clave: "devoluciones", etiqueta: "Devoluciones",  activa: false },
+  { clave: "devoluciones", etiqueta: "Devoluciones",  activa: true  },
   { clave: "chat",         etiqueta: "Chat Posventa", activa: true  },
   { clave: "tablero",      etiqueta: "Tablero de Control", activa: true },
   { clave: "notas",        etiqueta: "Notas",         activa: true },
@@ -2719,14 +2720,13 @@ export default function Posventa() {
             </button>
           ))}
         </div>
-        {/* El buscador y el periodo son de la vista PNR y de Devoluciones. En el
-            chat no filtran nada, y en el Tablero de Control tampoco: ese módulo
-            tiene su propio rango de fechas y su propio selector de quincena, así
-            que dejarlos acá daba dos controles de periodo en la misma pantalla
-            sin relación entre ellos. */}
+        {/* El buscador y el periodo son solo de la vista PNR. En el chat no
+            filtran nada; el Tablero de Control y Devoluciones tienen cada uno
+            su propio selector de fecha, así que dejarlos acá daba dos controles
+            de periodo en la misma pantalla sin relación entre ellos. */}
         <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 8 }}>
           {aviso && <span style={{ fontSize: 11.5, color: C.verde }}>{aviso}</span>}
-          {vista === "chat" || vista === "tablero" || vista === "notas" ? null : <Fragment>
+          {vista === "chat" || vista === "tablero" || vista === "notas" || vista === "devoluciones" ? null : <Fragment>
           <input value={busqueda} onChange={(e) => { setBusqueda(e.target.value); setAbiertas(new Set()); }}
             placeholder="Buscar caso, guía, ruta o conductor"
             style={{ fontSize: 12.5, padding: "5px 10px", borderRadius: 7,
@@ -2753,6 +2753,11 @@ export default function Posventa() {
         </div>
       ) : vista === "notas" ? (
         <NotasPosventa />
+      ) : vista === "devoluciones" ? (
+        /* Devoluciones lee la torre y las tablas dev_*, no vw_pnr_tablero: es
+           otro circuito y otro canal. Comparte la pantalla de Posventa porque
+           el analista es el mismo y revisa las dos cosas sobre el día cerrado. */
+        <DevolucionesPosventa />
       ) : vista === "tablero" ? (
         /* El tablero tiene su propio rango de fechas y no usa el selector de
            periodo de la barra: son dos preguntas distintas. El periodo sirve
