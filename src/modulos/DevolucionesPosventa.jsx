@@ -132,13 +132,22 @@ function marcasDePruebas(filasPruebas) {
 
 // ── Estado de la fila madre ────────────────────────────────────────────────
 
+// Un folio está RESUELTO si MELI lo escaneó de vuelta en el centro, o si
+// terminó entregado. Lo segundo pasa: un paquete se marca fallido a las 17:00,
+// se reintenta a las 19:00 y se entrega; queda clasificado "devolver" pero ya
+// no hay nada que devolver. Contarlo como faltante marcaba en rojo a un
+// conductor que cerró 81/81.
+const resuelto = (f) => !!f.meli_retorno_en || f.meli_estado_final === "delivered";
+
 function estadoRuta(r, folios, ahora) {
   const total = folios.length;
-  const conf = folios.filter((f) => f.meli_retorno_en).length;
+  const conf = folios.filter(resuelto).length;
+  const entregados = folios.filter((f) => !f.meli_retorno_en && f.meli_estado_final === "delivered").length;
   const faltan = total - conf;
 
   if (total > 0 && faltan === 0) {
-    return { clave: "registrada", texto: `Registrada · ${conf}/${total}`,
+    return { clave: "registrada",
+             texto: `Registrada · ${conf}/${total}` + (entregados ? ` · ${entregados} entregado${entregados > 1 ? "s" : ""}` : ""),
              color: C.verde, tinte: C.verdeTenue, icono: "✓" };
   }
   const vence = r.vence_en ? new Date(r.vence_en).getTime() : null;
@@ -189,8 +198,11 @@ function Marca({ estado, titulo }) {
 const GRID_RUTA = "18px 100px minmax(150px,1fr) 56px 150px 150px 92px 190px";
 const GRID_FOLIO = "120px minmax(140px,1fr) 78px 110px 110px";
 
-function FilaRuta({ r, folios, sup, pruebas, abierta, alternar, ahora, dia }) {
-  const est = estadoRuta(r, folios, ahora);
+function FilaRuta({ r, folios, sup, pruebas, abierta, alternar, dia }) {
+  // El estado viene calculado desde la lista, sobre la fila ya cruzada con la
+  // torre. Recalcularlo acá con otros datos hacía que el resumen dijera "1 sin
+  // registrar" y la tabla mostrara dos filas rojas.
+  const est = r.estado;
   const inicio = horaConDia(r.init_date, dia);
   const cierre = horaConDia(r.cierre_en, dia);
   return (
@@ -276,6 +288,9 @@ function FilaRuta({ r, folios, sup, pruebas, abierta, alternar, ahora, dia }) {
                 <span style={{ color: "var(--texto-suave, #55607a)", overflow: "hidden",
                   textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={f.incidente || f.substatus || ""}>
                   {f.incidente || f.substatus || "—"}
+                  {!f.meli_retorno_en && f.meli_estado_final === "delivered" && (
+                    <span style={{ marginLeft: 6, fontSize: 10.5, fontWeight: 700, color: C.verde }}>· entregado después</span>
+                  )}
                 </span>
                 <span style={{ textAlign: "center" }}>
                   <Marca estado={pr.foto ? "ok" : "pendiente"}
@@ -290,11 +305,13 @@ function FilaRuta({ r, folios, sup, pruebas, abierta, alternar, ahora, dia }) {
                       : "Sin ubicación todavía"} />
                 </span>
                 <span style={{ textAlign: "center" }}>
-                  <Marca estado={f.meli_retorno_en ? "ok" : "pendiente"}
+                  <Marca estado={f.meli_retorno_en ? "ok" : f.meli_estado_final === "delivered" ? "ok" : "pendiente"}
                     titulo={f.meli_retorno_en
                       ? `Escaneado en el centro ${fechaHoraMX(f.meli_retorno_en)}` +
                         (recibio ? ` · recibió ${recibio.nombre}` : "")
-                      : "MELI no registra el retorno todavía"} />
+                      : f.meli_estado_final === "delivered"
+                        ? "Se entregó en un reintento: no hay nada que devolver"
+                        : "MELI no registra el retorno todavía"} />
                 </span>
               </div>
             );
@@ -333,7 +350,7 @@ export default function DevolucionesPosventa() {
     // 1. Los folios a devolver del día. Es lo que define qué rutas aparecen.
     const fol = await sb.from("dev_paquetes_mx")
       .select("id, folio_guia, id_ruta, service_center_id, substatus, incidente, " +
-              "meli_retorno_en, meli_personas, aviso1_en, aviso2_en, resultado")
+              "meli_retorno_en, meli_estado_final, meli_personas, aviso1_en, aviso2_en, resultado")
       .eq("dia", dia).eq("requiere", "devolver")
       .order("id_ruta").order("folio_guia");
     if (fol.error) { setError(fol.error.message); setCargando(false); return; }
@@ -415,9 +432,11 @@ export default function DevolucionesPosventa() {
         pkg_delivered: t.pkg_delivered ?? null,
         pkg_not_delivered: t.pkg_not_delivered ?? null,
         folios: fs,
-        estado: estadoRuta(d, fs, ahora),
       });
     }
+    // El estado se calcula UNA vez, sobre la fila ya cruzada con la torre, y es
+    // el mismo que usan el resumen y la tabla.
+    for (const r of lista) r.estado = estadoRuta(r, r.folios, ahora);
     // Lo que hay que mirar primero arriba: sin registrar y vencidas, después
     // en ruta, después SleepOver en plazo, y al final las registradas.
     const peso = { sin_registrar: 0, vencida: 0, en_ruta: 1, sleepover: 2, registrada: 3 };
@@ -525,7 +544,7 @@ export default function DevolucionesPosventa() {
             pruebas={pruebas}
             abierta={abiertas.has(String(r.id_ruta))}
             alternar={() => alternar(r.id_ruta)}
-            ahora={ahora} dia={dia} />
+            dia={dia} />
         ))}
       </div>
 
