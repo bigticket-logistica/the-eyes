@@ -3,6 +3,7 @@ import { sb } from "../shared/supabase.js";
 import ChatPosventa from "./ChatPosventa.jsx";
 import TableroControl from "./TableroControl.jsx";
 import NotasPosventa from "./NotasPosventa.jsx";
+import HistorialSla from "./HistorialSla.jsx";
 import DevolucionesPosventa from "./DevolucionesPosventa.jsx";
 import { useAuth } from "../shared/auth.jsx";
 import { puedeActuar } from "../shared/permisos.js";
@@ -90,6 +91,7 @@ const VISTAS = [
   { clave: "chat",         etiqueta: "Chat Posventa", activa: true  },
   { clave: "tablero",      etiqueta: "Tablero de Control", activa: true },
   { clave: "notas",        etiqueta: "Notas",         activa: true },
+  { clave: "sla",          etiqueta: "Historial SLA",  activa: true },
 ];
 
 // Paleta. Navy y naranja son los institucionales; los otros tres se derivan
@@ -2726,7 +2728,7 @@ export default function Posventa() {
             de periodo en la misma pantalla sin relación entre ellos. */}
         <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 8 }}>
           {aviso && <span style={{ fontSize: 11.5, color: C.verde }}>{aviso}</span>}
-          {vista === "chat" || vista === "tablero" || vista === "notas" || vista === "devoluciones" ? null : <Fragment>
+          {vista === "chat" || vista === "tablero" || vista === "notas" || vista === "devoluciones" || vista === "sla" ? null : <Fragment>
           <input value={busqueda} onChange={(e) => { setBusqueda(e.target.value); setAbiertas(new Set()); }}
             placeholder="Buscar caso, guía, ruta o conductor"
             style={{ fontSize: 12.5, padding: "5px 10px", borderRadius: 7,
@@ -2751,6 +2753,8 @@ export default function Posventa() {
         <div style={{ height: "calc(100vh - 150px)", minHeight: 420 }}>
           <ChatPosventa />
         </div>
+      ) : vista === "sla" ? (
+        <HistorialSla />
       ) : vista === "notas" ? (
         <NotasPosventa />
       ) : vista === "devoluciones" ? (
