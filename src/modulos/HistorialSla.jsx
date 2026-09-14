@@ -48,6 +48,18 @@ const MOTIVO = {
 };
 
 // Cómo se lee cada acción de la línea de tiempo.
+// Y por qué sí cumplió, cuando la búsqueda trae un caso que cumple.
+const CUMPLE_MOTIVO = {
+  evidencia: "Envió la evidencia dentro de las 40 horas.",
+  evidencia_corregida:
+    "La torre le rechazó la primera evidencia y volvió a cargar dentro del plazo.",
+  cerro_con_motivo:
+    'Cerró la tarea con "No hay pruebas" explicando el motivo, dentro de las 40 horas.',
+  sin_gestion:
+    "Mercado Libre anuló el reclamo dentro de las 40 horas, así que la entrega "
+    + "quedó confirmada y no había nada que reclamarle al supervisor.",
+};
+
 const ACCION = {
   "nace el PNR":          { texto: "Mercado Libre abre el reclamo", color: C.navy, peso: 700 },
   "aviso inicial":        { texto: "Aviso inicial",                 color: C.naranja },
@@ -85,8 +97,15 @@ function Historia({ caso }) {
     return () => { vivo = false; };
   }, [caso.pnr_case_id]);
 
-  const motivo = MOTIVO[caso.gesto]
-    || "No se registró gestión válida dentro del plazo.";
+  // El veredicto puede ser cualquiera: se busca un caso sin saber cómo salió.
+  const no = caso.cumple === "NO CUMPLE";
+  const enPlazo = caso.cumple === "EN PLAZO";
+  const motivo = no
+    ? (MOTIVO[caso.gesto] || "No se registró gestión válida dentro del plazo.")
+    : enPlazo
+      ? "El plazo todavía corre, así que no hay veredicto: el supervisor puede "
+        + "resolverlo en las horas que quedan."
+      : (CUMPLE_MOTIVO[caso.gesto] || "Gestionó dentro de las 40 horas.");
 
   return (
     <div style={{ borderTop: "1px solid var(--borde)", padding: "12px 14px",
@@ -94,11 +113,13 @@ function Historia({ caso }) {
 
       {/* El veredicto primero: es la respuesta a la pregunta que trajo al
           analista hasta acá. La secuencia viene después, como respaldo. */}
-      <div style={{ border: `1px solid ${C.ladrillo}`, borderRadius: 10,
-        padding: "10px 12px", background: "#FFF7F3", marginBottom: 12 }}>
-        <div style={{ fontSize: 12.5, fontWeight: 700, color: C.ladrillo,
-          marginBottom: 4 }}>
-          Por qué no cumple
+      <div style={{ borderRadius: 10, padding: "10px 12px", marginBottom: 12,
+        border: `1px solid ${no ? C.ladrillo : enPlazo ? C.naranja : C.verde}`,
+        background: no ? "#FFF7F3" : enPlazo ? "#FFFBF5" : "#F4FBF7" }}>
+        <div style={{ fontSize: 12.5, fontWeight: 700, marginBottom: 4,
+          color: no ? C.ladrillo : enPlazo ? C.naranja : C.verde }}>
+          {no ? "Por qué no cumple"
+             : enPlazo ? "Todavía en plazo" : "Por qué cumple"}
         </div>
         <div style={{ fontSize: 13, lineHeight: 1.5 }}>{motivo}</div>
         <div style={{ fontSize: 11.5, color: C.gris, marginTop: 6 }}>
@@ -182,31 +203,40 @@ function Historia({ caso }) {
 }
 
 export default function HistorialSla() {
-  const [casos, setCasos] = useState([]);
-  const [cargando, setCargando] = useState(true);
-  const [abierto, setAbierto] = useState(null);
   const [busca, setBusca] = useState("");
+  const [casos, setCasos] = useState(null);
+  const [buscando, setBuscando] = useState(false);
+  const [abierto, setAbierto] = useState(null);
   const [error, setError] = useState(null);
 
-  const cargar = useCallback(async () => {
-    setCargando(true);
-    const { data, error: e } = await sb.from("vw_pnr_sla_tareas")
-      .select("*").eq("cumple", "NO CUMPLE").order("vence_en", { ascending: false });
-    setCargando(false);
-    if (e) { setError(e.message); return; }
+  // No se lista nada hasta que el analista busque.
+  //   Traer los 44 casos sin cumplir de entrada obliga a recorrerlos para
+  //   encontrar uno, y este módulo existe para lo contrario: llega un reclamo
+  //   por un caso puntual y hay que responderlo. El listado completo ya está
+  //   en el tablero.
+  async function buscar(e) {
+    e?.preventDefault();
+    const q = busca.trim();
+    if (!q) return;
+    setBuscando(true);
+    setError(null);
+    setAbierto(null);
+
+    // Por número de caso si son solo dígitos, por supervisor o centro si no.
+    const esCaso = /^\d+$/.test(q);
+    const consulta = sb.from("vw_pnr_sla_tareas").select("*");
+    const { data, error: err } = esCaso
+      ? await consulta.eq("pnr_case_id", Number(q))
+      : await consulta.or(`supervisor.ilike.%${q}%,sc.ilike.%${q}%`)
+          .order("vence_en", { ascending: false }).limit(50);
+
+    setBuscando(false);
+    if (err) { setError(err.message); setCasos([]); return; }
     setCasos(data || []);
-  }, []);
-
-  useEffect(() => { cargar(); }, [cargar]);
-
-  // El buscador acepta el número de caso o el nombre del supervisor: son las
-  // dos formas en que llega un reclamo — "el caso tal" o "los míos".
-  const q = busca.trim().toLowerCase();
-  const lista = q
-    ? casos.filter((c) => String(c.pnr_case_id).includes(q)
-        || (c.supervisor || "").toLowerCase().includes(q)
-        || (c.sc || "").toLowerCase().includes(q))
-    : casos;
+    // Un solo resultado se abre solo: buscar por número de caso y tener que
+    // hacer un clic más para ver lo que pediste es un paso de sobra.
+    if ((data || []).length === 1) setAbierto(data[0].pnr_case_id);
+  }
 
   return (
     <div>
@@ -216,33 +246,46 @@ export default function HistorialSla() {
           fontSize: 12.5, marginBottom: 12 }}>{error}</div>
       )}
 
-      <div style={{ display: "flex", alignItems: "center", gap: 10,
-        flexWrap: "wrap", marginBottom: 12 }}>
-        <input value={busca} onChange={(e) => setBusca(e.target.value)}
-          placeholder="Buscar por caso, supervisor o centro"
-          style={{ flex: "1 1 280px", maxWidth: 380, fontSize: 12.5,
-            padding: "7px 11px", borderRadius: 8,
+      <form onSubmit={buscar} style={{ display: "flex", alignItems: "center",
+        gap: 8, flexWrap: "wrap", marginBottom: 14 }}>
+        <input value={busca} onChange={(e) => setBusca(e.target.value)} autoFocus
+          placeholder="Número de caso, supervisor o centro"
+          style={{ flex: "1 1 300px", maxWidth: 400, fontSize: 13,
+            padding: "8px 12px", borderRadius: 8,
             border: "1px solid var(--borde)" }} />
-        <span style={{ fontSize: 12, color: C.gris }}>
-          {cargando ? "cargando…"
-            : `${lista.length} caso(s) sin cumplir${q ? " · filtrado" : ""}`}
-        </span>
-        <button onClick={cargar} style={{ fontSize: 11.5, padding: "5px 11px",
-          borderRadius: 7 }}>Actualizar</button>
-      </div>
+        <button type="submit" disabled={buscando || !busca.trim()}
+          className="btn-navy"
+          style={{ fontSize: 12.5, fontWeight: 600, padding: "8px 16px",
+            borderRadius: 8 }}>
+          {buscando ? "Buscando…" : "Buscar"}
+        </button>
+        {casos !== null && (
+          <span style={{ fontSize: 12, color: C.gris }}>
+            {casos.length === 0 ? "sin resultados"
+              : `${casos.length} caso(s)`}
+          </span>
+        )}
+      </form>
 
-      {!cargando && lista.length === 0 ? (
-        <div style={{ fontSize: 12.5, color: C.gris, padding: "26px 0",
+      {casos === null ? (
+        <div style={{ fontSize: 12.5, color: C.gris, padding: "40px 20px",
+          textAlign: "center", border: "1px dashed var(--borde)",
+          borderRadius: 12, lineHeight: 1.6 }}>
+          Busca un caso para ver su historia completa: cuándo nació, qué avisos
+          salieron, qué hizo el supervisor y por qué cumplió o no.
+        </div>
+      ) : casos.length === 0 ? (
+        <div style={{ fontSize: 12.5, color: C.gris, padding: "30px 0",
           textAlign: "center", border: "1px dashed var(--borde)",
           borderRadius: 12 }}>
-          {q ? "Ningún caso coincide con la búsqueda."
-             : "Ningún caso sin cumplir."}
+          No encontré nada con «{busca.trim()}».
         </div>
       ) : (
         <div style={{ border: "1px solid var(--borde)", borderRadius: 12,
           background: "#fff", overflow: "hidden" }}>
-          {lista.map((c) => {
+          {casos.map((c) => {
             const activo = abierto === c.pnr_case_id;
+            const no = c.cumple === "NO CUMPLE";
             return (
               <div key={c.tarea_id || c.pnr_case_id}
                 style={{ borderBottom: "1px solid var(--borde)" }}>
@@ -261,13 +304,13 @@ export default function HistorialSla() {
                     </strong>
                     <span style={{ fontSize: 12, minWidth: 150 }}>{c.supervisor}</span>
                     <span style={{ fontSize: 11.5, fontWeight: 700 }}>{c.sc}</span>
-                    {/* El motivo resumido en la fila: con 44 casos, tener que
-                        abrir cada uno para saber de qué se trata es lento. */}
-                    <span style={{ fontSize: 11, color: C.ladrillo }}>
-                      {c.gesto === "sin_gestion" ? "no gestionó"
-                        : c.gesto === "evidencia_rechazada_sin_corregir" ? "rechazada, no corrigió"
-                        : c.gesto === "cerro_sin_motivo" ? "cerró sin motivo"
-                        : "fuera de plazo"}
+                    {/* El veredicto en la fila: se busca un caso sin saber si
+                        cumplió, así que la respuesta tiene que verse antes de
+                        abrir nada. */}
+                    <span style={{ fontSize: 11.5, fontWeight: 700,
+                      color: c.cumple === "CUMPLE" ? C.verde
+                           : c.cumple === "EN PLAZO" ? C.naranja : C.ladrillo }}>
+                      {c.cumple}
                     </span>
                     <span style={{ marginLeft: "auto", fontSize: 12,
                       fontWeight: 700, fontVariantNumeric: "tabular-nums" }}>
