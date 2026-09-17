@@ -115,7 +115,7 @@ function Cifra({ etiqueta, valor, nota, color = C.navy, tinte = "#fff" }) {
 
 // ── Envoltorio de bloque ───────────────────────────────────────────────────
 
-function Bloque({ n, titulo, subtitulo, children }) {
+function Bloque({ n, titulo, subtitulo, accion, children }) {
   return (
     <div style={{ border: "1px solid var(--borde)", borderRadius: 14,
       background: "#fff", marginBottom: 16, overflow: "hidden" }}>
@@ -131,9 +131,33 @@ function Bloque({ n, titulo, subtitulo, children }) {
         {subtitulo && (
           <span style={{ fontSize: 11.5, color: C.gris }}>{subtitulo}</span>
         )}
+        {accion && <span style={{ marginLeft: "auto" }}>{accion}</span>}
       </div>
       <div style={{ padding: 14 }}>{children}</div>
     </div>
+  );
+}
+
+// ── Botón de descarga de un bloque ─────────────────────────────────────────
+// Baja exactamente lo que muestra la tabla de arriba, con la fila TOTAL que
+// viene de la base. No recalcula nada: si el CSV y la pantalla difirieran,
+// habría que decidir cuál de los dos está bien y no hay forma de saberlo.
+
+function BotonCsvBloque({ onClick, titulo, rango }) {
+  return (
+    <span style={{ display: "inline-flex", alignItems: "center", gap: 7 }}>
+      {/* El rango se escribe al lado del botón, no solo en el tooltip: los
+          selectores de fecha quedan arriba de todo y al llegar acá ya no se
+          ven, así que sin esto se descarga sin saber qué periodo se está
+          bajando. */}
+      <span style={{ fontSize: 10.5, color: C.gris }}>{rango}</span>
+      <button onClick={onClick} title={titulo}
+        style={{ fontSize: 11, fontWeight: 600, padding: "4px 10px", borderRadius: 7,
+          border: "1px solid " + C.navy, background: "#fff", color: C.navy,
+          cursor: "pointer" }}>
+        ↓ CSV
+      </button>
+    </span>
   );
 }
 
@@ -416,6 +440,26 @@ export default function TableroControl() {
       + filas.map((f) => cols.map((c) => escapa(f[c])).join(";")).join("\n");
   }
 
+  // ── Los CSV de cada bloque ───────────────────────────────────────────────
+  // Bajan los números agregados que muestra cada bloque, con el rango elegido
+  // arriba. Es distinto del CSV de detalle: ahí va un caso por fila para que el
+  // analista agrupe como quiera; acá van los totales ya calculados por la base,
+  // que es lo que se manda a gerencia sin volver a sumar nada.
+  //
+  // El rango va en el nombre del archivo. Sin eso, tres descargas de rangos
+  // distintos quedan en la carpeta como pnr_bloque1.csv, (1) y (2), y a los dos
+  // días nadie sabe cuál era cuál.
+  function bajarBloque(filas, nombre, etiqueta) {
+    setError(null);
+    if (!filas || !filas.length) {
+      setError(`No hay datos de ${etiqueta} en ese rango.`);
+      return;
+    }
+    const cols = Object.keys(filas[0]);
+    const sufijo = desde === hasta ? desde : `${desde}_a_${hasta}`;
+    bajarBlob(filasACsv(filas, cols), "text/csv;charset=utf-8", `${nombre}_${sufijo}.csv`);
+  }
+
   // ── El informe del periodo MELI ──────────────────────────────────────────
   // Una fila por caso, con los nombres de columna del portal, para poder cruzar
   // el archivo contra MELI sin renombrar nada.
@@ -467,6 +511,9 @@ export default function TableroControl() {
       setBajando(false);
     }
   }
+
+  // Texto del rango que se muestra junto a cada botón de descarga.
+  const rangoTexto = desde === hasta ? desde : `${desde} → ${hasta}`;
 
   // Solo las cerradas llegan al selector. La vigente no se ofrece siquiera:
   // ofrecerla deshabilitada invita a preguntar por qué está ahí.
@@ -688,7 +735,9 @@ export default function TableroControl() {
       </div>
 
       {/* ── BLOQUE 1 ─────────────────────────────────────────────────── */}
-      <Bloque n={1} titulo="PNR y montos" subtitulo="general y por centro">
+      <Bloque n={1} titulo="PNR y montos" subtitulo="general y por centro"
+        accion={<BotonCsvBloque titulo={`PNR y montos del ${desde} al ${hasta}`}
+          rango={rangoTexto} onClick={() => bajarBloque(b1, "pnr_montos", "PNR y montos")} />}>
         <div style={{ display: "flex", gap: 9, flexWrap: "wrap", marginBottom: 13 }}>
           <Cifra etiqueta="PNR en el rango" valor={num(total.pnr_total)}
             nota={`${num(total.resueltos)} con desenlace`} />
@@ -745,7 +794,9 @@ export default function TableroControl() {
 
       {/* ── BLOQUE 2 ─────────────────────────────────────────────────── */}
       <Bloque n={2} titulo="Tareas por supervisor"
-        subtitulo="los dos SLA que le corresponden, reaperturas y tiempos">
+        subtitulo="los dos SLA que le corresponden, reaperturas y tiempos"
+        accion={<BotonCsvBloque titulo={`Tareas por supervisor del ${desde} al ${hasta}`}
+          rango={rangoTexto} onClick={() => bajarBloque(b2, "tareas_por_supervisor", "tareas por supervisor")} />}>
         {/* Los dos SLA se explican acá y no en un tooltip: son distintos y la
             diferencia entre ellos es justamente lo que hay que mirar. */}
         <div style={{ fontSize: 11.5, color: C.gris, marginBottom: 11, lineHeight: 1.45 }}>
@@ -804,7 +855,9 @@ export default function TableroControl() {
       </Bloque>
 
       {/* ── BLOQUE 3 ─────────────────────────────────────────────────── */}
-      <Bloque n={3} titulo="Evidencia" subtitulo="con prueba cargada vs. respondido sin prueba">
+      <Bloque n={3} titulo="Evidencia" subtitulo="con prueba cargada vs. respondido sin prueba"
+        accion={<BotonCsvBloque titulo={`Evidencia del ${desde} al ${hasta}`}
+          rango={rangoTexto} onClick={() => bajarBloque(b3, "evidencia", "evidencia")} />}>
         <div style={{ display: "flex", gap: 9, flexWrap: "wrap", marginBottom: 13 }}>
           <Cifra etiqueta="Con prueba" valor={num(t3.con_prueba)}
             nota={`${num(t3.con_prueba_anulado)} anulados`} color={C.verde} tinte={C.verdeTenue} />
