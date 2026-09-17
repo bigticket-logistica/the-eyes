@@ -5,6 +5,7 @@ import TableroControl from "./TableroControl.jsx";
 import NotasPosventa from "./NotasPosventa.jsx";
 import HistorialSla from "./HistorialSla.jsx";
 import DevolucionesPosventa from "./DevolucionesPosventa.jsx";
+import AvisosFallidos from "./AvisosFallidos.jsx";
 import { useAuth } from "../shared/auth.jsx";
 import { puedeActuar } from "../shared/permisos.js";
 
@@ -1783,6 +1784,12 @@ function Detalle({ c, ahora, onPedir, trayendo, supervisor, tarea, vueltas, movi
                 </div>
               );
             })}
+
+            {/* Un aviso que Meta no pudo entregar no se veía en ninguna parte:
+                el chip quedaba verde porque el mensaje se encoló, y el chofer
+                nunca recibía nada. Acá sale el motivo y el botón para mandarlo
+                a otro número. */}
+            <AvisosFallidos caseId={c.case_id} onNotificar={onNotificar} />
 
             <HistorialAvisos caseId={c.case_id} />
           </div>
