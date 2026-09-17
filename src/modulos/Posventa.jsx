@@ -2015,7 +2015,8 @@ function Fila({ c, abierta, onAbrir, onPedir, trayendo, ahora, supervisor, tarea
               pisaba el raw entero— así que ahí solo se muestra el número. */}
           {avisoMalo && avisoMalo.length > 0 && (
             <span title={avisoMalo.map((a) =>
-                `No le llegó a ${a.quien || a.telefono}` +
+                `No le llegó al ${a.rol}` +
+                (a.quien ? ` ${a.quien}` : "") + ` (${a.telefono})` +
                 (a.codigo === 131026
                   ? ": ese número no recibe WhatsApp"
                   : ` · código ${a.codigo || "?"}`)
@@ -2024,8 +2025,7 @@ function Fila({ c, abierta, onAbrir, onPedir, trayendo, ahora, supervisor, tarea
                 fontWeight: 700, color: C.naranja, background: C.naranjaTenue,
                 border: `1px solid ${C.naranja}`, borderRadius: 4,
                 padding: "0 5px", verticalAlign: "middle", cursor: "help" }}>
-              ⚠ no le llegó a {avisoMalo.map((a) =>
-                (a.quien || a.telefono).split(" ")[0]).join(" y ")}
+              ⚠ no le llegó al {avisoMalo.map((a) => a.rol).join(" ni al ")}
             </span>
           )}
         </span>
@@ -2122,9 +2122,97 @@ export default function Posventa() {
     return { data: filas, error: null };
   }
 
+  // ── Los avisos que Meta no pudo entregar ─────────────────────────────────
+  // Se piden SOLO los fallidos, no todos los salientes. Con todos, el tope se
+  // llenaba de mensajes buenos y los fallidos viejos quedaban afuera: con
+  // 8022 salientes en 30 días y un tope de 4000, la insignia desaparecía sin
+  // dar error. Filtrando acá, el volumen que importa es el de los fallos.
+  //
+  // Después se pregunta si hubo un envío BUENO posterior a ese mismo número:
+  // si lo hubo, alguien lo corrigió —o cambió el directorio— y no hay nada
+  // que avisar.
+  async function cargarAvisosMalos() {
+    try {
+      const { data: mal, error } = await sb.from("pnr_mensajes_mx")
+        .select("case_id, telefono, conversacion_id, creado_en, raw")
+        .eq("direccion", "saliente")
+        .eq("estado_entrega", "fallido")
+        .gte("creado_en", new Date(Date.now() - 30 * 86400000).toISOString())
+        .order("creado_en", { ascending: false })
+        .limit(2000);
+      if (error || !mal || !mal.length) { setAvisosMalos({}); return; }
+
+      const ultimo = new Map();
+      for (const m of mal) {
+        const k = `${m.case_id}|${m.telefono}`;
+        if (!ultimo.has(k)) ultimo.set(k, m);
+      }
+
+      // Los envíos buenos de esos casos, nada más. Los lotes van en paralelo:
+      // en serie, con muchos casos, eran varias idas y vueltas encadenadas.
+      const casos = [...new Set([...ultimo.values()].map((m) => m.case_id))];
+
+      // El ROL de cada destinatario: chofer o supervisor. Se saca de la
+      // conversación y no de los parámetros de la plantilla, porque los
+      // mensajes anteriores al arreglo del webhook perdieron esos parámetros
+      // —el error pisaba el raw entero— y quedaban mostrando solo un número
+      // sin decir de quién era. El rol está siempre.
+      const convs = [...new Set([...ultimo.values()]
+        .map((m) => m.conversacion_id).filter(Boolean))];
+      const roles = new Map();
+      if (convs.length) {
+        const pedidos = [];
+        for (let i = 0; i < convs.length; i += 200) {
+          pedidos.push(sb.from("pnr_conversaciones_mx")
+            .select("id, rol, conductor").in("id", convs.slice(i, i + 200)));
+        }
+        for (const r of await Promise.all(pedidos)) {
+          for (const cv of r.data || []) roles.set(String(cv.id), cv);
+        }
+      }
+      const lotes = [];
+      for (let i = 0; i < casos.length; i += 200) {
+        lotes.push(sb.from("pnr_mensajes_mx")
+          .select("case_id, telefono, creado_en")
+          .eq("direccion", "saliente")
+          .in("estado_entrega", ["enviado", "entregado", "leido"])
+          .in("case_id", casos.slice(i, i + 200))
+          .order("creado_en", { ascending: false }));
+      }
+      const buenos = new Map();
+      for (const r of await Promise.all(lotes)) {
+        for (const m of r.data || []) {
+          const k = `${m.case_id}|${m.telefono}`;
+          if (!buenos.has(k)) buenos.set(k, m.creado_en);
+        }
+      }
+
+      const porCaso = {};
+      for (const [k, m] of ultimo) {
+        const bueno = buenos.get(k);
+        if (bueno && new Date(bueno) > new Date(m.creado_en)) continue;
+        const raw = m.raw && typeof m.raw === "object" ? m.raw : {};
+        const cv = roles.get(String(m.conversacion_id)) || {};
+        // El nombre: el de la plantilla si está, si no el de la conversación.
+        const quien = (Array.isArray(raw.parametros) ? raw.parametros[0] : null)
+          || cv.conductor || null;
+        (porCaso[m.case_id] = porCaso[m.case_id] || []).push({
+          telefono: m.telefono, quien,
+          rol: cv.rol === "supervisor" ? "supervisor" : "chofer",
+          codigo: (raw.wa_error || {}).code || null,
+        });
+      }
+      setAvisosMalos(porCaso);
+    } catch (e) {
+      // Silencio a propósito: es un adorno del tablero, no puede hacer ruido
+      // ni frenar nada si falla.
+      setAvisosMalos({});
+    }
+  }
+
   async function cargar() {
     setError(null);
-    const [tablero, sup, mal] = await Promise.all([
+    const [tablero, sup] = await Promise.all([
       // PAGINADO OBLIGATORIO.
       //   PostgREST corta en 1000 filas por respuesta y el .limit() no lo
       //   sube: es un techo del servidor, no del cliente. Con la vista en 350
@@ -2140,26 +2228,6 @@ export default function Posventa() {
       // poco. Sirven para saber a quién le va la tarea del escalamiento sin
       // pedirlo caso por caso.
       sb.from("vw_pnr_supervisor").select("*"),
-      // Los avisos que Meta NO pudo entregar en los últimos 30 días. Un aviso
-      // fallido no se veía en ninguna parte: el chip quedaba verde porque el
-      // mensaje se encoló y el chofer nunca recibía nada.
-      //
-      // Se piden SOLO los fallidos, no todos los salientes. Con todos, el
-      // tope se llenaba de mensajes buenos y los fallidos viejos quedaban
-      // afuera: con 8022 salientes en 30 días y un tope de 4000, la insignia
-      // desaparecía sin dar error. Filtrando acá, el volumen que importa es
-      // el de los fallos, que son decenas.
-      //
-      // Si después hubo un envío bueno a ese mismo número, el fallo ya se
-      // resolvió; eso se verifica abajo con una segunda consulta acotada a
-      // los casos que aparecieron acá.
-      sb.from("pnr_mensajes_mx")
-        .select("case_id, telefono, creado_en, raw")
-        .eq("direccion", "saliente")
-        .eq("estado_entrega", "fallido")
-        .gte("creado_en", new Date(Date.now() - 30 * 86400000).toISOString())
-        .order("creado_en", { ascending: false })
-        .limit(2000),
     ]);
     // Las tareas vivas del periodo, para que el panel muestre si ya se pidió la
     // foto y en qué quedó, en vez de ofrecer crearla otra vez.
@@ -2189,51 +2257,12 @@ export default function Posventa() {
       setSupervisores(m);
     }
 
-    // El fallo más reciente de cada par caso+teléfono, y después la pregunta
-    // que decide si sigue vigente: ¿hubo un envío bueno a ese número después?
-    // Si lo hubo, alguien lo corrigió —o cambió el directorio— y no hay nada
-    // que avisar. Un número muerto puede tener cientos de fallos iguales; lo
-    // que el analista necesita saber es a quién no le llegó.
-    if (!mal.error && mal.data && mal.data.length) {
-      const ultimo = new Map();
-      for (const m of mal.data) {
-        const k = `${m.case_id}|${m.telefono}`;
-        if (!ultimo.has(k)) ultimo.set(k, m);
-      }
-
-      // Los envíos buenos de esos casos, nada más. Son pocos casos, así que
-      // esta consulta es chica aunque la tabla sea grande.
-      const casosConFallo = [...new Set([...ultimo.values()].map((m) => m.case_id))];
-      const buenos = new Map();
-      for (let i = 0; i < casosConFallo.length; i += 200) {
-        const lote = casosConFallo.slice(i, i + 200);
-        const { data: ok } = await sb.from("pnr_mensajes_mx")
-          .select("case_id, telefono, creado_en")
-          .eq("direccion", "saliente")
-          .in("estado_entrega", ["enviado", "entregado", "leido"])
-          .in("case_id", lote)
-          .order("creado_en", { ascending: false });
-        for (const m of ok || []) {
-          const k = `${m.case_id}|${m.telefono}`;
-          if (!buenos.has(k)) buenos.set(k, m.creado_en);
-        }
-      }
-
-      const porCaso = {};
-      for (const [k, m] of ultimo) {
-        const bueno = buenos.get(k);
-        if (bueno && new Date(bueno) > new Date(m.creado_en)) continue;
-        const raw = m.raw && typeof m.raw === "object" ? m.raw : {};
-        const quien = Array.isArray(raw.parametros) ? raw.parametros[0] : null;
-        (porCaso[m.case_id] = porCaso[m.case_id] || []).push({
-          telefono: m.telefono, quien,
-          codigo: (raw.wa_error || {}).code || null,
-        });
-      }
-      setAvisosMalos(porCaso);
-    } else {
-      setAvisosMalos({});
-    }
+    // Los avisos que Meta no pudo entregar se resuelven APARTE y sin await:
+    // son dos consultas más y la insignia es un detalle secundario. Metidas
+    // en la carga del tablero, retrasaban lo único que el analista necesita
+    // ver de inmediato, que son los casos. Así la tabla se pinta enseguida y
+    // la insignia aparece un segundo después.
+    cargarAvisosMalos();
     if (!tar.error && tar.data) {
       const m = {};
       for (const f of tar.data) m[f.case_id] = f;
