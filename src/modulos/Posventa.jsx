@@ -2140,16 +2140,26 @@ export default function Posventa() {
       // poco. Sirven para saber a quién le va la tarea del escalamiento sin
       // pedirlo caso por caso.
       sb.from("vw_pnr_supervisor").select("*"),
-      // Los avisos salientes de los últimos 30 días, para saber cuáles no
-      // llegaron. Un aviso fallido no se veía en ninguna parte: el chip
-      // quedaba verde porque el mensaje se encoló y el chofer nunca recibía
-      // nada. Se pide acá y no por fila para no hacer una consulta por caso.
+      // Los avisos que Meta NO pudo entregar en los últimos 30 días. Un aviso
+      // fallido no se veía en ninguna parte: el chip quedaba verde porque el
+      // mensaje se encoló y el chofer nunca recibía nada.
+      //
+      // Se piden SOLO los fallidos, no todos los salientes. Con todos, el
+      // tope se llenaba de mensajes buenos y los fallidos viejos quedaban
+      // afuera: con 8022 salientes en 30 días y un tope de 4000, la insignia
+      // desaparecía sin dar error. Filtrando acá, el volumen que importa es
+      // el de los fallos, que son decenas.
+      //
+      // Si después hubo un envío bueno a ese mismo número, el fallo ya se
+      // resolvió; eso se verifica abajo con una segunda consulta acotada a
+      // los casos que aparecieron acá.
       sb.from("pnr_mensajes_mx")
-        .select("case_id, telefono, estado_entrega, creado_en, raw")
+        .select("case_id, telefono, creado_en, raw")
         .eq("direccion", "saliente")
+        .eq("estado_entrega", "fallido")
         .gte("creado_en", new Date(Date.now() - 30 * 86400000).toISOString())
         .order("creado_en", { ascending: false })
-        .limit(4000),
+        .limit(2000),
     ]);
     // Las tareas vivas del periodo, para que el panel muestre si ya se pidió la
     // foto y en qué quedó, en vez de ofrecer crearla otra vez.
@@ -2179,19 +2189,40 @@ export default function Posventa() {
       setSupervisores(m);
     }
 
-    // El ÚLTIMO estado de cada par caso+teléfono. Si el último fue bueno, el
-    // problema ya se resolvió —lo corrigieron o cambió el directorio— y no hay
-    // nada que avisar. Un número muerto puede tener cientos de fallos iguales;
-    // lo que el analista necesita saber es a quién no le llegó.
-    if (!mal.error && mal.data) {
+    // El fallo más reciente de cada par caso+teléfono, y después la pregunta
+    // que decide si sigue vigente: ¿hubo un envío bueno a ese número después?
+    // Si lo hubo, alguien lo corrigió —o cambió el directorio— y no hay nada
+    // que avisar. Un número muerto puede tener cientos de fallos iguales; lo
+    // que el analista necesita saber es a quién no le llegó.
+    if (!mal.error && mal.data && mal.data.length) {
       const ultimo = new Map();
       for (const m of mal.data) {
         const k = `${m.case_id}|${m.telefono}`;
         if (!ultimo.has(k)) ultimo.set(k, m);
       }
+
+      // Los envíos buenos de esos casos, nada más. Son pocos casos, así que
+      // esta consulta es chica aunque la tabla sea grande.
+      const casosConFallo = [...new Set([...ultimo.values()].map((m) => m.case_id))];
+      const buenos = new Map();
+      for (let i = 0; i < casosConFallo.length; i += 200) {
+        const lote = casosConFallo.slice(i, i + 200);
+        const { data: ok } = await sb.from("pnr_mensajes_mx")
+          .select("case_id, telefono, creado_en")
+          .eq("direccion", "saliente")
+          .in("estado_entrega", ["enviado", "entregado", "leido"])
+          .in("case_id", lote)
+          .order("creado_en", { ascending: false });
+        for (const m of ok || []) {
+          const k = `${m.case_id}|${m.telefono}`;
+          if (!buenos.has(k)) buenos.set(k, m.creado_en);
+        }
+      }
+
       const porCaso = {};
-      for (const m of ultimo.values()) {
-        if (m.estado_entrega !== "fallido") continue;
+      for (const [k, m] of ultimo) {
+        const bueno = buenos.get(k);
+        if (bueno && new Date(bueno) > new Date(m.creado_en)) continue;
         const raw = m.raw && typeof m.raw === "object" ? m.raw : {};
         const quien = Array.isArray(raw.parametros) ? raw.parametros[0] : null;
         (porCaso[m.case_id] = porCaso[m.case_id] || []).push({
@@ -2200,6 +2231,8 @@ export default function Posventa() {
         });
       }
       setAvisosMalos(porCaso);
+    } else {
+      setAvisosMalos({});
     }
     if (!tar.error && tar.data) {
       const m = {};
