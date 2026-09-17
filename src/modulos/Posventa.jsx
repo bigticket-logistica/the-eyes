@@ -5,7 +5,6 @@ import TableroControl from "./TableroControl.jsx";
 import NotasPosventa from "./NotasPosventa.jsx";
 import HistorialSla from "./HistorialSla.jsx";
 import DevolucionesPosventa from "./DevolucionesPosventa.jsx";
-import AvisosFallidos from "./AvisosFallidos.jsx";
 import { useAuth } from "../shared/auth.jsx";
 import { puedeActuar } from "../shared/permisos.js";
 
@@ -1785,12 +1784,6 @@ function Detalle({ c, ahora, onPedir, trayendo, supervisor, tarea, vueltas, movi
               );
             })}
 
-            {/* Un aviso que Meta no pudo entregar no se veía en ninguna parte:
-                el chip quedaba verde porque el mensaje se encoló, y el chofer
-                nunca recibía nada. Acá sale el motivo y el botón para mandarlo
-                a otro número. */}
-            <AvisosFallidos caseId={c.case_id} onNotificar={onNotificar} />
-
             <HistorialAvisos caseId={c.case_id} />
           </div>
 
@@ -1953,7 +1946,7 @@ function Detalle({ c, ahora, onPedir, trayendo, supervisor, tarea, vueltas, movi
   );
 }
 
-function Fila({ c, abierta, onAbrir, onPedir, trayendo, ahora, supervisor, tarea, vueltas, movimientos, sinVer, fueraDePeriodo, telefonos, telElegido, onElegirTel, onTelGuardado, onTareaCreada, onRepedir, onAprobar, onNotificar }) {
+function Fila({ c, abierta, onAbrir, onPedir, trayendo, ahora, supervisor, tarea, vueltas, movimientos, sinVer, fueraDePeriodo, avisoMalo, telefonos, telElegido, onElegirTel, onTelGuardado, onTareaCreada, onRepedir, onAprobar, onNotificar }) {
   const g = POR_CLAVE[clasificar(c)];
   const fondo = abierta ? C.grisTenue : "#fff";
   const sub = chipEstado(c.sub_estado);
@@ -2010,6 +2003,31 @@ function Fila({ c, abierta, onAbrir, onPedir, trayendo, ahora, supervisor, tarea
             </span>
           )}
           {c.conductor || "Sin conductor"}
+          {/* Un aviso que Meta no pudo entregar, con el nombre de quién no lo
+              recibió. Va acá, junto al conductor, porque es la columna donde
+              el analista mira a las personas del caso. Dentro de la ficha
+              está el motivo completo y el botón para reenviar, pero si el
+              aviso vive solo ahí adentro nadie lo ve: hay que desplegar el
+              caso para enterarse de que el caso necesitaba atención.
+
+              El nombre sale de los parámetros de la plantilla. Los mensajes
+              anteriores al arreglo del webhook perdieron ese dato —el error
+              pisaba el raw entero— así que ahí solo se muestra el número. */}
+          {avisoMalo && avisoMalo.length > 0 && (
+            <span title={avisoMalo.map((a) =>
+                `No le llegó a ${a.quien || a.telefono}` +
+                (a.codigo === 131026
+                  ? ": ese número no recibe WhatsApp"
+                  : ` · código ${a.codigo || "?"}`)
+              ).join(" · ") + ". Despliega el caso para mandarlo a otro número."}
+              style={{ display: "inline-block", marginLeft: 6, fontSize: 9.5,
+                fontWeight: 700, color: C.naranja, background: C.naranjaTenue,
+                border: `1px solid ${C.naranja}`, borderRadius: 4,
+                padding: "0 5px", verticalAlign: "middle", cursor: "help" }}>
+              ⚠ no le llegó a {avisoMalo.map((a) =>
+                (a.quien || a.telefono).split(" ")[0]).join(" y ")}
+            </span>
+          )}
         </span>
         <span style={{ fontSize: 12, color: "var(--texto-suave)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
           {c.route_code} · {c.service_center}
@@ -2058,6 +2076,9 @@ export default function Posventa() {
   const [ahora, setAhora] = useState(() => Date.now());
   const [orden, setOrden] = useState({ campo: "sla", dir: "asc" });
   const [supervisores, setSupervisores] = useState({});
+  // Qué casos tienen un aviso que Meta no pudo entregar. Se carga junto con el
+  // tablero y no fila por fila: una consulta para todos.
+  const [avisosMalos, setAvisosMalos] = useState({});
   // El nombre de quien prende el aviso automático: sin esto el interruptor
   // diría "lo prendió alguien" y el lunes nadie sabe a quién preguntar.
   const { analista } = useAuth();
@@ -2103,7 +2124,7 @@ export default function Posventa() {
 
   async function cargar() {
     setError(null);
-    const [tablero, sup] = await Promise.all([
+    const [tablero, sup, mal] = await Promise.all([
       // PAGINADO OBLIGATORIO.
       //   PostgREST corta en 1000 filas por respuesta y el .limit() no lo
       //   sube: es un techo del servidor, no del cliente. Con la vista en 350
@@ -2119,6 +2140,16 @@ export default function Posventa() {
       // poco. Sirven para saber a quién le va la tarea del escalamiento sin
       // pedirlo caso por caso.
       sb.from("vw_pnr_supervisor").select("*"),
+      // Los avisos salientes de los últimos 30 días, para saber cuáles no
+      // llegaron. Un aviso fallido no se veía en ninguna parte: el chip
+      // quedaba verde porque el mensaje se encoló y el chofer nunca recibía
+      // nada. Se pide acá y no por fila para no hacer una consulta por caso.
+      sb.from("pnr_mensajes_mx")
+        .select("case_id, telefono, estado_entrega, creado_en, raw")
+        .eq("direccion", "saliente")
+        .gte("creado_en", new Date(Date.now() - 30 * 86400000).toISOString())
+        .order("creado_en", { ascending: false })
+        .limit(4000),
     ]);
     // Las tareas vivas del periodo, para que el panel muestre si ya se pidió la
     // foto y en qué quedó, en vez de ofrecer crearla otra vez.
@@ -2146,6 +2177,29 @@ export default function Posventa() {
       const m = {};
       for (const f of sup.data) if (f.estacion_origen) m[f.estacion_origen] = f;
       setSupervisores(m);
+    }
+
+    // El ÚLTIMO estado de cada par caso+teléfono. Si el último fue bueno, el
+    // problema ya se resolvió —lo corrigieron o cambió el directorio— y no hay
+    // nada que avisar. Un número muerto puede tener cientos de fallos iguales;
+    // lo que el analista necesita saber es a quién no le llegó.
+    if (!mal.error && mal.data) {
+      const ultimo = new Map();
+      for (const m of mal.data) {
+        const k = `${m.case_id}|${m.telefono}`;
+        if (!ultimo.has(k)) ultimo.set(k, m);
+      }
+      const porCaso = {};
+      for (const m of ultimo.values()) {
+        if (m.estado_entrega !== "fallido") continue;
+        const raw = m.raw && typeof m.raw === "object" ? m.raw : {};
+        const quien = Array.isArray(raw.parametros) ? raw.parametros[0] : null;
+        (porCaso[m.case_id] = porCaso[m.case_id] || []).push({
+          telefono: m.telefono, quien,
+          codigo: (raw.wa_error || {}).code || null,
+        });
+      }
+      setAvisosMalos(porCaso);
     }
     if (!tar.error && tar.data) {
       const m = {};
@@ -2960,6 +3014,7 @@ export default function Posventa() {
                   tarea={tareas[c.case_id]} vueltas={vueltas[c.case_id]}
                   onTareaCreada={agregarTarea} onRepedir={repedirPruebas} onAprobar={aprobarPruebas}
                   movimientos={historial[c.case_id]} sinVer={!vistos.has(c.case_id)}
+                  avisoMalo={avisosMalos[c.case_id]}
                   fueraDePeriodo={!!periodo && c.periodo !== periodo}
                   telefonos={telefonos[c.case_id]} telElegido={telElegidos[c.case_id]}
                   onElegirTel={(t) => elegirTelefono(c.case_id, t)}
