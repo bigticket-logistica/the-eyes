@@ -2142,9 +2142,15 @@ export default function Posventa() {
         .limit(2000);
       if (error || !mal || !mal.length) { setAvisosMalos({}); return; }
 
+      // Se agrupa por caso + CONVERSACIÓN, no por caso + teléfono. La
+      // conversación identifica al destinatario; el teléfono es solo el número
+      // con el que se le escribió esa vez. Agrupando por teléfono, reenviar a
+      // otro número dejaba la alerta encendida para siempre: el fallo del
+      // número viejo seguía siendo el último de ESE número, aunque el mensaje
+      // ya hubiera llegado al nuevo.
       const ultimo = new Map();
       for (const m of mal) {
-        const k = `${m.case_id}|${m.telefono}`;
+        const k = `${m.case_id}|${m.conversacion_id}`;
         if (!ultimo.has(k)) ultimo.set(k, m);
       }
 
@@ -2173,7 +2179,7 @@ export default function Posventa() {
       const lotes = [];
       for (let i = 0; i < casos.length; i += 200) {
         lotes.push(sb.from("pnr_mensajes_mx")
-          .select("case_id, telefono, creado_en")
+          .select("case_id, telefono, conversacion_id, creado_en")
           .eq("direccion", "saliente")
           .in("estado_entrega", ["enviado", "entregado", "leido"])
           .in("case_id", casos.slice(i, i + 200))
@@ -2182,23 +2188,36 @@ export default function Posventa() {
       const buenos = new Map();
       for (const r of await Promise.all(lotes)) {
         for (const m of r.data || []) {
-          const k = `${m.case_id}|${m.telefono}`;
+          const k = `${m.case_id}|${m.conversacion_id}`;
           if (!buenos.has(k)) buenos.set(k, m.creado_en);
+        }
+      }
+
+      // Además por caso + ROL: si el analista reenvió a otro número, esa es
+      // otra conversación, y lo que importa es que al supervisor —o al
+      // chofer— le haya llegado algo después del fallo.
+      const buenosRol = new Map();
+      for (const [k, cuando] of buenos) {
+        const idConv = k.split("|")[1];
+        const cv = roles.get(String(idConv)) || {};
+        const kr = `${k.split("|")[0]}|${cv.rol === "supervisor" ? "supervisor" : "chofer"}`;
+        if (!buenosRol.has(kr) || new Date(cuando) > new Date(buenosRol.get(kr))) {
+          buenosRol.set(kr, cuando);
         }
       }
 
       const porCaso = {};
       for (const [k, m] of ultimo) {
-        const bueno = buenos.get(k);
+        const cvm = roles.get(String(m.conversacion_id)) || {};
+        const rolm = cvm.rol === "supervisor" ? "supervisor" : "chofer";
+        const bueno = buenos.get(k) || buenosRol.get(`${m.case_id}|${rolm}`);
         if (bueno && new Date(bueno) > new Date(m.creado_en)) continue;
         const raw = m.raw && typeof m.raw === "object" ? m.raw : {};
-        const cv = roles.get(String(m.conversacion_id)) || {};
         // El nombre: el de la plantilla si está, si no el de la conversación.
         const quien = (Array.isArray(raw.parametros) ? raw.parametros[0] : null)
-          || cv.conductor || null;
+          || cvm.conductor || null;
         (porCaso[m.case_id] = porCaso[m.case_id] || []).push({
-          telefono: m.telefono, quien,
-          rol: cv.rol === "supervisor" ? "supervisor" : "chofer",
+          telefono: m.telefono, quien, rol: rolm,
           codigo: (raw.wa_error || {}).code || null,
         });
       }
