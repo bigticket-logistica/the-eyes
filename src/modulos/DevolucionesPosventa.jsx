@@ -337,6 +337,55 @@ export default function DevolucionesPosventa() {
   const [error, setError] = useState(null);
   const [ahora, setAhora] = useState(Date.now());
 
+  // ── Riesgo de cobro ──────────────────────────────────────────────────────
+  // Va aparte del día operativo a propósito.
+  //   Un paquete declarado perdido el 17 puede ser de una ruta del 14, y quien
+  //   mira las devoluciones de hoy no tendría por qué cambiar de fecha para
+  //   enterarse de que le están cobrando algo de la semana pasada.
+  //
+  //   Sale de vw_incidentes_con_devolucion, que cruza lo que MELI dice del
+  //   paquete con lo que Devoluciones sabe de su retorno. Dos lecturas
+  //   importan: el que ya está perdido, y el que no se entregó ni volvió —que
+  //   es el que todavía se puede salvar.
+  const [riesgo, setRiesgo] = useState({ perdidos: [], sinRetorno: [] });
+
+  useEffect(() => {
+    let vivo = true;
+    (async () => {
+      const { data } = await sb.from("vw_incidentes_con_devolucion")
+        .select("folio_guia, fecha_ruta, service_center_id, id_ruta, driver_name, "
+              + "patente, substatus, lost_at, lectura")
+        .in("lectura", ["perdido en el centro", "perdido sin retorno",
+                        "sin retorno registrado"])
+        .order("fecha_ruta", { ascending: true });
+      if (!vivo) return;
+      const filas = data || [];
+      setRiesgo({
+        perdidos: filas.filter((f) => f.lectura.startsWith("perdido")),
+        sinRetorno: filas.filter((f) => f.lectura === "sin retorno registrado"),
+      });
+    })();
+    // Cada tres minutos: el vigilante escribe cada tres horas, así que releer
+    // más seguido no aporta nada.
+    const t = setInterval(() => { if (!document.hidden) setAhora(Date.now()); }, 180000);
+    return () => { vivo = false; clearInterval(t); };
+  }, []);
+
+  // Agrupado por conductor: un paquete sin devolver es un descuido, catorce del
+  // mismo chofer es un patrón, y eso decide a quién llamar primero.
+  const porConductor = useMemo(() => {
+    const m = new Map();
+    for (const f of riesgo.sinRetorno) {
+      const k = `${f.driver_name || "sin conductor"}|${f.service_center_id || ""}`;
+      if (!m.has(k)) {
+        m.set(k, { driver: f.driver_name || "sin conductor",
+                   sc: f.service_center_id, folios: [], desde: f.fecha_ruta });
+      }
+      m.get(k).folios.push(f);
+    }
+    return [...m.values()].sort((a, b) => b.folios.length - a.folios.length);
+  }, [riesgo.sinRetorno]);
+
   // El reloj de la fila de SleepOver: cada minuto alcanza.
   useEffect(() => {
     const t = setInterval(() => setAhora(Date.now()), 60000);
@@ -466,8 +515,96 @@ export default function DevolucionesPosventa() {
     });
   }
 
+  const [verRiesgo, setVerRiesgo] = useState(false);
+
   return (
     <div>
+      {/* ── Riesgo de cobro ─────────────────────────────────────────────────
+          Arriba de todo y fuera del día operativo: es lo único de esta pantalla
+          donde cada hora que pasa cuesta dinero. */}
+      {(riesgo.perdidos.length > 0 || riesgo.sinRetorno.length > 0) && (
+        <div style={{ border: `1px solid ${riesgo.perdidos.length ? C.ladrillo : C.naranja}`,
+          borderRadius: 11, marginBottom: 14, overflow: "hidden",
+          background: riesgo.perdidos.length ? "#FFF5F4" : "#FFFAF5" }}>
+
+          <button onClick={() => setVerRiesgo((v) => !v)}
+            style={{ width: "100%", textAlign: "left", border: "none",
+              background: "transparent", cursor: "pointer", padding: "10px 14px" }}>
+            <div style={{ display: "flex", alignItems: "baseline", gap: 10, flexWrap: "wrap" }}>
+              <span style={{ fontSize: 11, color: C.gris }}>{verRiesgo ? "▾" : "▸"}</span>
+              <strong style={{ fontSize: 13, color: riesgo.perdidos.length ? C.ladrillo : C.navy }}>
+                {riesgo.perdidos.length > 0
+                  ? `${riesgo.perdidos.length} paquete(s) declarado(s) PERDIDO por Mercado Libre`
+                  : "Riesgo de cobro"}
+              </strong>
+              {riesgo.sinRetorno.length > 0 && (
+                <span style={{ fontSize: 12, color: C.naranja, fontWeight: 600 }}>
+                  {riesgo.sinRetorno.length} sin retorno registrado
+                </span>
+              )}
+              <span style={{ fontSize: 11, color: C.gris, marginLeft: "auto" }}>
+                de todos los días · no depende de la fecha de arriba
+              </span>
+            </div>
+          </button>
+
+          {verRiesgo && (
+            <div style={{ padding: "0 14px 12px" }}>
+              {/* Los perdidos primero: ya no hay nada que hacer salvo disputar
+                  el cobro, y para eso importa si el paquete llegó al centro. */}
+              {riesgo.perdidos.map((p) => (
+                <div key={p.folio_guia} style={{ display: "flex", gap: 9,
+                  alignItems: "baseline", padding: "6px 0", fontSize: 12,
+                  borderTop: "1px solid var(--borde)", flexWrap: "wrap" }}>
+                  <strong style={{ color: C.ladrillo, minWidth: 96,
+                    fontVariantNumeric: "tabular-nums" }}>{p.folio_guia}</strong>
+                  <span style={{ minWidth: 140 }}>{p.driver_name || "—"}</span>
+                  <span style={{ fontWeight: 700 }}>{p.service_center_id}</span>
+                  <span style={{ color: C.gris }}>ruta {p.id_ruta} · del {p.fecha_ruta}</span>
+                  <span style={{ marginLeft: "auto", fontSize: 11, fontWeight: 700,
+                    color: p.lectura === "perdido en el centro" ? C.naranja : C.ladrillo }}>
+                    {p.lectura === "perdido en el centro"
+                      ? "llegó al centro y se perdió ahí"
+                      : "nunca volvió al centro"}
+                  </span>
+                </div>
+              ))}
+
+              {/* Y los que todavía se pueden salvar, agrupados por conductor. */}
+              {porConductor.length > 0 && (
+                <>
+                  <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: 0.3,
+                    textTransform: "uppercase", color: C.gris,
+                    marginTop: riesgo.perdidos.length ? 12 : 4, marginBottom: 4 }}>
+                    Sin entregar y sin devolver · todavía se pueden recuperar
+                  </div>
+                  {porConductor.map((g) => (
+                    <div key={g.driver + g.sc} style={{ display: "flex", gap: 9,
+                      alignItems: "baseline", padding: "5px 0", fontSize: 12,
+                      borderTop: "1px solid var(--borde)", flexWrap: "wrap" }}>
+                      <strong style={{ minWidth: 150 }}>{g.driver}</strong>
+                      <span style={{ fontWeight: 700 }}>{g.sc}</span>
+                      <span style={{ fontWeight: 700,
+                        color: g.folios.length >= 5 ? C.ladrillo : C.naranja }}>
+                        {g.folios.length} paquete{g.folios.length > 1 ? "s" : ""}
+                      </span>
+                      <span style={{ fontSize: 11, color: C.gris }}>
+                        desde el {g.desde}
+                      </span>
+                      <span style={{ marginLeft: "auto", fontSize: 10.5, color: C.gris,
+                        fontVariantNumeric: "tabular-nums" }}>
+                        {g.folios.slice(0, 4).map((f) => f.folio_guia).join(" · ")}
+                        {g.folios.length > 4 ? ` y ${g.folios.length - 4} más` : ""}
+                      </span>
+                    </div>
+                  ))}
+                </>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+
       {/* ── Los tres bloques ────────────────────────────────────────────── */}
       <div style={{ display: "flex", gap: 10, marginBottom: 14 }}>
         {BLOQUES.map((b) => {
