@@ -112,4 +112,9 @@ export const ETIQUETAS_CASO = [
 export const SERVICE_CENTERS_MX = [
   "SCY1","SHP1","SMX1","SMX7","SMX8","SMX10",
   "SPY1","SQR1","STL1","STX1","SVH1",
+  // SMXRV1 · asignado a Juan Mancilla, agregado el 17-sep-2026. Esta lista se
+  // mantiene a mano y en paralelo con la de the-eyes-mx.cjs en el VPS de la
+  // torre: si se agrega un centro allá y no acá, la torre lo captura pero el
+  // front no lo muestra.
+  "SMXRV1",
 ];
