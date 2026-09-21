@@ -58,6 +58,16 @@ const C = {
   gris: "#8a94a6", grisTenue: "#f4f6f9",
 };
 
+// Fecha corta para el bloque de riesgo: día y hora bastan, el año estorba en
+// una lista que se lee de un vistazo.
+function fechaCorta(ts) {
+  if (!ts) return "—";
+  return new Date(ts).toLocaleString("es-MX", {
+    timeZone: "America/Mexico_City",
+    day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit",
+  });
+}
+
 function hoyMX() {
   return new Date().toLocaleDateString("en-CA", { timeZone: "America/Mexico_City" });
 }
@@ -354,7 +364,7 @@ export default function DevolucionesPosventa() {
     (async () => {
       const { data } = await sb.from("vw_incidentes_con_devolucion")
         .select("folio_guia, fecha_ruta, service_center_id, id_ruta, driver_name, "
-              + "patente, substatus, lost_at, lectura")
+              + "patente, substatus, lost_at, lectura, meli_verificado_en, dias_en_centro")
         .in("lectura", ["perdido en el centro", "perdido sin retorno",
                         "sin retorno registrado"])
         .order("fecha_ruta", { ascending: true });
@@ -560,12 +570,36 @@ export default function DevolucionesPosventa() {
                     fontVariantNumeric: "tabular-nums" }}>{p.folio_guia}</strong>
                   <span style={{ minWidth: 140 }}>{p.driver_name || "—"}</span>
                   <span style={{ fontWeight: 700 }}>{p.service_center_id}</span>
-                  <span style={{ color: C.gris }}>ruta {p.id_ruta} · del {p.fecha_ruta}</span>
+                  <span style={{ color: C.gris }}>ruta {p.id_ruta}</span>
+                  {/* La fecha que importa es cuándo MELI lo declaró perdido, no
+                      cuándo salió la ruta: es el hecho que genera el cobro y la
+                      referencia para reclamar. La de la ruta queda como dato
+                      secundario. */}
+                  <span style={{ fontWeight: 700, color: C.ladrillo }}>
+                    perdido el {fechaCorta(p.lost_at)}
+                  </span>
+                  <span style={{ fontSize: 11, color: C.gris }}>
+                    ruta del {p.fecha_ruta}
+                  </span>
                   <span style={{ marginLeft: "auto", fontSize: 11, fontWeight: 700,
+                    textAlign: "right",
                     color: p.lectura === "perdido en el centro" ? C.naranja : C.ladrillo }}>
-                    {p.lectura === "perdido en el centro"
-                      ? "llegó al centro y se perdió ahí"
-                      : "nunca volvió al centro"}
+                    {p.lectura === "perdido en el centro" ? (
+                      <>
+                        llegó al centro y se perdió ahí
+                        {/* La evidencia, con fecha: sin esto "llegó al centro"
+                            es una afirmación sin respaldo, y es justo lo que
+                            hay que mostrar para disputar el cobro. */}
+                        {p.meli_verificado_en && (
+                          <span style={{ display: "block", fontWeight: 400,
+                            color: C.gris, fontSize: 10.5 }}>
+                            verificado en el centro el {fechaCorta(p.meli_verificado_en)}
+                            {p.dias_en_centro != null
+                              && ` · ${p.dias_en_centro} día(s) antes`}
+                          </span>
+                        )}
+                      </>
+                    ) : "nunca volvió al centro"}
                   </span>
                 </div>
               ))}
