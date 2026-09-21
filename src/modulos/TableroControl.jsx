@@ -346,6 +346,7 @@ export default function TableroControl() {
   const [b3, setB3] = useState([]);
   const [b4, setB4] = useState([]);
   const [vistaTipos, setVistaTipos] = useState("sc");
+  const [detalleTipo, setDetalleTipo] = useState(null);
   const [alertas, setAlertas] = useState([]);
   const [verCierre, setVerCierre] = useState(false);
   const [cerrando, setCerrando] = useState(null);
@@ -597,6 +598,32 @@ export default function TableroControl() {
     const sufijo = desde === hasta ? desde : `${desde}_a_${hasta}`;
     bajarBlob(filasACsv(salida, cols), "text/csv;charset=utf-8",
       `tipos_pnr_por_${vistaTipos}_${sufijo}.csv`);
+  }
+
+  // ── El detalle detrás de una celda ───────────────────────────────────────
+  // Sobre todo para "Otros", que es texto libre: el número solo dice cuántos
+  // hubo, y lo que importa es qué escribieron. Si varias notas repiten lo
+  // mismo, esa es una categoría que le falta a la lista.
+  async function verCasosDeCelda(fila, cls) {
+    setDetalleTipo({ cargando: true, sc: fila.sc, supervisor: fila.supervisor, cls, filas: [] });
+    let q = sb.from("pnr_tareas_mx")
+      .select("case_id, sc, supervisor_nombre, clasificacion_nota, creada_en")
+      .gte("creada_en", desde)
+      .lte("creada_en", `${hasta}T23:59:59`)
+      .eq("sc", fila.sc)
+      .order("creada_en", { ascending: false });
+    if (cls === "sin_clasificar") q = q.is("clasificacion", null);
+    else q = q.eq("clasificacion", cls);
+    if (fila.supervisor) q = q.eq("supervisor_nombre", fila.supervisor);
+
+    const { data, error: e } = await q;
+    if (e) {
+      setDetalleTipo(null);
+      setError(`No se pudo abrir el detalle: ${e.message}`);
+      return;
+    }
+    setDetalleTipo({ cargando: false, sc: fila.sc, supervisor: fila.supervisor, cls,
+      filas: data || [] });
   }
 
   // Texto del rango que se muestra junto a cada botón de descarga.
@@ -1065,8 +1092,12 @@ export default function TableroControl() {
                       <td style={{ padding: "6px 9px" }}>{f.supervisor}</td>
                     )}
                     {tipos.cols.map((c) => (
-                      <td key={c} style={{ padding: "6px 9px", textAlign: "right",
-                        color: f.celdas[c] ? "#1a1a1a" : C.gris }}>
+                      <td key={c} onClick={() => f.celdas[c] && verCasosDeCelda(f, c)}
+                        title={f.celdas[c] ? "Ver los casos de esta celda" : undefined}
+                        style={{ padding: "6px 9px", textAlign: "right",
+                          color: f.celdas[c] ? C.navy : C.gris,
+                          cursor: f.celdas[c] ? "pointer" : "default",
+                          textDecoration: f.celdas[c] ? "underline" : "none" }}>
                         {f.celdas[c] ? num(f.celdas[c]) : "—"}
                       </td>
                     ))}
@@ -1089,6 +1120,55 @@ export default function TableroControl() {
                 </tr>
               </tbody>
             </table>
+          </div>
+        )}
+
+        {/* El detalle de la celda: se abre debajo de la tabla, no en un modal,
+            para poder comparar las notas contra los números de arriba. */}
+        {detalleTipo && (
+          <div style={{ marginTop: 12, border: "1px solid var(--borde)", borderRadius: 10,
+            background: C.grisTenue, padding: "10px 12px" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
+              <span style={{ fontSize: 12.5, fontWeight: 700, color: C.navy }}>
+                {tipoPnr(detalleTipo.cls)} · {detalleTipo.sc}
+                {detalleTipo.supervisor ? ` · ${detalleTipo.supervisor}` : ""}
+              </span>
+              <span style={{ fontSize: 11, color: C.gris }}>
+                {detalleTipo.cargando ? "cargando…" : `${detalleTipo.filas.length} caso(s)`}
+              </span>
+              <button onClick={() => setDetalleTipo(null)}
+                style={{ marginLeft: "auto", fontSize: 11, padding: "3px 9px",
+                  borderRadius: 6, cursor: "pointer" }}>
+                Cerrar
+              </button>
+            </div>
+            {!detalleTipo.cargando && (
+              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+                <tbody>
+                  {detalleTipo.filas.map((r) => (
+                    <tr key={r.case_id} style={{ borderTop: "1px solid var(--borde)" }}>
+                      <td style={{ padding: "5px 8px", fontWeight: 600, whiteSpace: "nowrap",
+                        verticalAlign: "top", width: 1 }}>
+                        {r.case_id}
+                      </td>
+                      <td style={{ padding: "5px 8px", color: C.gris, whiteSpace: "nowrap",
+                        verticalAlign: "top", width: 1 }}>
+                        {String(r.creada_en).slice(0, 10)}
+                      </td>
+                      {!detalleTipo.supervisor && (
+                        <td style={{ padding: "5px 8px", color: C.gris, whiteSpace: "nowrap",
+                          verticalAlign: "top", width: 1 }}>
+                          {r.supervisor_nombre || "—"}
+                        </td>
+                      )}
+                      <td style={{ padding: "5px 8px" }}>
+                        {r.clasificacion_nota || <span style={{ color: C.gris }}>sin nota</span>}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
           </div>
         )}
       </Bloque>
