@@ -354,47 +354,66 @@ export default function DevolucionesPosventa() {
   //   enterarse de que le están cobrando algo de la semana pasada.
   //
   //   Sale de vw_incidentes_con_devolucion, que cruza lo que MELI dice del
-  //   paquete con lo que Devoluciones sabe de su retorno. Dos lecturas
-  //   importan: el que ya está perdido, y el que no se entregó ni volvió —que
-  //   es el que todavía se puede salvar.
-  const [riesgo, setRiesgo] = useState({ perdidos: [], sinRetorno: [] });
+  //   paquete con lo que Devoluciones sabe de su retorno.
+  //
+  //   Tres lecturas importan, y son tres cosas distintas que no se mezclan:
+  //     perdido      — MELI ya lo declaró. No hay nada que buscar, solo disputar.
+  //     en resolucion— MELI está averiguando qué pasó. Tres días antes de que
+  //                    se convierta en perdido. Es lo único con reloj corriendo.
+  //     afuera       — el conductor lo tiene y no lo devolvió. Se puede rescatar.
+  //
+  //   Antes "en resolucion" caía dentro de "en el centro" y quedaba invisible
+  //   justo cuando es el estado más cerca de costar plata.
+  const [riesgo, setRiesgo] = useState({ perdidos: [], enResolucion: [], afuera: [] });
 
   useEffect(() => {
     let vivo = true;
-    (async () => {
+    const traer = async () => {
       const { data } = await sb.from("vw_incidentes_con_devolucion")
         .select("folio_guia, fecha_ruta, service_center_id, id_ruta, driver_name, "
-              + "patente, substatus, lost_at, lectura, meli_verificado_en, dias_en_centro")
+              + "patente, substatus, lost_at, lectura, meli_verificado_en, "
+              + "dias_en_centro, dias_afuera, prioridad")
         .in("lectura", ["perdido en el centro", "perdido sin retorno",
-                        "sin retorno registrado"])
+                        "en resolucion", "afuera sin resolver"])
         .order("fecha_ruta", { ascending: true });
       if (!vivo) return;
       const filas = data || [];
       setRiesgo({
         perdidos: filas.filter((f) => f.lectura.startsWith("perdido")),
-        sinRetorno: filas.filter((f) => f.lectura === "sin retorno registrado"),
+        // Los más viejos primero: en resolución, cada día acerca el lost_at.
+        enResolucion: filas.filter((f) => f.lectura === "en resolucion")
+                           .sort((a, b) => (b.dias_afuera || 0) - (a.dias_afuera || 0)),
+        afuera: filas.filter((f) => f.lectura === "afuera sin resolver"),
       });
-    })();
-    // Cada tres minutos: el vigilante escribe cada tres horas, así que releer
-    // más seguido no aporta nada.
-    const t = setInterval(() => { if (!document.hidden) setAhora(Date.now()); }, 180000);
-    return () => { vivo = false; clearInterval(t); };
+    };
+    traer();
+    // Releer cada tres minutos. El techo real lo pone el vigilante, que escribe
+    // seis veces al día, pero así el panel muestra el cambio apenas aterriza.
+    const r = setInterval(() => { if (!document.hidden) traer(); }, 180000);
+    return () => { vivo = false; clearInterval(r); };
   }, []);
 
   // Agrupado por conductor: un paquete sin devolver es un descuido, catorce del
   // mismo chofer es un patrón, y eso decide a quién llamar primero.
+  //
+  // Ordena por antigüedad y no por cantidad: catorce paquetes de hace dos días
+  // se recuperan, uno de hace siete probablemente ya no.
   const porConductor = useMemo(() => {
     const m = new Map();
-    for (const f of riesgo.sinRetorno) {
+    for (const f of riesgo.afuera) {
       const k = `${f.driver_name || "sin conductor"}|${f.service_center_id || ""}`;
       if (!m.has(k)) {
         m.set(k, { driver: f.driver_name || "sin conductor",
-                   sc: f.service_center_id, folios: [], desde: f.fecha_ruta });
+                   sc: f.service_center_id, folios: [], desde: f.fecha_ruta,
+                   dias: f.dias_afuera ?? 0 });
       }
-      m.get(k).folios.push(f);
+      const g = m.get(k);
+      g.folios.push(f);
+      if ((f.dias_afuera ?? 0) > g.dias) { g.dias = f.dias_afuera; g.desde = f.fecha_ruta; }
     }
-    return [...m.values()].sort((a, b) => b.folios.length - a.folios.length);
-  }, [riesgo.sinRetorno]);
+    return [...m.values()].sort((a, b) => b.dias - a.dias
+                                       || b.folios.length - a.folios.length);
+  }, [riesgo.afuera]);
 
   // El reloj de la fila de SleepOver: cada minuto alcanza.
   useEffect(() => {
@@ -526,42 +545,47 @@ export default function DevolucionesPosventa() {
   }
 
   const [verRiesgo, setVerRiesgo] = useState(false);
+  const [verPerdidos, setVerPerdidos] = useState(false);
 
   return (
     <div>
-      {/* ── Riesgo de cobro ─────────────────────────────────────────────────
-          Arriba de todo y fuera del día operativo: es lo único de esta pantalla
-          donde cada hora que pasa cuesta dinero. */}
-      {(riesgo.perdidos.length > 0 || riesgo.sinRetorno.length > 0) && (
-        <div style={{ border: `1px solid ${riesgo.perdidos.length ? C.ladrillo : C.naranja}`,
-          borderRadius: 11, marginBottom: 14, overflow: "hidden",
-          background: riesgo.perdidos.length ? "#FFF5F4" : "#FFFAF5" }}>
+      {/* ── PERDIDO · plata ya cobrada ──────────────────────────────────────
+          Bloque propio, separado de lo que está en riesgo. Acá no hay nada que
+          buscar: el paquete ya fue declarado perdido y el cobro llegó o va a
+          llegar. La única acción posible es disputarlo, y eso es trabajo de
+          oficina, no de bodega.
 
-          <button onClick={() => setVerRiesgo((v) => !v)}
+          Mezclarlo con lo recuperable era el problema: el supervisor no puede
+          distinguir dónde correr y dónde reclamar si están en la misma lista. */}
+      {riesgo.perdidos.length > 0 && (
+        <div style={{ border: `1px solid ${C.ladrillo}`, borderRadius: 11,
+          marginBottom: 10, overflow: "hidden", background: "#FFF5F4" }}>
+
+          <button onClick={() => setVerPerdidos((v) => !v)}
             style={{ width: "100%", textAlign: "left", border: "none",
               background: "transparent", cursor: "pointer", padding: "10px 14px" }}>
             <div style={{ display: "flex", alignItems: "baseline", gap: 10, flexWrap: "wrap" }}>
-              <span style={{ fontSize: 11, color: C.gris }}>{verRiesgo ? "▾" : "▸"}</span>
-              <strong style={{ fontSize: 13, color: riesgo.perdidos.length ? C.ladrillo : C.navy }}>
-                {riesgo.perdidos.length > 0
-                  ? `${riesgo.perdidos.length} paquete(s) declarado(s) PERDIDO por Mercado Libre`
-                  : "Riesgo de cobro"}
+              <span style={{ fontSize: 11, color: C.gris }}>{verPerdidos ? "▾" : "▸"}</span>
+              <strong style={{ fontSize: 13, color: C.ladrillo }}>
+                {riesgo.perdidos.length} paquete(s) declarado(s) PERDIDO por Mercado Libre
               </strong>
-              {riesgo.sinRetorno.length > 0 && (
-                <span style={{ fontSize: 12, color: C.naranja, fontWeight: 600 }}>
-                  {riesgo.sinRetorno.length} sin retorno registrado
+              {/* El dato del reclamo, en la cabecera: si el paquete estaba
+                  verificado en el centro cuando lo declararon perdido, se
+                  perdió bajo custodia de MELI y el cobro es discutible. */}
+              {riesgo.perdidos.some((p) => p.lectura === "perdido en el centro") && (
+                <span style={{ fontSize: 12, color: C.naranja, fontWeight: 700 }}>
+                  {riesgo.perdidos.filter((p) => p.lectura === "perdido en el centro").length} con
+                  retorno verificado · cobro discutible
                 </span>
               )}
               <span style={{ fontSize: 11, color: C.gris, marginLeft: "auto" }}>
-                de todos los días · no depende de la fecha de arriba
+                cerrado · ya no se recupera, se reclama
               </span>
             </div>
           </button>
 
-          {verRiesgo && (
+          {verPerdidos && (
             <div style={{ padding: "0 14px 12px" }}>
-              {/* Los perdidos primero: ya no hay nada que hacer salvo disputar
-                  el cobro, y para eso importa si el paquete llegó al centro. */}
               {riesgo.perdidos.map((p) => (
                 <div key={p.folio_guia} style={{ display: "flex", gap: 9,
                   alignItems: "baseline", padding: "6px 0", fontSize: 12,
@@ -603,13 +627,86 @@ export default function DevolucionesPosventa() {
                   </span>
                 </div>
               ))}
+            </div>
+          )}
+        </div>
+      )}
 
-              {/* Y los que todavía se pueden salvar, agrupados por conductor. */}
+      {/* ── EN RIESGO · todavía se puede actuar ─────────────────────────────
+          Lo accionable, y por eso va separado de lo perdido. Dos secciones en
+          orden de urgencia real, no de cantidad:
+
+            1. En resolución — MELI está averiguando qué pasó. La secuencia
+               verificada es missing → problem_solving → lost en tres días, así
+               que acá hay un reloj corriendo y es el único lugar donde se
+               puede impedir que el paquete se convierta en cobro.
+            2. Afuera sin resolver — el conductor lo tiene. No hay reloj de
+               MELI, pero mientras más viejo menos probable que aparezca. */}
+      {(riesgo.enResolucion.length > 0 || riesgo.afuera.length > 0) && (
+        <div style={{ border: `1px solid ${C.naranja}`, borderRadius: 11,
+          marginBottom: 14, overflow: "hidden", background: "#FFFAF5" }}>
+
+          <button onClick={() => setVerRiesgo((v) => !v)}
+            style={{ width: "100%", textAlign: "left", border: "none",
+              background: "transparent", cursor: "pointer", padding: "10px 14px" }}>
+            <div style={{ display: "flex", alignItems: "baseline", gap: 10, flexWrap: "wrap" }}>
+              <span style={{ fontSize: 11, color: C.gris }}>{verRiesgo ? "▾" : "▸"}</span>
+              <strong style={{ fontSize: 13, color: C.navy }}>
+                {riesgo.enResolucion.length + riesgo.afuera.length} paquete(s) en riesgo
+              </strong>
+              {riesgo.enResolucion.length > 0 && (
+                <span style={{ fontSize: 12, color: C.ladrillo, fontWeight: 700 }}>
+                  {riesgo.enResolucion.length} en resolución de MELI
+                </span>
+              )}
+              {riesgo.afuera.length > 0 && (
+                <span style={{ fontSize: 12, color: C.naranja, fontWeight: 600 }}>
+                  {riesgo.afuera.length} sin devolver
+                </span>
+              )}
+              <span style={{ fontSize: 11, color: C.gris, marginLeft: "auto" }}>
+                de todos los días · no depende de la fecha de arriba
+              </span>
+            </div>
+          </button>
+
+          {verRiesgo && (
+            <div style={{ padding: "0 14px 12px" }}>
+              {/* Primero el reloj: estos se convierten en perdidos esta semana. */}
+              {riesgo.enResolucion.length > 0 && (
+                <>
+                  <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: 0.3,
+                    textTransform: "uppercase", color: C.ladrillo, marginTop: 4,
+                    marginBottom: 4 }}>
+                    MELI los está resolviendo · se declaran perdidos en ~3 días
+                  </div>
+                  {riesgo.enResolucion.map((p) => (
+                    <div key={p.folio_guia} style={{ display: "flex", gap: 9,
+                      alignItems: "baseline", padding: "6px 0", fontSize: 12,
+                      borderTop: "1px solid var(--borde)", flexWrap: "wrap" }}>
+                      <strong style={{ color: C.ladrillo, minWidth: 96,
+                        fontVariantNumeric: "tabular-nums" }}>{p.folio_guia}</strong>
+                      <span style={{ minWidth: 140 }}>{p.driver_name || "—"}</span>
+                      <span style={{ fontWeight: 700 }}>{p.service_center_id}</span>
+                      <span style={{ color: C.gris }}>ruta {p.id_ruta}</span>
+                      <span style={{ fontSize: 11, color: C.gris }}>
+                        ruta del {p.fecha_ruta}
+                      </span>
+                      <span style={{ marginLeft: "auto", fontSize: 11, fontWeight: 700,
+                        color: (p.dias_afuera ?? 0) >= 3 ? C.ladrillo : C.naranja }}>
+                        {p.dias_afuera} día(s) en resolución
+                      </span>
+                    </div>
+                  ))}
+                </>
+              )}
+
+              {/* Y los que tiene el conductor, agrupados y por antigüedad. */}
               {porConductor.length > 0 && (
                 <>
                   <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: 0.3,
                     textTransform: "uppercase", color: C.gris,
-                    marginTop: riesgo.perdidos.length ? 12 : 4, marginBottom: 4 }}>
+                    marginTop: riesgo.enResolucion.length ? 12 : 4, marginBottom: 4 }}>
                     Sin entregar y sin devolver · todavía se pueden recuperar
                   </div>
                   {porConductor.map((g) => (
@@ -621,6 +718,11 @@ export default function DevolucionesPosventa() {
                       <span style={{ fontWeight: 700,
                         color: g.folios.length >= 5 ? C.ladrillo : C.naranja }}>
                         {g.folios.length} paquete{g.folios.length > 1 ? "s" : ""}
+                      </span>
+                      {/* La antigüedad manda el orden, así que va destacada. */}
+                      <span style={{ fontWeight: 700,
+                        color: g.dias >= 5 ? C.ladrillo : C.naranja }}>
+                        {g.dias} día(s)
                       </span>
                       <span style={{ fontSize: 11, color: C.gris }}>
                         desde el {g.desde}
