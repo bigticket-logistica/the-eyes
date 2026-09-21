@@ -138,6 +138,27 @@ function Bloque({ n, titulo, subtitulo, accion, children }) {
   );
 }
 
+// ── Los tipos de PNR ───────────────────────────────────────────────────────
+// La base guarda slugs. Acá viven las etiquetas para leerlas: un informe que
+// sale con "entrega_tercero" obliga a traducir a mano antes de mandarlo.
+//
+// Si aparece un slug que no está en esta lista se muestra tal cual en vez de
+// omitirse. Perder una columna sin avisar es peor que mostrarla fea.
+
+const TIPOS_PNR = {
+  caja_vacia: "Caja vacía",
+  entrega_tercero: "Entrega a un tercero",
+  paquete_incompleto: "Paquete incompleto",
+  paquete_danado: "Paquete dañado",
+  paquete_dañado: "Paquete dañado",
+  paquete_extraviado: "Paquete extraviado",
+  reclamo_proveedor: "Reclamo al proveedor",
+  otros: "Otros",
+  sin_clasificar: "Sin clasificar",
+};
+
+const tipoPnr = (slug) => TIPOS_PNR[slug] || slug;
+
 // ── Botón de descarga de un bloque ─────────────────────────────────────────
 // Baja exactamente lo que muestra la tabla de arriba, con la fila TOTAL que
 // viene de la base. No recalcula nada: si el CSV y la pantalla difirieran,
@@ -323,6 +344,8 @@ export default function TableroControl() {
   const [b1, setB1] = useState([]);
   const [b2, setB2] = useState([]);
   const [b3, setB3] = useState([]);
+  const [b4, setB4] = useState([]);
+  const [vistaTipos, setVistaTipos] = useState("sc");
   const [alertas, setAlertas] = useState([]);
   const [verCierre, setVerCierre] = useState(false);
   const [cerrando, setCerrando] = useState(null);
@@ -344,17 +367,19 @@ export default function TableroControl() {
     setCargando(true);
     setError(null);
     const args = { p_desde: desde, p_hasta: hasta };
-    const [r1, r2, r3, ra] = await Promise.all([
+    const [r1, r2, r3, r4, ra] = await Promise.all([
       sb.rpc("fn_pnr_bloque1", args),
       sb.rpc("fn_pnr_bloque2", args),
       sb.rpc("fn_pnr_bloque3", args),
+      sb.rpc("fn_pnr_bloque4", args),
       sb.from("vw_pnr_sla_alertas").select("*"),
     ]);
-    const malo = r1.error || r2.error || r3.error;
+    const malo = r1.error || r2.error || r3.error || r4.error;
     if (malo) setError(malo.message);
     setB1(r1.data || []);
     setB2(r2.data || []);
     setB3(r3.data || []);
+    setB4(r4.data || []);
     setAlertas(ra.error ? [] : (ra.data || []));
     setCargando(false);
   }, [desde, hasta]);
@@ -510,6 +535,68 @@ export default function TableroControl() {
     } finally {
       setBajando(false);
     }
+  }
+
+  // ── El cruce de tipos de PNR ─────────────────────────────────────────────
+  // fn_pnr_bloque4 devuelve formato largo con los totales ya calculados, tanto
+  // los de cada fila como el general. Acá solo se acomodan en la grilla: no se
+  // suma nada, así que la pantalla y el CSV no pueden discrepar.
+  const tipos = useMemo(() => {
+    const generales = b4.filter((r) => r.nivel === "total" && r.sc == null);
+    const cols = generales
+      .filter((r) => r.clasificacion !== "TOTAL")
+      .sort((a, b) => Number(b.casos) - Number(a.casos))
+      .map((r) => r.clasificacion);
+
+    const armar = (nivel) => {
+      const mapa = new Map();
+      for (const r of b4) {
+        if (r.nivel !== nivel) continue;
+        if (nivel === "sc" && r.supervisor != null) continue;
+        const clave = nivel === "sc" ? r.sc : `${r.sc}||${r.supervisor}`;
+        if (!mapa.has(clave)) {
+          mapa.set(clave, { sc: r.sc, supervisor: r.supervisor, celdas: {}, total: 0 });
+        }
+        const fila = mapa.get(clave);
+        if (r.clasificacion === "TOTAL") fila.total = Number(r.casos);
+        else fila.celdas[r.clasificacion] = Number(r.casos);
+      }
+      return [...mapa.values()].sort((a, b) => b.total - a.total);
+    };
+
+    const totalGeneral = generales.find((r) => r.clasificacion === "TOTAL");
+    const pie = { celdas: {}, total: totalGeneral ? Number(totalGeneral.casos) : 0 };
+    for (const r of generales) {
+      if (r.clasificacion !== "TOTAL") pie.celdas[r.clasificacion] = Number(r.casos);
+    }
+    return { cols, porSc: armar("sc"), porSupervisor: armar("supervisor"), pie };
+  }, [b4]);
+
+  // El CSV baja la grilla que se está viendo, no el formato largo: el analista
+  // lo abre y lo pega en su informe sin tener que pivotear nada.
+  function bajarTipos() {
+    const filas = vistaTipos === "sc" ? tipos.porSc : tipos.porSupervisor;
+    if (!filas.length) {
+      setError("No hay tareas clasificadas en ese rango.");
+      return;
+    }
+    const salida = filas.map((f) => {
+      const fila = vistaTipos === "sc"
+        ? { CECO: f.sc }
+        : { CECO: f.sc, Supervisor: f.supervisor };
+      for (const c of tipos.cols) fila[tipoPnr(c)] = f.celdas[c] || 0;
+      fila.Total = f.total;
+      return fila;
+    });
+    const total = vistaTipos === "sc" ? { CECO: "TOTAL" } : { CECO: "TOTAL", Supervisor: "" };
+    for (const c of tipos.cols) total[tipoPnr(c)] = tipos.pie.celdas[c] || 0;
+    total.Total = tipos.pie.total;
+    salida.push(total);
+
+    const cols = Object.keys(salida[0]);
+    const sufijo = desde === hasta ? desde : `${desde}_a_${hasta}`;
+    bajarBlob(filasACsv(salida, cols), "text/csv;charset=utf-8",
+      `tipos_pnr_por_${vistaTipos}_${sufijo}.csv`);
   }
 
   // Texto del rango que se muestra junto a cada botón de descarga.
@@ -919,6 +1006,91 @@ export default function TableroControl() {
               ayuda: "Anulados sobre resueltos, entre los que NO tenían prueba. Comparado con el anterior dice cuánto sirve de verdad cargar la evidencia.", derecha: true,
               pinta: (f) => <Pct v={f.pct_exito_sin_prueba} /> },
           ]} />
+      </Bloque>
+
+      {/* ── BLOQUE 4 ─────────────────────────────────────────────────── */}
+      {/* De qué son los PNR, según lo que marca el supervisor al cerrar su
+          tarea. Es la única lectura de causa que existe: los estados de MELI
+          dicen cómo terminó el caso, no por qué se generó. */}
+      <Bloque n={4} titulo="Tipo de PNR"
+        subtitulo="lo que clasifica el supervisor en su tarea de bitácora"
+        accion={
+          <span style={{ display: "inline-flex", alignItems: "center", gap: 7 }}>
+            <span style={{ display: "inline-flex", border: "1px solid var(--borde)",
+              borderRadius: 7, overflow: "hidden" }}>
+              {[["sc", "por CECO"], ["supervisor", "por supervisor"]].map(([v, t]) => (
+                <button key={v} onClick={() => setVistaTipos(v)}
+                  style={{ fontSize: 10.5, padding: "4px 9px", border: "none", cursor: "pointer",
+                    background: vistaTipos === v ? C.navy : "#fff",
+                    color: vistaTipos === v ? "#fff" : C.gris, fontWeight: 600 }}>
+                  {t}
+                </button>
+              ))}
+            </span>
+            <BotonCsvBloque rango={rangoTexto}
+              titulo={`Tipos de PNR ${vistaTipos === "sc" ? "por CECO" : "por supervisor"} del ${desde} al ${hasta}`}
+              onClick={bajarTipos} />
+          </span>
+        }>
+        {!tipos.cols.length ? (
+          <div style={{ fontSize: 12, color: C.gris, padding: "6px 2px" }}>
+            No hay tareas con tipo de PNR en este rango.
+          </div>
+        ) : (
+          <div style={{ overflowX: "auto" }}>
+            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12.5 }}>
+              <thead>
+                <tr style={{ background: C.grisTenue }}>
+                  <th style={{ textAlign: "left", padding: "7px 9px", fontSize: 11,
+                    color: C.gris, fontWeight: 700 }}>CECO</th>
+                  {vistaTipos === "supervisor" && (
+                    <th style={{ textAlign: "left", padding: "7px 9px", fontSize: 11,
+                      color: C.gris, fontWeight: 700 }}>Supervisor</th>
+                  )}
+                  {tipos.cols.map((c) => (
+                    <th key={c} style={{ textAlign: "right", padding: "7px 9px", fontSize: 11,
+                      color: C.gris, fontWeight: 700, whiteSpace: "nowrap" }}>
+                      {tipoPnr(c)}
+                    </th>
+                  ))}
+                  <th style={{ textAlign: "right", padding: "7px 9px", fontSize: 11,
+                    color: C.navy, fontWeight: 700 }}>Total</th>
+                </tr>
+              </thead>
+              <tbody>
+                {(vistaTipos === "sc" ? tipos.porSc : tipos.porSupervisor).map((f, i) => (
+                  <tr key={i} style={{ borderTop: "1px solid var(--borde)" }}>
+                    <td style={{ padding: "6px 9px", fontWeight: 600 }}>{f.sc}</td>
+                    {vistaTipos === "supervisor" && (
+                      <td style={{ padding: "6px 9px" }}>{f.supervisor}</td>
+                    )}
+                    {tipos.cols.map((c) => (
+                      <td key={c} style={{ padding: "6px 9px", textAlign: "right",
+                        color: f.celdas[c] ? "#1a1a1a" : C.gris }}>
+                        {f.celdas[c] ? num(f.celdas[c]) : "—"}
+                      </td>
+                    ))}
+                    <td style={{ padding: "6px 9px", textAlign: "right", fontWeight: 700 }}>
+                      {num(f.total)}
+                    </td>
+                  </tr>
+                ))}
+                <tr style={{ borderTop: "2px solid " + C.navy, background: C.navyTenue }}>
+                  <td style={{ padding: "7px 9px", fontWeight: 700, color: C.navy }}>TOTAL</td>
+                  {vistaTipos === "supervisor" && <td />}
+                  {tipos.cols.map((c) => (
+                    <td key={c} style={{ padding: "7px 9px", textAlign: "right",
+                      fontWeight: 700, color: C.navy }}>
+                      {num(tipos.pie.celdas[c] || 0)}
+                    </td>
+                  ))}
+                  <td style={{ padding: "7px 9px", textAlign: "right", fontWeight: 700,
+                    color: C.navy }}>{num(tipos.pie.total)}</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        )}
       </Bloque>
     </div>
   );
