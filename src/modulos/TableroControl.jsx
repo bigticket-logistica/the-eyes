@@ -182,6 +182,71 @@ function BotonCsvBloque({ onClick, titulo, rango }) {
   );
 }
 
+// ── Informe de control de gestión ─────────────────────────────────────────
+// Genera el PDF de dos páginas con los gráficos y las decisiones, para el
+// rango que esté elegido arriba.
+//
+// Tarda entre 5 y 10 segundos porque los gráficos se dibujan en el servidor,
+// así que el botón cambia de texto mientras trabaja: sin eso el analista lo
+// aprieta dos veces y se generan dos informes.
+//
+// Se descarga directo en vez de mandarse por correo: quien lo pide está
+// mirando la pantalla y lo quiere ahora.
+const API_INFORME = "https://posventa.bigticket.cl/informe";
+
+function BotonInforme({ desde, hasta }) {
+  const [generando, setGenerando] = useState(false);
+  const [error, setError] = useState(null);
+
+  async function generar() {
+    setGenerando(true);
+    setError(null);
+    try {
+      const r = await fetch(`${API_INFORME}/generar`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ desde, hasta }),
+      });
+      if (!r.ok) {
+        // El servidor devuelve JSON cuando falla y PDF cuando funciona.
+        let msg = `Error ${r.status}`;
+        try { msg = (await r.json()).error || msg; } catch {}
+        throw new Error(msg);
+      }
+      const blob = await r.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `control_gestion_${desde}_a_${hasta}.pdf`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    } catch (e) {
+      setError(e.message);
+    }
+    setGenerando(false);
+  }
+
+  return (
+    <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
+      <button onClick={generar} disabled={generando}
+        title="Informe de control de gestión en PDF, con gráficos y análisis"
+        style={{ fontSize: 11.5, fontWeight: 700, padding: "5px 14px",
+          borderRadius: 7, border: "none",
+          background: generando ? C.gris : C.navy, color: "#fff",
+          cursor: generando ? "default" : "pointer" }}>
+        {generando ? "Generando el informe…" : "↓ Informe PDF"}
+      </button>
+      {error && (
+        <span style={{ fontSize: 10.5, color: C.ladrillo, maxWidth: 260 }}>
+          {error}
+        </span>
+      )}
+    </span>
+  );
+}
+
 // ── Tabla ──────────────────────────────────────────────────────────────────
 // La fila TOTAL viene de la base, no sumada acá, y se pinta distinto para que no
 // se confunda con un centro más.
@@ -682,6 +747,7 @@ export default function TableroControl() {
                 onChange={(e) => setHasta(e.target.value)}
                 style={{ fontSize: 12.5, border: "none", outline: "none", padding: 0,
                   background: "transparent", width: 118 }} />
+              <BotonInforme desde={desde} hasta={hasta} />
             </div>
 
             <button onClick={bajarCsv} disabled={bajando} className="btn-navy"
