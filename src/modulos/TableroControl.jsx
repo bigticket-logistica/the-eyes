@@ -25,6 +25,16 @@ import TareasPorSupervisor from "./TareasPorSupervisor.jsx";
 //   la primera vez y estorba a partir de la segunda.
 // ═══════════════════════════════════════════════════════════════════════════
 
+// Los nombres de las áreas como se leen, no como se guardan.
+const ETIQUETA_AREA = {
+  cuidado_cliente: "Cuidado al Cliente",
+  gestion_flota: "Gestión de Flota",
+  jefatura: "Jefatura",
+  ti: "TI",
+  ia: "Biggy",
+  "sin registro": "Sin registro",
+};
+
 const C = {
   navy: "#1a3a6b", navyTenue: "#eef2f8",
   naranja: "#F47B20", naranjaTenue: "#fdf1e6",
@@ -410,6 +420,11 @@ export default function TableroControl() {
   const [b2, setB2] = useState([]);
   const [b3, setB3] = useState([]);
   const [b4, setB4] = useState([]);
+  // Quién notificó y quién revisó, por área.
+  //   Hasta el 22 de septiembre toda acción humana se guardaba como "posventa",
+  //   así que lo anterior a esa fecha sale como "sin registro". No se puede
+  //   reconstruir: el dato no existía.
+  const [b5, setB5] = useState([]);
   const [vistaTipos, setVistaTipos] = useState("sc");
   const [detalleTipo, setDetalleTipo] = useState(null);
   const [alertas, setAlertas] = useState([]);
@@ -433,11 +448,12 @@ export default function TableroControl() {
     setCargando(true);
     setError(null);
     const args = { p_desde: desde, p_hasta: hasta };
-    const [r1, r2, r3, r4, ra] = await Promise.all([
+    const [r1, r2, r3, r4, ra, r5] = await Promise.all([
       sb.rpc("fn_pnr_bloque1", args),
       sb.rpc("fn_pnr_bloque2", args),
       sb.rpc("fn_pnr_bloque3", args),
       sb.rpc("fn_pnr_bloque4", args),
+      sb.rpc("fn_informe_actividad", { p_desde: desde, p_hasta: hasta }),
       sb.from("vw_pnr_sla_alertas").select("*"),
     ]);
     const malo = r1.error || r2.error || r3.error || r4.error;
@@ -446,6 +462,7 @@ export default function TableroControl() {
     setB2(r2.data || []);
     setB3(r3.data || []);
     setB4(r4.data || []);
+    setB5(r5.data || []);
     setAlertas(ra.error ? [] : (ra.data || []));
     setCargando(false);
   }, [desde, hasta]);
@@ -1237,6 +1254,49 @@ export default function TableroControl() {
             )}
           </div>
         )}
+      </Bloque>
+
+      {/* ── BLOQUE 5 ─────────────────────────────────────────────────── */}
+      {/* Quién notificó y quién revisó la evidencia, agrupado por área.
+          Responde una pregunta que el tablero no tenía: cuánto trabajo hace
+          cada área y cuánto Biggy. */}
+      <Bloque n={5} titulo="Actividad por área"
+        subtitulo="quién notificó y quién revisó las evidencias"
+        accion={<BotonCsvBloque titulo={`Actividad por área del ${desde} al ${hasta}`}
+          rango={rangoTexto}
+          onClick={() => bajarBloque(b5, "actividad_por_area", "actividad por área")} />}>
+
+        {/* La advertencia va acá y no en un tooltip: sin ella el "sin registro"
+            parece un error del sistema y no lo es. */}
+        <div style={{ fontSize: 11.5, color: C.gris, marginBottom: 11, lineHeight: 1.45 }}>
+          Hasta el <strong style={{ color: C.navy }}>22 de septiembre</strong> toda acción
+          humana se guardaba sin identificar a la persona, así que lo anterior a esa fecha
+          aparece como <strong style={{ color: C.navy }}>sin registro</strong>. Ese dato no
+          se puede reconstruir. De ahí en adelante cada notificación, aprobación y rechazo
+          queda con el correo de quien la hizo.
+        </div>
+
+        <Tabla claveFila={(f) => `${f.area}|${f.quien}`}
+          filas={b5}
+          columnas={[
+            { clave: "area", titulo: "Área",
+              ayuda: "Área a la que pertenece la persona, según el padrón de analistas.",
+              pinta: (f) => (
+                <span style={{ fontWeight: 600,
+                  color: f.area === "ia" ? C.naranja
+                       : f.area === "sin registro" ? C.gris : C.navy }}>
+                  {ETIQUETA_AREA[f.area] || f.area}
+                </span>
+              ) },
+            { clave: "quien", titulo: "Quién",
+              ayuda: "Persona que ejecutó la acción." },
+            { clave: "notificadas", titulo: "Notificó", num: true,
+              ayuda: "Tareas de bitácora que creó, avisando al supervisor y al conductor." },
+            { clave: "aprobadas", titulo: "Aprobó", num: true,
+              ayuda: "Evidencias que revisó y dio por buenas." },
+            { clave: "rechazadas", titulo: "Rechazó", num: true,
+              ayuda: "Evidencias que revisó y devolvió al supervisor con un motivo." },
+          ]} />
       </Bloque>
     </div>
   );
