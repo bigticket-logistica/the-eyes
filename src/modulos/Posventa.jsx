@@ -1563,6 +1563,12 @@ function Detalle({ c, ahora, onPedir, trayendo, supervisor, tarea, vueltas, movi
       supervisor_email: supervisor.supervisor_email,
       supervisor_telefono: supervisor.supervisor_telefono,
       creada_por: "posventa",
+      // El correo de quien notificó, además del genérico.
+      //   creada_por dice "posventa" para toda acción humana, así que no se
+      //   podía separar Cuidado al Cliente de Gestión de Flota en los informes
+      //   de gestión. El campo viejo se mantiene porque hay consultas que lo
+      //   leen; el correo se suma al lado.
+      notificada_por_email: analista?.email || null,
     }).select().single();
 
     if (error) {
@@ -2768,6 +2774,7 @@ export default function Posventa() {
       completada_en: null,
       reabierta_en: new Date().toISOString(),
       reabierta_por: "posventa",
+      rechazada_por_email: analista?.email || null,
       motivo_reabrir: motivo,
       veces_pedida: (t.veces_pedida || 1) + 1,
     }).eq("id", t.id).select().single();
@@ -2781,7 +2788,8 @@ export default function Posventa() {
   async function aprobarPruebas(t) {
     if (!t) return;
     const { data, error } = await sb.rpc("fn_pnr_aprobar_pruebas",
-      { p_tarea_id: t.id, p_quien: "posventa", p_nota: null });
+      { p_tarea_id: t.id, p_quien: "posventa", p_nota: null,
+        p_email: analista?.email || null });
     if (error) { setError("No se pudo aprobar: " + error.message); return; }
 
     // Si la aprobación quedó pero el aviso falló, hay que decirlo: el
