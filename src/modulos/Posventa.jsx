@@ -1542,6 +1542,11 @@ function LineaTiempo({ movimientos }) {
 }
 
 function Detalle({ c, ahora, onPedir, trayendo, supervisor, tarea, vueltas, movimientos, telefonos, telElegido, onElegirTel, onTelGuardado, onTareaCreada, onRepedir, onAprobar, onNotificar }) {
+  // El analista de la sesión, para registrar quién hizo cada acción.
+  //   Se toma del hook y no de las props: este componente recibe catorce y
+  //   sumar una más para esto solo obliga a tocar a quien lo usa. El hook ya
+  //   está disponible en todo el árbol.
+  const { analista } = useAuth();
   const [panel, setPanel] = useState(false);
   const [creando, setCreando] = useState(false);
   const [errorTarea, setErrorTarea] = useState("");
