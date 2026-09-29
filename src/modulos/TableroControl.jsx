@@ -452,7 +452,10 @@ export default function TableroControl() {
     setCargando(true);
     setError(null);
     const args = { p_desde: desde, p_hasta: hasta };
-    const [r1, r2, r3, r4, ra, r5, rc] = await Promise.all([
+    // El orden de estas variables sigue el orden de las llamadas de abajo.
+    // Insertar una en el medio sin correr las demás cruza los resultados: eso
+    // dejó al bloque 5 leyendo las alertas y mostrando "sin datos".
+    const [r1, r2, r3, r4, r5, ra, rc] = await Promise.all([
       sb.rpc("fn_pnr_bloque1", args),
       sb.rpc("fn_pnr_bloque2", args),
       sb.rpc("fn_pnr_bloque3", args),
