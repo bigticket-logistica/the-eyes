@@ -1030,16 +1030,37 @@ export default function TableroControl() {
             { clave: "fotos_enviadas", titulo: "Con fotos",
               ayuda: "Tareas que el supervisor cerró subiendo la evidencia.", derecha: true,
               pinta: (f) => <span style={{ color: C.verde }}>{num(f.fotos_enviadas)}</span> },
-            { clave: "tareas_vencidas", titulo: "Vencidas",
-              ayuda: "Tareas que pasaron el plazo de 40 h sin cerrarse. Quedan bloqueadas en la bitácora como no cumplidas.", derecha: true,
-              pinta: (f) => f.tareas_vencidas > 0
-                ? <span style={{ color: C.ladrillo, fontWeight: 700 }}>{num(f.tareas_vencidas)}</span>
+            // El veredicto, con las mismas tres categorías del informe.
+            //   Antes había una sola columna "Vencidas" que contaba las tareas
+            //   en estado sla_vencido. Pero el cierre automático las pasa a
+            //   caso_cerrado cuando MELI resuelve, así que las que nadie
+            //   gestionó no alcanzaban a marcarse: el tablero mostraba 5 donde
+            //   el informe mostraba 15, y nadie sabía cuál creer.
+            { clave: "sla_cumple", titulo: "Cumple",
+              ayuda: "Gestionó dentro de las 40 h: subió evidencia, corrigió tras un rechazo, cerró con motivo, o MELI anuló el reclamo a tiempo.", derecha: true,
+              pinta: (f) => <span style={{ color: C.verde }}>{num(f.sla_cumple)}</span> },
+            { clave: "sla_no_cumple", titulo: "No cumple",
+              ayuda: "Venció el plazo sin gestión válida, o le rechazaron la evidencia y no volvió a cargar.", derecha: true,
+              pinta: (f) => f.sla_no_cumple > 0
+                ? <span style={{ color: C.ladrillo, fontWeight: 700 }}>{num(f.sla_no_cumple)}</span>
+                : <span style={{ color: C.gris }}>0</span> },
+            { clave: "sla_en_plazo", titulo: "En plazo",
+              ayuda: "Todavía corre el reloj y no hay veredicto. No entran en el porcentaje: si contaran, el número bajaría cada vez que nace un caso.", derecha: true,
+              pinta: (f) => f.sla_en_plazo > 0
+                ? <span style={{ color: C.naranja }}>{num(f.sla_en_plazo)}</span>
+                : <span style={{ color: C.gris }}>0</span> },
+            // Por qué no cumplieron: no responder es un problema distinto de que
+            // la torre le rechace la evidencia, y se corrigen distinto.
+            { clave: "sin_gestion", titulo: "Sin gestión",
+              ayuda: "No abrió ni respondió la tarea. De las que no cumplen, son las que ni siquiera se intentaron.", derecha: true,
+              pinta: (f) => f.sin_gestion > 0
+                ? <span style={{ color: C.ladrillo }}>{num(f.sin_gestion)}</span>
                 : <span style={{ color: C.gris }}>0</span> },
             { clave: "reaperturas", titulo: "Reaperturas",
               ayuda: "Veces que la torre rechazó la evidencia y pidió otra. Cada reapertura es trabajo que se repite.", derecha: true,
               pinta: (f) => num(f.reaperturas) },
             { clave: "pct_sla_fotos", titulo: "% SLA fotos",
-              ayuda: "Tareas con fotos subidas dentro de las 40 h, sobre las que ya se definieron. \"Sin datos\" significa que no hay tareas: sin Notificar no hay nada que cumplir. Declarar que el conductor no tiene pruebas cuenta como cumplido.", derecha: true,
+              ayuda: "Cumplen sobre las que ya tienen veredicto. Las que están en plazo quedan fuera del cálculo. Misma regla que el informe a SharePoint.", derecha: true,
               pinta: (f) => <Pct v={f.pct_sla_fotos} /> },
             { clave: "pct_sla_comprobante", titulo: "% SLA compr.",
               ayuda: "Casos con el comprobante cargado en MELI dentro de las 40 h. Es el SLA que de verdad decide el caso, y el que tiene volumen suficiente para leerse.", derecha: true,
