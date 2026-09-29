@@ -417,6 +417,10 @@ export default function TableroControl() {
   const [hasta, setHasta] = useState(() => hoyMX());
 
   const [b1, setB1] = useState([]);
+  // Lo cobrado a terceros dentro del rango. Va aparte de los bloques porque no
+  // habla de los mismos casos: el tablero agrupa por cuándo se abrió el PNR y
+  // esto por cuándo pasó a cobro.
+  const [cobrado, setCobrado] = useState(null);
   const [b2, setB2] = useState([]);
   const [b3, setB3] = useState([]);
   const [b4, setB4] = useState([]);
@@ -448,13 +452,14 @@ export default function TableroControl() {
     setCargando(true);
     setError(null);
     const args = { p_desde: desde, p_hasta: hasta };
-    const [r1, r2, r3, r4, ra, r5] = await Promise.all([
+    const [r1, r2, r3, r4, ra, r5, rc] = await Promise.all([
       sb.rpc("fn_pnr_bloque1", args),
       sb.rpc("fn_pnr_bloque2", args),
       sb.rpc("fn_pnr_bloque3", args),
       sb.rpc("fn_pnr_bloque4", args),
       sb.rpc("fn_informe_actividad", { p_desde: desde, p_hasta: hasta }),
       sb.from("vw_pnr_sla_alertas").select("*"),
+      sb.rpc("fn_pnr_cobrado_periodo", args),
     ]);
     const malo = r1.error || r2.error || r3.error || r4.error;
     if (malo) setError(malo.message);
@@ -464,6 +469,7 @@ export default function TableroControl() {
     setB4(r4.data || []);
     setB5(r5.data || []);
     setAlertas(ra.error ? [] : (ra.data || []));
+    setCobrado(rc.error ? null : ((rc.data || [])[0] || null));
     setCargando(false);
   }, [desde, hasta]);
 
@@ -952,6 +958,40 @@ export default function TableroControl() {
             color={Number(total.pct_anulado) >= META_PCT ? C.verde : C.naranja}
             tinte={Number(total.pct_anulado) >= META_PCT ? C.verdeTenue : C.naranjaTenue} />
         </div>
+
+        {cobrado && Number(cobrado.casos) > 0 ? (
+          <div style={{
+            display: "flex", gap: 14, alignItems: "flex-start", flexWrap: "wrap",
+            background: "#f8fafc", border: "1px dashed #cbd5e1", borderRadius: 10,
+            padding: "11px 14px", marginBottom: 13,
+          }}>
+            <div style={{ minWidth: 150 }}>
+              <div style={{ fontSize: 10.5, color: "#64748b", fontWeight: 600 }}>
+                COBRADO A TERCEROS EN EL RANGO
+              </div>
+              <div style={{ fontSize: 20, fontWeight: 700, color: "#1a3a6b", marginTop: 2 }}>
+                {dinero(cobrado.monto)}
+              </div>
+              <div style={{ fontSize: 10.5, color: "#94a3b8", marginTop: 2 }}>
+                {num(cobrado.casos)} caso(s)
+              </div>
+            </div>
+            <div style={{ flex: 1, minWidth: 280, fontSize: 11.5, color: "#475569", lineHeight: 1.5 }}>
+              <b style={{ color: "#1a3a6b" }}>No son los mismos casos de arriba.</b>{" "}
+              Las cifras de arriba son los PNR <b>abiertos</b> en este rango y cómo terminaron.
+              Esta es la plata que se le cargó a los transportistas en la prefactura dentro del
+              mismo rango, sin importar cuándo se abrió cada caso: un PNR tarda días o semanas en
+              resolverse.
+              {Number(cobrado.de_otras_semanas) > 0 ? (
+                <> De estos {num(cobrado.casos)}, <b>{num(cobrado.de_otras_semanas)}</b> son de
+                  casos anteriores al rango
+                  {cobrado.caso_mas_antiguo ? <>, el más antiguo del {cobrado.caso_mas_antiguo}</> : null}.
+                </>
+              ) : null}{" "}
+              Es la misma cifra que muestra el Brain en PNR — cobro a terceros.
+            </div>
+          </div>
+        ) : null}
 
         {/* Abre ordenado por plata perdida, de mayor a menor: el centro que más
             cuesta va arriba sin que nadie tenga que buscarlo. Para volver al
