@@ -949,7 +949,7 @@ export default function TableroControl() {
           <Cifra etiqueta="Facturados" valor={num(total.facturados)}
             nota="se cobran" color={C.ladrillo} tinte={C.ladrilloTenue} />
           <Cifra etiqueta="Monto perdido" valor={dinero(total.monto_facturado)}
-            color={C.ladrillo} tinte={C.ladrilloTenue} />
+            nota="se cobra al tercero más adelante" color={C.ladrillo} tinte={C.ladrilloTenue} />
           <Cifra etiqueta="Monto en riesgo" valor={dinero(total.monto_en_riesgo)}
             nota="abiertos y en revisión" color={C.naranja} tinte={C.naranjaTenue} />
           <Cifra etiqueta="% anulado" valor={total.pct_anulado != null
@@ -967,7 +967,7 @@ export default function TableroControl() {
           }}>
             <div style={{ minWidth: 150 }}>
               <div style={{ fontSize: 10.5, color: "#64748b", fontWeight: 600 }}>
-                COBRADO A TERCEROS EN EL RANGO
+                YA COBRADO EN ESTE RANGO
               </div>
               <div style={{ fontSize: 20, fontWeight: 700, color: "#1a3a6b", marginTop: 2 }}>
                 {dinero(cobrado.monto)}
@@ -977,15 +977,14 @@ export default function TableroControl() {
               </div>
             </div>
             <div style={{ flex: 1, minWidth: 280, fontSize: 11.5, color: "#475569", lineHeight: 1.5 }}>
-              <b style={{ color: "#1a3a6b" }}>No son los mismos casos de arriba.</b>{" "}
-              Las cifras de arriba son los PNR <b>abiertos</b> en este rango y cómo terminaron.
-              Esta es la plata que se le cargó a los transportistas en la prefactura dentro del
-              mismo rango, sin importar cuándo se abrió cada caso: un PNR tarda días o semanas en
-              resolverse.
+              <b style={{ color: "#1a3a6b" }}>No confundir con el monto perdido de arriba.</b>{" "}
+              Arriba está lo que se <b>perdió</b> con los PNR abiertos en este rango: todavía no se
+              le cobra a nadie, entra a la prefactura más adelante. Esto es lo que se{" "}
+              <b>cobró</b> dentro del rango, casi todo por casos perdidos en semanas anteriores.
               {Number(cobrado.de_otras_semanas) > 0 ? (
-                <> De estos {num(cobrado.casos)}, <b>{num(cobrado.de_otras_semanas)}</b> son de
-                  casos anteriores al rango
-                  {cobrado.caso_mas_antiguo ? <>, el más antiguo del {cobrado.caso_mas_antiguo}</> : null}.
+                <> De estos {num(cobrado.casos)} casos, <b>{num(cobrado.de_otras_semanas)}</b> se
+                  abrieron antes de este rango
+                  {cobrado.caso_mas_antiguo ? <>, el más antiguo el {cobrado.caso_mas_antiguo}</> : null}.
                 </>
               ) : null}{" "}
               Es la misma cifra que muestra el Brain en PNR — cobro a terceros.
