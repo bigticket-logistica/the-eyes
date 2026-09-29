@@ -950,6 +950,11 @@ export default function TableroControl() {
             nota="se cobran" color={C.ladrillo} tinte={C.ladrilloTenue} />
           <Cifra etiqueta="Monto perdido" valor={dinero(total.monto_facturado)}
             nota="se cobra al tercero más adelante" color={C.ladrillo} tinte={C.ladrilloTenue} />
+          {/* Distinta a las demás: no habla de los PNR abiertos en el rango
+              sino de lo que se le cargó al tercero dentro del rango, casi todo
+              por casos perdidos antes. Es la misma cifra del Brain. */}
+          <Cifra etiqueta="Ya cobrado" valor={dinero(cobrado ? cobrado.monto : 0)}
+            nota={cobrado ? `${num(cobrado.casos)} caso(s) en prefactura` : "—"} />
           <Cifra etiqueta="Monto en riesgo" valor={dinero(total.monto_en_riesgo)}
             nota="abiertos y en revisión" color={C.naranja} tinte={C.naranjaTenue} />
           <Cifra etiqueta="% anulado" valor={total.pct_anulado != null
@@ -959,38 +964,6 @@ export default function TableroControl() {
             tinte={Number(total.pct_anulado) >= META_PCT ? C.verdeTenue : C.naranjaTenue} />
         </div>
 
-        {cobrado && Number(cobrado.casos) > 0 ? (
-          <div style={{
-            display: "flex", gap: 14, alignItems: "flex-start", flexWrap: "wrap",
-            background: "#f8fafc", border: "1px dashed #cbd5e1", borderRadius: 10,
-            padding: "11px 14px", marginBottom: 13,
-          }}>
-            <div style={{ minWidth: 150 }}>
-              <div style={{ fontSize: 10.5, color: "#64748b", fontWeight: 600 }}>
-                YA COBRADO EN ESTE RANGO
-              </div>
-              <div style={{ fontSize: 20, fontWeight: 700, color: "#1a3a6b", marginTop: 2 }}>
-                {dinero(cobrado.monto)}
-              </div>
-              <div style={{ fontSize: 10.5, color: "#94a3b8", marginTop: 2 }}>
-                {num(cobrado.casos)} caso(s)
-              </div>
-            </div>
-            <div style={{ flex: 1, minWidth: 280, fontSize: 11.5, color: "#475569", lineHeight: 1.5 }}>
-              <b style={{ color: "#1a3a6b" }}>No confundir con el monto perdido de arriba.</b>{" "}
-              Arriba está lo que se <b>perdió</b> con los PNR abiertos en este rango: todavía no se
-              le cobra a nadie, entra a la prefactura más adelante. Esto es lo que se{" "}
-              <b>cobró</b> dentro del rango, casi todo por casos perdidos en semanas anteriores.
-              {Number(cobrado.de_otras_semanas) > 0 ? (
-                <> De estos {num(cobrado.casos)} casos, <b>{num(cobrado.de_otras_semanas)}</b> se
-                  abrieron antes de este rango
-                  {cobrado.caso_mas_antiguo ? <>, el más antiguo el {cobrado.caso_mas_antiguo}</> : null}.
-                </>
-              ) : null}{" "}
-              Es la misma cifra que muestra el Brain en PNR — cobro a terceros.
-            </div>
-          </div>
-        ) : null}
 
         {/* Abre ordenado por plata perdida, de mayor a menor: el centro que más
             cuesta va arriba sin que nadie tenga que buscarlo. Para volver al
