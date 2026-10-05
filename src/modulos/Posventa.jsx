@@ -1548,23 +1548,34 @@ function Pruebas({ tarea, vueltas, onRepedir, onAprobar }) {
               </span>
             ) : (
               <>
+                {/* Se habilita tambien cuando el supervisor marco "no hay
+                    pruebas". Antes solo miraba si habia fotos, y un caso sin
+                    pruebas quedaba trabado: el analista no podia aprobarlo ni
+                    dejarlo cerrado, aunque su decision ya estuviera tomada.
+
+                    Aprobar sin fotos no es aprobar una evidencia: es dar por
+                    cerrada la gestion del supervisor, que respondio a tiempo
+                    diciendo que no tenia nada. Por eso el texto de la
+                    confirmacion cambia segun el caso. */}
                 <button
                   onClick={() => {
-                    if (window.confirm(
-                      "¿Aprobar estas pruebas?\n\n" +
-                      "Se le avisa al supervisor que ahora debe cargar el comprobante " +
-                      "en Logistic. No se puede deshacer desde acá.")) {
-                      onAprobar(tarea);
-                    }
+                    const texto = hayAlgo
+                      ? "¿Aprobar estas pruebas?\n\n" +
+                        "Se le avisa al supervisor que ahora debe cargar el comprobante " +
+                        "en Logistic. No se puede deshacer desde acá."
+                      : "El supervisor declaró que no hay pruebas.\n\n" +
+                        "¿Dar por cerrada su gestión? El caso queda sin evidencia y " +
+                        "pasa a cobro si MELI lo resuelve así. No se puede deshacer desde acá.";
+                    if (window.confirm(texto)) onAprobar(tarea);
                   }}
-                  disabled={!hayAlgo}
-                  title={hayAlgo ? "" : "No hay pruebas que aprobar"}
+                  disabled={!hayAlgo && !sinPruebas}
+                  title={hayAlgo || sinPruebas ? "" : "Todavía no hay nada que resolver"}
                   style={{ fontSize: 12, fontWeight: 600, padding: "6px 13px", borderRadius: 8,
-                    cursor: hayAlgo ? "pointer" : "default",
-                    border: `2px solid ${hayAlgo ? C.verde : "var(--borde)"}`,
-                    background: hayAlgo ? "#eaf5f1" : "#fff",
-                    color: hayAlgo ? C.verde : "var(--texto-tenue)" }}>
-                  Aprobado
+                    cursor: hayAlgo || sinPruebas ? "pointer" : "default",
+                    border: `2px solid ${hayAlgo || sinPruebas ? C.verde : "var(--borde)"}`,
+                    background: hayAlgo || sinPruebas ? "#eaf5f1" : "#fff",
+                    color: hayAlgo || sinPruebas ? C.verde : "var(--texto-tenue)" }}>
+                  {hayAlgo ? "Aprobado" : "Cerrar sin pruebas"}
                 </button>
                 <button onClick={() => setPidiendo(true)}
                   style={{ fontSize: 12, fontWeight: 600, padding: "6px 13px", borderRadius: 8,
