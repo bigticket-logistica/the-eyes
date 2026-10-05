@@ -318,14 +318,25 @@ function HistorialAvisos({ caseId, fechaCaso }) {
            una linea por aviso quedaba ilegible. Las columnas dejan comparar de
            un vistazo que al chofer se le escribio a un numero y al supervisor a
            otro. */
+        /* Cinco columnas y no cuatro: el plazo iba pegado a la hora y la
+           partia en dos lineas, asi que cada aviso ocupaba el doble de alto y
+           las fechas dejaban de alinearse entre si. Separado, la columna de
+           hora nunca se parte y el ojo baja derecho por los minutos.
+
+           El canal va en dos lineas a proposito —el medio arriba, el destino
+           abajo— porque un numero de trece digitos no cabe al lado del nombre
+           del canal sin cortarse. */
         <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 10,
-          tableLayout: "fixed" }}>
+          tableLayout: "fixed", marginTop: 3 }}>
           <thead>
-            <tr style={{ color: "var(--texto-tenue)", textAlign: "left" }}>
-              <th style={{ fontWeight: 600, padding: "2px 4px 2px 0", width: "24%" }}>Momento</th>
-              <th style={{ fontWeight: 600, padding: "2px 4px", width: "21%" }}>Que</th>
-              <th style={{ fontWeight: 600, padding: "2px 4px", width: "14%" }}>Para</th>
-              <th style={{ fontWeight: 600, padding: "2px 0 2px 4px" }}>Canal y destino</th>
+            <tr style={{ color: "var(--texto-tenue)", textAlign: "left",
+              fontSize: 9, textTransform: "uppercase", letterSpacing: 0.3 }}>
+              <th style={{ fontWeight: 600, padding: "0 4px 4px 0", width: "26%" }}>Momento</th>
+              <th style={{ fontWeight: 600, padding: "0 6px 4px 0", width: "11%",
+                textAlign: "right" }}>Plazo</th>
+              <th style={{ fontWeight: 600, padding: "0 4px 4px", width: "23%" }}>Que</th>
+              <th style={{ fontWeight: 600, padding: "0 4px 4px", width: "17%" }}>Para</th>
+              <th style={{ fontWeight: 600, padding: "0 0 4px 4px" }}>Canal</th>
             </tr>
           </thead>
           <tbody>
@@ -333,41 +344,55 @@ function HistorialAvisos({ caseId, fechaCaso }) {
                 mide todo lo de abajo. Sin ella el analista tenia que ir a buscar
                 a otra parte cuanto habia tardado el primer aviso. */}
             <tr style={{ borderTop: "1px solid var(--borde)" }}>
-              <td style={{ padding: "2px 4px 2px 0", fontVariantNumeric: "tabular-nums",
-                color: "var(--texto-suave)" }}>{fechaHito(fechaCaso) || "sin fecha"}</td>
-              <td style={{ padding: "2px 4px", fontWeight: 600 }}>PNR creado en Logistic</td>
-              <td style={{ padding: "2px 4px", color: "var(--texto-tenue)" }}>-</td>
-              <td style={{ padding: "2px 0 2px 4px", color: "var(--texto-tenue)" }}>-</td>
+              <td style={{ padding: "4px 4px 4px 0", fontVariantNumeric: "tabular-nums",
+                whiteSpace: "nowrap", color: "var(--texto-suave)" }}>
+                {fechaHito(fechaCaso) || "sin fecha"}
+              </td>
+              <td style={{ padding: "4px 6px 4px 0", textAlign: "right",
+                color: "var(--texto-tenue)" }}>—</td>
+              <td style={{ padding: "4px 4px", fontWeight: 600 }}>Creado en Logistic</td>
+              <td style={{ padding: "4px 4px", color: "var(--texto-tenue)" }}>—</td>
+              <td style={{ padding: "4px 0 4px 4px", color: "var(--texto-tenue)" }}>—</td>
             </tr>
 
             {avisos.length === 0 ? (
               <tr style={{ borderTop: "1px solid var(--borde)" }}>
-                <td colSpan={4} style={{ padding: "3px 0", color: "var(--texto-tenue)" }}>
+                <td colSpan={5} style={{ padding: "5px 0", color: "var(--texto-tenue)" }}>
                   Ningun aviso salio de este caso.
                 </td>
               </tr>
             ) : avisos.map((a, i) => (
               <tr key={i} style={{ borderTop: "1px solid var(--borde)" }}>
-                <td style={{ padding: "2px 4px 2px 0", fontVariantNumeric: "tabular-nums",
+                <td style={{ padding: "4px 4px 4px 0", fontVariantNumeric: "tabular-nums",
+                  whiteSpace: "nowrap",
                   color: a.leido ? C.verde : "var(--texto-suave)" }}>
                   {fechaHito(a.cuando)}
-                  {a.horas != null ? ` - ${a.horas} h` : ""}
                 </td>
-                <td style={{ padding: "2px 4px", color: "var(--texto-suave)" }}>
+                <td style={{ padding: "4px 6px 4px 0", textAlign: "right",
+                  fontVariantNumeric: "tabular-nums", whiteSpace: "nowrap",
+                  color: "var(--texto-tenue)" }}>
+                  {a.horas != null ? `${a.horas} h` : "—"}
+                </td>
+                <td style={{ padding: "4px 4px", color: "var(--texto-suave)" }}>
                   {a.tipo}
                   {/* Quien lo mando: solo lo tienen los envios de pnr_envios_mx.
                       En los WhatsApp el autor no quedo guardado. */}
-                  {a.quien ? <span style={{ color: "var(--texto-tenue)" }}> - {a.quien}</span> : null}
+                  {a.quien ? (
+                    <div style={{ color: "var(--texto-tenue)", fontSize: 9 }}>{a.quien}</div>
+                  ) : null}
                 </td>
-                <td style={{ padding: "2px 4px" }}>
-                  {a.destino === "conductor" ? "chofer" : a.destino || "-"}
+                <td style={{ padding: "4px 4px" }}>
+                  {a.destino === "conductor" ? "chofer" : a.destino || "—"}
                 </td>
-                <td style={{ padding: "2px 0 2px 4px", color: "var(--texto-suave)",
-                  whiteSpace: "normal", wordBreak: "break-word" }}
-                  title={a.detalle || ""}>
+                <td style={{ padding: "4px 0 4px 4px", color: "var(--texto-suave)" }}>
                   {a.canal === "whatsapp" ? "WhatsApp" : a.canal === "correo" ? "Correo"
-                    : a.canal === "bitacora" ? "Bitacora" : a.canal || "-"}
-                  {a.detalle ? ` - ${a.detalle}` : ""}
+                    : a.canal === "bitacora" ? "Bitacora" : a.canal || "—"}
+                  {a.detalle ? (
+                    <div style={{ color: "var(--texto-tenue)", fontSize: 9,
+                      fontVariantNumeric: "tabular-nums", wordBreak: "break-all" }}>
+                      {a.detalle}
+                    </div>
+                  ) : null}
                 </td>
               </tr>
             ))}
