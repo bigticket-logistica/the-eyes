@@ -252,7 +252,20 @@ function chipEstado(sub) {
 // para los de horario fijo como para la alerta final, y esa ambigüedad fue la
 // que provocó un bucle de 28 mensajes al mismo conductor. La vista lo separa
 // por emisor.
-function HistorialAvisos({ caseId }) {
+//
+// Dos fuentes, porque ningun lugar las tiene juntas:
+//
+//   vw_pnr_avisos_historial  los WhatsApp, que salen de pnr_mensajes_mx
+//   pnr_envios_mx            el correo y la bitacora, que no dejan mensaje
+//
+// La vista filtra por plantillas salientes, asi que el correo al supervisor
+// nunca aparecia ahi: el analista veia "aviso inicial - supervisor" y no podia
+// saber si ademas le habia llegado el mail. Ahora se mezclan y se ordenan por
+// hora, que es como ocurrieron.
+//
+// pnr_envios_mx arranca vacia: lo anterior a hoy no tiene registro de correo y
+// no se puede reconstruir. Se decidio partir desde ahora en vez de esperar.
+function HistorialAvisos({ caseId, fechaCaso }) {
   const [avisos, setAvisos] = useState(null);
   const [abierto, setAbierto] = useState(false);
 
@@ -260,10 +273,29 @@ function HistorialAvisos({ caseId }) {
     if (!abierto || avisos) return;
     let vivo = true;
     (async () => {
-      const { data } = await sb.from("vw_pnr_avisos_historial")
-        .select("tipo,destino,creado_en,horas_restantes,estado_entrega")
-        .eq("case_id", caseId);
-      if (vivo) setAvisos(data || []);
+      const [wa, otros] = await Promise.all([
+        sb.from("vw_pnr_avisos_historial")
+          .select("tipo,destino,creado_en,horas_restantes,estado_entrega,telefono")
+          .eq("case_id", caseId),
+        sb.from("pnr_envios_mx")
+          .select("canal,destino,detalle,analista,estado,creado_en,enviado_en")
+          .eq("case_id", caseId),
+      ]);
+      if (!vivo) return;
+      const filas = [
+        ...(wa.data || []).map((a) => ({
+          tipo: a.tipo, destino: a.destino, canal: "whatsapp",
+          detalle: a.telefono, cuando: a.creado_en,
+          horas: a.horas_restantes, leido: a.estado_entrega === "leido",
+        })),
+        // El correo y la bitacora no tienen acuse, asi que nunca van en verde.
+        ...(otros.data || []).map((e) => ({
+          tipo: e.estado || "aviso", destino: e.destino, canal: e.canal,
+          detalle: e.detalle, quien: e.analista,
+          cuando: e.enviado_en || e.creado_en, horas: null, leido: false,
+        })),
+      ].sort((a, b) => new Date(a.cuando) - new Date(b.cuando));
+      setAvisos(filas);
     })();
     return () => { vivo = false; };
   }, [abierto, avisos, caseId]);
@@ -280,25 +312,67 @@ function HistorialAvisos({ caseId }) {
       </button>
 
       {abierto && (avisos === null ? (
-        <div style={{ fontSize: 10, color: "var(--texto-tenue)", padding: "3px 0" }}>…</div>
-      ) : avisos.length === 0 ? (
-        <div style={{ fontSize: 10, color: "var(--texto-tenue)", padding: "3px 0" }}>
-          Ningún aviso salió de este caso.
-        </div>
+        <div style={{ fontSize: 10, color: "var(--texto-tenue)", padding: "3px 0" }}>...</div>
       ) : (
-        avisos.map((a, i) => (
-          <div key={i} style={{ display: "flex", justifyContent: "space-between",
-            alignItems: "baseline", gap: 6, padding: "1.5px 0", fontSize: 10 }}>
-            <span style={{ color: "var(--texto-suave)" }}>
-              {a.tipo} · {a.destino === "conductor" ? "chofer" : "supervisor"}
-            </span>
-            <span style={{ fontVariantNumeric: "tabular-nums",
-              color: a.estado_entrega === "leido" ? C.verde : "var(--texto-suave)" }}>
-              {fechaHito(a.creado_en)}
-              {a.horas_restantes != null ? ` · ${a.horas_restantes} h` : ""}
-            </span>
-          </div>
-        ))
+        /* Tabla y no lista: con el canal y el numero de destino, la version de
+           una linea por aviso quedaba ilegible. Las columnas dejan comparar de
+           un vistazo que al chofer se le escribio a un numero y al supervisor a
+           otro. */
+        <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 10,
+          tableLayout: "fixed" }}>
+          <thead>
+            <tr style={{ color: "var(--texto-tenue)", textAlign: "left" }}>
+              <th style={{ fontWeight: 600, padding: "2px 4px 2px 0", width: "27%" }}>Momento</th>
+              <th style={{ fontWeight: 600, padding: "2px 4px", width: "25%" }}>Que</th>
+              <th style={{ fontWeight: 600, padding: "2px 4px", width: "17%" }}>Para</th>
+              <th style={{ fontWeight: 600, padding: "2px 0 2px 4px" }}>Canal y destino</th>
+            </tr>
+          </thead>
+          <tbody>
+            {/* La creacion del PNR encabeza siempre: es la hora contra la que se
+                mide todo lo de abajo. Sin ella el analista tenia que ir a buscar
+                a otra parte cuanto habia tardado el primer aviso. */}
+            <tr style={{ borderTop: "1px solid var(--borde)" }}>
+              <td style={{ padding: "2px 4px 2px 0", fontVariantNumeric: "tabular-nums",
+                color: "var(--texto-suave)" }}>{fechaHito(fechaCaso) || "sin fecha"}</td>
+              <td style={{ padding: "2px 4px", fontWeight: 600 }}>PNR creado en Logistic</td>
+              <td style={{ padding: "2px 4px", color: "var(--texto-tenue)" }}>-</td>
+              <td style={{ padding: "2px 0 2px 4px", color: "var(--texto-tenue)" }}>-</td>
+            </tr>
+
+            {avisos.length === 0 ? (
+              <tr style={{ borderTop: "1px solid var(--borde)" }}>
+                <td colSpan={4} style={{ padding: "3px 0", color: "var(--texto-tenue)" }}>
+                  Ningun aviso salio de este caso.
+                </td>
+              </tr>
+            ) : avisos.map((a, i) => (
+              <tr key={i} style={{ borderTop: "1px solid var(--borde)" }}>
+                <td style={{ padding: "2px 4px 2px 0", fontVariantNumeric: "tabular-nums",
+                  color: a.leido ? C.verde : "var(--texto-suave)" }}>
+                  {fechaHito(a.cuando)}
+                  {a.horas != null ? ` - ${a.horas} h` : ""}
+                </td>
+                <td style={{ padding: "2px 4px", color: "var(--texto-suave)" }}>
+                  {a.tipo}
+                  {/* Quien lo mando: solo lo tienen los envios de pnr_envios_mx.
+                      En los WhatsApp el autor no quedo guardado. */}
+                  {a.quien ? <span style={{ color: "var(--texto-tenue)" }}> - {a.quien}</span> : null}
+                </td>
+                <td style={{ padding: "2px 4px" }}>
+                  {a.destino === "conductor" ? "chofer" : a.destino || "-"}
+                </td>
+                <td style={{ padding: "2px 0 2px 4px", color: "var(--texto-suave)",
+                  overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
+                  title={a.detalle || ""}>
+                  {a.canal === "whatsapp" ? "WhatsApp" : a.canal === "correo" ? "Correo"
+                    : a.canal === "bitacora" ? "Bitacora" : a.canal || "-"}
+                  {a.detalle ? ` - ${a.detalle}` : ""}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
       ))}
     </div>
   );
@@ -1775,27 +1849,16 @@ function Detalle({ c, ahora, onPedir, trayendo, supervisor, tarea, vueltas, movi
             alternos={c.telefonos_alternos}
             extra={c.direccion_entrega} />
 
-          {/* El cumplimiento estaba como bloque propio y repetía el riel de la
-              fila. Acá va comprimido y junto al botón, que es donde importa:
-              saber a quién ya se le avisó antes de volver a avisarle. */}
-          <div style={{ border: "1px solid var(--borde)", borderRadius: 10, background: "#fff", padding: "7px 10px" }}>
-            {HITOS.map((h) => {
-              const f = fechaHito(c[h.clave]);
-              const inferido = !f && h.inferir && h.inferir(c);
-              return (
-                <div key={h.clave} style={{ display: "flex", justifyContent: "space-between",
-                  alignItems: "baseline", gap: 8, padding: "1.5px 0" }}>
-                  <span style={{ fontSize: 11, color: "var(--texto-suave)" }}>{h.etiqueta}</span>
-                  <span title={inferido ? "Ocurrió antes de que se registrara el historial" : ""}
-                    style={{ fontSize: 10.5, fontVariantNumeric: "tabular-nums",
-                      color: f ? C.verde : inferido ? "var(--texto-suave)" : "var(--texto-tenue)" }}>
-                    {f || (inferido ? "sí, sin fecha" : "pendiente")}
-                  </span>
-                </div>
-              );
-            })}
+          {/* Acá iba el resumen de hitos —Aviso, Recuerdos, Pruebas, Cargado—
+              con una fecha por línea. Se eliminó: el historial de abajo ya
+              muestra lo mismo con más detalle, separado por destinatario y con
+              las horas de plazo, así que el resumen solo repetía datos y
+              empujaba el historial hacia abajo.
 
-            <HistorialAvisos caseId={c.case_id} />
+              El riel de la fila sigue usando HITOS: ahí el resumen sí sirve,
+              porque se ve sin abrir el caso. */}
+          <div style={{ border: "1px solid var(--borde)", borderRadius: 10, background: "#fff", padding: "7px 10px" }}>
+            <HistorialAvisos caseId={c.case_id} fechaCaso={c.fecha_caso} />
           </div>
 
           <button onClick={() => setPanel((v) => !v)}
@@ -2764,6 +2827,44 @@ export default function Posventa() {
         wa.correo = false;
         wa.correo_error = String(e.message || e);
       }
+    }
+
+    // ── Quien notifico ───────────────────────────────────────────────────
+    //   fn_pnr_avisar recibe p_quien: "analista", un texto fijo, asi que la
+    //   base nunca supo QUIEN apreto el boton. Posventa necesita medir por
+    //   accion: un caso puede pasar por varios ejecutivos y el conteo semanal
+    //   es por persona, no por caso.
+    //
+    //   Se escribe aca y no en la RPC porque el navegador es el unico que sabe
+    //   quien tiene la sesion abierta. Una fila por destino y canal: tres en un
+    //   aviso inicial completo, una sola en un recordatorio.
+    //
+    //   Va despues de los envios y nunca bloquea: si este registro falla, el
+    //   aviso igual salio y eso es lo que importa. Por eso no hay await sobre
+    //   el resultado ni se toca `wa`.
+    try {
+      const quien = analista?.nombre || analista?.email || null;
+      const ahora = new Date().toISOString();
+      const filas = [];
+
+      if (wa.conductor?.ok) {
+        filas.push({ case_id: caseId, canal: "whatsapp", destino: "conductor",
+          detalle: telefono || wa.conductor?.telefono || null,
+          estado: t, analista: quien, enviado_en: ahora });
+      }
+      if (wa.supervisor?.ok) {
+        filas.push({ case_id: caseId, canal: "whatsapp", destino: "supervisor",
+          detalle: wa.supervisor?.telefono || null,
+          estado: t, analista: quien, enviado_en: ahora });
+      }
+      if (wa.correo) {
+        filas.push({ case_id: caseId, canal: "correo", destino: "supervisor",
+          detalle: datosCorreo?.supervisor_email || datosCorreo?.email || null,
+          estado: t, analista: quien, enviado_en: ahora });
+      }
+      if (filas.length) sb.from("pnr_envios_mx").insert(filas);
+    } catch (e) {
+      // El registro es para el informe, no para la operacion.
     }
 
     return wa;
