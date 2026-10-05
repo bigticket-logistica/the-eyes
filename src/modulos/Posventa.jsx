@@ -322,9 +322,9 @@ function HistorialAvisos({ caseId, fechaCaso }) {
           tableLayout: "fixed" }}>
           <thead>
             <tr style={{ color: "var(--texto-tenue)", textAlign: "left" }}>
-              <th style={{ fontWeight: 600, padding: "2px 4px 2px 0", width: "27%" }}>Momento</th>
-              <th style={{ fontWeight: 600, padding: "2px 4px", width: "25%" }}>Que</th>
-              <th style={{ fontWeight: 600, padding: "2px 4px", width: "17%" }}>Para</th>
+              <th style={{ fontWeight: 600, padding: "2px 4px 2px 0", width: "24%" }}>Momento</th>
+              <th style={{ fontWeight: 600, padding: "2px 4px", width: "21%" }}>Que</th>
+              <th style={{ fontWeight: 600, padding: "2px 4px", width: "14%" }}>Para</th>
               <th style={{ fontWeight: 600, padding: "2px 0 2px 4px" }}>Canal y destino</th>
             </tr>
           </thead>
@@ -363,7 +363,7 @@ function HistorialAvisos({ caseId, fechaCaso }) {
                   {a.destino === "conductor" ? "chofer" : a.destino || "-"}
                 </td>
                 <td style={{ padding: "2px 0 2px 4px", color: "var(--texto-suave)",
-                  overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
+                  whiteSpace: "normal", wordBreak: "break-word" }}
                   title={a.detalle || ""}>
                   {a.canal === "whatsapp" ? "WhatsApp" : a.canal === "correo" ? "Correo"
                     : a.canal === "bitacora" ? "Bitacora" : a.canal || "-"}
