@@ -265,7 +265,7 @@ function chipEstado(sub) {
 //
 // pnr_envios_mx arranca vacia: lo anterior a hoy no tiene registro de correo y
 // no se puede reconstruir. Se decidio partir desde ahora en vez de esperar.
-function HistorialAvisos({ caseId, fechaCaso }) {
+function HistorialAvisos({ caseId, fechaCaso, tarea }) {
   const [avisos, setAvisos] = useState(null);
   const [abierto, setAbierto] = useState(false);
 
@@ -361,7 +361,36 @@ function HistorialAvisos({ caseId, fechaCaso }) {
                   Ningun aviso salio de este caso.
                 </td>
               </tr>
-            ) : avisos.map((a, i) => (
+            ) : null}
+
+            {/* La resolucion del analista. No es un aviso —no sale de ninguna
+                de las dos fuentes— pero es el hecho que cierra el caso, y un
+                historial que termina en "recordatorio" deja al que lo lee sin
+                saber como acabo. */}
+            {tarea?.aprobada_en && (
+              <tr style={{ borderTop: "1px solid var(--borde)" }}>
+                <td style={{ padding: "4px 4px 4px 0", fontVariantNumeric: "tabular-nums",
+                  whiteSpace: "nowrap",
+                  color: tarea.estado === "sin_pruebas" ? C.ladrillo : C.verde }}>
+                  {fechaHito(tarea.aprobada_en)}
+                </td>
+                <td style={{ padding: "4px 6px 4px 0", textAlign: "right",
+                  color: "var(--texto-tenue)" }}>—</td>
+                <td style={{ padding: "4px 4px", fontWeight: 600,
+                  color: tarea.estado === "sin_pruebas" ? C.ladrillo : C.verde }}>
+                  {tarea.estado === "sin_pruebas" ? "Cerrado sin pruebas" : "Pruebas aprobadas"}
+                  {(tarea.aprobada_por_email || tarea.aprobada_por) ? (
+                    <div style={{ color: "var(--texto-tenue)", fontSize: 9, fontWeight: 400 }}>
+                      {tarea.aprobada_por_email || tarea.aprobada_por}
+                    </div>
+                  ) : null}
+                </td>
+                <td style={{ padding: "4px 4px", color: "var(--texto-tenue)" }}>analista</td>
+                <td style={{ padding: "4px 0 4px 4px", color: "var(--texto-tenue)" }}>Torre</td>
+              </tr>
+            )}
+
+            {avisos.map((a, i) => (
               <tr key={i} style={{ borderTop: "1px solid var(--borde)" }}>
                 <td style={{ padding: "4px 4px 4px 0", fontVariantNumeric: "tabular-nums",
                   whiteSpace: "nowrap",
@@ -772,7 +801,13 @@ function Tarjeta({ grupo, monto, casos, activa, onClick, partes }) {
 //
 // Sólido cuando el caso ya terminó, punteado mientras se mueve: un riel
 // cerrado se lee como un caso cerrado.
-function Riel({ c, color, terminal, fondo }) {
+function Riel({ c, color, terminal, fondo, tarea }) {
+  // "No hay pruebas" no es lo mismo que "todavia no llegan". El supervisor
+  // respondio dentro del plazo y dijo que no tenia nada: su gestion esta
+  // cumplida aunque el caso se pierda. Pintarlo hueco lo confundia con el
+  // supervisor que nunca contesto, y en una lista de cien casos esa diferencia
+  // es justo la que el analista necesita ver sin abrir la fila.
+  const sinPruebas = tarea?.estado === "sin_pruebas";
   return (
     <span style={{ position: "relative", display: "grid", gridTemplateColumns: `repeat(${HITOS.length}, 1fr)`, gap: 2 }}>
       <span aria-hidden="true" style={{
@@ -802,6 +837,25 @@ function Riel({ c, color, terminal, fondo }) {
               }}>{n || "–"}</span>
               <div style={{ fontSize: 8, color: "var(--texto-tenue)", whiteSpace: "nowrap", marginTop: 1 }}>
                 {f || ""}
+              </div>
+            </span>
+          );
+        }
+
+        // Sin pruebas: punto lleno en ladrillo, que es el color que ya usa la
+        // pantalla para "respondio pero no sirve". Va antes del caso terminal
+        // porque un caso cerrado dibuja raya y nunca llegaria hasta aca.
+        if (h.clave === "pruebas_recibidas_en" && !f && sinPruebas) {
+          return (
+            <span key={h.clave} title={`${h.titulo}: el supervisor declaró que no hay pruebas`}
+              style={{ position: "relative", textAlign: "center", lineHeight: 1.15, overflow: "hidden" }}>
+              <span style={{
+                display: "inline-block", width: 9, height: 9, borderRadius: "50%",
+                background: C.ladrillo, border: `2px solid ${C.ladrillo}`,
+                boxShadow: `0 0 0 2.5px ${fondo}`, verticalAlign: "middle",
+              }} />
+              <div style={{ fontSize: 8, color: C.ladrillo, whiteSpace: "nowrap", marginTop: 1 }}>
+                sin pruebas
               </div>
             </span>
           );
@@ -1894,7 +1948,7 @@ function Detalle({ c, ahora, onPedir, trayendo, supervisor, tarea, vueltas, movi
               El riel de la fila sigue usando HITOS: ahí el resumen sí sirve,
               porque se ve sin abrir el caso. */}
           <div style={{ border: "1px solid var(--borde)", borderRadius: 10, background: "#fff", padding: "7px 10px" }}>
-            <HistorialAvisos caseId={c.case_id} fechaCaso={c.fecha_caso} />
+            <HistorialAvisos caseId={c.case_id} fechaCaso={c.fecha_caso} tarea={tarea} />
           </div>
 
           <button onClick={() => setPanel((v) => !v)}
@@ -2158,7 +2212,8 @@ function Fila({ c, abierta, onAbrir, onPedir, trayendo, ahora, supervisor, tarea
             </span>
           )}
         </span>
-        <Riel c={c} color={COLOR_ESTADO[c.sub_estado] || g.color} terminal={g.terminal} fondo={fondo} />
+        <Riel c={c} color={COLOR_ESTADO[c.sub_estado] || g.color} terminal={g.terminal}
+          fondo={fondo} tarea={tarea} />
         <span style={{ textAlign: "right", fontSize: 13, fontWeight: 600, color: "var(--texto)" }}>
           {dinero(c.monto)}
         </span>
@@ -2374,7 +2429,7 @@ export default function Posventa() {
     // foto y en qué quedó, en vez de ofrecer crearla otra vez.
     const [tar, vlt] = await Promise.all([
       sb.from("pnr_tareas_mx")
-        .select("id, case_id, sc, estado, supervisor_nombre, creada_en, fotos, comentario, veces_pedida, motivo_reabrir, aprobada_en, aprobada_por")
+        .select("id, case_id, sc, estado, supervisor_nombre, creada_en, fotos, comentario, veces_pedida, motivo_reabrir, aprobada_en, aprobada_por, aprobada_por_email, aprobada_nota")
         .in("estado", ["pendiente", "vista", "completada", "sin_pruebas"])
         .limit(5000),
       sb.from("pnr_tareas_vueltas").select("*").order("vuelta").limit(5000),
