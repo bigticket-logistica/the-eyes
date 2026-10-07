@@ -117,4 +117,9 @@ export const SERVICE_CENTERS_MX = [
   // torre: si se agrega un centro allá y no acá, la torre lo captura pero el
   // front no lo muestra.
   "SMXRV1",
+  // SMX2 · asignado a Jose Antonio Chavez, agregado el 05-oct-2026.
+  "SMX2",
+  // SMX22 · asignado a Juan Mancilla, agregado el 07-oct-2026. Ojo: SMX2 y
+  // SMX22 son centros distintos y se escriben casi igual.
+  "SMX22",
 ];
