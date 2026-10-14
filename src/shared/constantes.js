@@ -122,4 +122,8 @@ export const SERVICE_CENTERS_MX = [
   // SMX22 · asignado a Juan Mancilla, agregado el 07-oct-2026. Ojo: SMX2 y
   // SMX22 son centros distintos y se escriben casi igual.
   "SMX22",
+  // SMX9 · asignado a Jose Antonio Chavez, agregado el 14-oct-2026. Estaba en
+  // operacion desde antes pero nunca entro a ninguna de las dos listas, asi
+  // que la torre no lo capturaba y el front no lo ofrecia.
+  "SMX9",
 ];
