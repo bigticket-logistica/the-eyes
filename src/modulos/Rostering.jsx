@@ -1,0 +1,342 @@
+import { useState, useEffect, useMemo, useCallback } from "react";
+import { sb } from "../shared/supabase.js";
+
+// ═══════════════════════════════════════════════════════════════════════════
+// ROSTERING MX · torre de control
+//
+// QUÉ ES EL ROSTERING Y POR QUÉ IMPORTA
+//   MELI acepta un viaje y el supervisor tiene que asignarle tres cosas:
+//   chofer, placa y ruta. Si alguna falta cuando llega la hora de la cita, el
+//   vehículo no sale y MELI lo cuenta como no ejecutado. Hasta ahora nadie
+//   miraba eso hasta que ya había pasado.
+//
+// POR QUÉ LO MALO VA ARRIBA
+//   Un tablero ordenado alfabéticamente obliga a leerlo entero para encontrar
+//   el problema. Acá el centro con lo peor sube solo, y el que está completo
+//   se hunde al fondo. Si todo está verde, no hay nada que leer.
+//
+// LOS TRES COLORES
+//   rojo      falta chofer o placa — el rostering ni empezó
+//   amarillo  tiene chofer y placa pero no tiene ruta — quedó a medias
+//   verde     completo, operando o terminado
+//
+//   El amarillo existe porque es el caso que no se veía: en la pantalla de
+//   MELI dice "Rutas no asignadas" y el supervisor cree que ya terminó.
+//
+// EL RELOJ VA CONTRA LA CITA, NO CONTRA EL LOCKDATE
+//   MELI da de plazo técnico la cita + 10 horas (eran 16 hasta junio, lo
+//   cambiaron). Pero rosterizar a las 20:00 un viaje que debía cargar a las
+//   07:00 no lo salva: el camión no salió igual. El plazo real es la cita, y
+//   eso es lo que cuenta el contador.
+//
+// DE DÓNDE SALEN LOS DATOS
+//   vw_torre_rostering_vivo, que se arma con la captura más reciente de
+//   meli_rostering_planificado — una cada 5 minutos — cruzada con
+//   rutas_monitoreo_mx para el avance real.
+//
+//   El estado NO se deduce del cruce: sale de travelStatus, que es lo que MELI
+//   dice del viaje. La versión anterior adivinaba por placa y marcaba como no
+//   salidos a cinco choferes que estaban en ruta.
+// ═══════════════════════════════════════════════════════════════════════════
+
+const C = {
+  verde:    "#1D9E75",
+  verdeBg:  "#E1F5EE",
+  ambar:    "#BA7517",
+  ambarBg:  "#FAEEDA",
+  rojo:     "#E24B4A",
+  rojoBg:   "#FCEBEB",
+  gris:     "var(--texto-suave)",
+  tenue:    "var(--texto-tenue)",
+};
+
+// Un viaje cae en un solo semáforo. El orden de la evaluación es el orden de
+// gravedad: primero lo que ya no tiene arreglo, al final lo que está bien.
+function semaforo(v) {
+  if (v.estado === "PERDIDO" || v.estado === "NO_SALIO") return "rojo";
+  if (v.estado === "SIN_ASIGNAR" || v.estado === "POR_VENCER") return "rojo";
+  if (v.estado === "ROSTEREADO_SIN_RUTA") return "ambar";
+  return "verde";
+}
+
+const ETIQUETA = {
+  PERDIDO:             "Cita vencida sin asignar",
+  NO_SALIO:            "No salió",
+  SIN_ASIGNAR:         "Sin chofer ni placa",
+  POR_VENCER:          "Por vencer",
+  ROSTEREADO_SIN_RUTA: "Sin ruta asignada",
+  LISTO_PARA_SALIR:    "Listo para salir",
+  OPERANDO:            "En ruta",
+  TERMINADO:           "Terminado",
+};
+
+// El contador hacia la cita. En negativo se lee como atraso, no como tiempo
+// restante: "hace 2:15" dice algo distinto que "-2:15".
+function reloj(min) {
+  if (min == null) return "—";
+  const m = Math.abs(Math.round(min));
+  const txt = `${Math.floor(m / 60)}:${String(m % 60).padStart(2, "0")}`;
+  return min < 0 ? `hace ${txt}` : txt;
+}
+
+function Punto({ color }) {
+  const c = color === "rojo" ? C.rojo : color === "ambar" ? C.ambar : C.verde;
+  return <span style={{ display: "inline-block", width: 9, height: 9,
+    borderRadius: "50%", background: c, flexShrink: 0 }} />;
+}
+
+function Pill({ color, children }) {
+  const m = { rojo: [C.rojoBg, C.rojo], ambar: [C.ambarBg, C.ambar], verde: [C.verdeBg, C.verde] };
+  const [bg, fg] = m[color] || m.verde;
+  return (
+    <span style={{ background: bg, color: fg, fontSize: 10.5, fontWeight: 600,
+      padding: "2px 7px", borderRadius: 999, whiteSpace: "nowrap" }}>
+      {children}
+    </span>
+  );
+}
+
+// Barra de avance de la ruta. Solo aparece si la ruta existe y tiene paquetes:
+// una barra en cero para un viaje que no arrancó se lee como "va mal" cuando
+// en realidad todavía no empieza.
+function Avance({ total, entregados }) {
+  if (!total) return <span style={{ fontSize: 11, color: C.tenue }}>—</span>;
+  const pct = Math.round((entregados / total) * 100);
+  return (
+    <span style={{ display: "inline-flex", alignItems: "center", gap: 7 }}>
+      <span style={{ width: 70, height: 5, borderRadius: 3, background: "var(--borde)",
+        overflow: "hidden", flexShrink: 0 }}>
+        <span style={{ display: "block", width: `${pct}%`, height: "100%",
+          background: pct >= 95 ? C.verde : "var(--navy, #1a3a6b)" }} />
+      </span>
+      <span style={{ fontSize: 11, fontVariantNumeric: "tabular-nums", color: C.gris }}>
+        {entregados}/{total}
+      </span>
+    </span>
+  );
+}
+
+export default function Rostering() {
+  const [filas, setFilas] = useState(null);
+  const [error, setError] = useState(null);
+  const [abiertos, setAbiertos] = useState(new Set());
+  const [visto, setVisto] = useState(null);
+
+  const cargar = useCallback(async () => {
+    const { data, error } = await sb.from("vw_torre_rostering_vivo")
+      .select("travel_id, sc, servicio, vehiculo, flota, estado, travel_status, "
+            + "driver_name, vehicle_plate, ruta_id, ruta_nombre, ruta_paradas, "
+            + "ruta_region, eta_visible, min_hasta_eta, min_hasta_lockdate, "
+            + "id_ruta, ruta_status, salida_real, min_atraso_salida, "
+            + "pkg_total, pkg_delivered, chofer_cambiado, captura_hora")
+      .order("sc").order("eta_visible");
+    if (error) { setError(error.message); return; }
+    setError(null);
+    setFilas(data || []);
+    setVisto(new Date());
+  }, []);
+
+  useEffect(() => {
+    cargar();
+    // El rostering se captura cada 5 minutos; releer cada uno mantiene el
+    // contador vivo sin pedirle más a la base de lo que la base sabe.
+    const t = setInterval(() => { if (!document.hidden) cargar(); }, 60000);
+    return () => clearInterval(t);
+  }, [cargar]);
+
+  // Agrupado por centro, con el peor semáforo arriba. Dentro de cada centro
+  // los viajes también van por gravedad: el analista abre el rojo y lo primero
+  // que ve es lo que tiene que resolver.
+  const centros = useMemo(() => {
+    if (!filas) return [];
+    const m = new Map();
+    for (const v of filas) {
+      if (!m.has(v.sc)) m.set(v.sc, { sc: v.sc, viajes: [], rojo: 0, ambar: 0, verde: 0 });
+      const g = m.get(v.sc);
+      g.viajes.push(v);
+      g[semaforo(v)]++;
+    }
+    const peso = { rojo: 0, ambar: 1, verde: 2 };
+    return [...m.values()].map((g) => ({
+      ...g,
+      color: g.rojo ? "rojo" : g.ambar ? "ambar" : "verde",
+      viajes: g.viajes.sort((a, b) =>
+        peso[semaforo(a)] - peso[semaforo(b)]
+        || (a.min_hasta_eta ?? 0) - (b.min_hasta_eta ?? 0)),
+    })).sort((a, b) =>
+      peso[a.color] - peso[b.color] || b.rojo - a.rojo || b.ambar - a.ambar
+      || a.sc.localeCompare(b.sc));
+  }, [filas]);
+
+  const total = useMemo(() => centros.reduce((a, g) => ({
+    rojo: a.rojo + g.rojo, ambar: a.ambar + g.ambar, verde: a.verde + g.verde,
+  }), { rojo: 0, ambar: 0, verde: 0 }), [centros]);
+
+  const alternar = (sc) => setAbiertos((s) => {
+    const n = new Set(s);
+    n.has(sc) ? n.delete(sc) : n.add(sc);
+    return n;
+  });
+
+  if (error) {
+    return <div style={{ padding: 20, color: C.rojo, fontSize: 13 }}>
+      No se pudo cargar el rostering: {error}
+    </div>;
+  }
+  if (filas === null) {
+    return <div style={{ padding: 20, color: C.gris, fontSize: 13 }}>Cargando…</div>;
+  }
+
+  return (
+    <div style={{ height: "100%", overflow: "auto", padding: "14px 18px" }}>
+
+      {/* ── Resumen ──────────────────────────────────────────────────────
+          Tres cifras y nada más. Si rojo y ámbar están en cero, la jornada
+          está limpia y no hace falta abrir ningún centro. */}
+      <div style={{ display: "flex", alignItems: "center", gap: 18, flexWrap: "wrap",
+        marginBottom: 12 }}>
+        <strong style={{ fontSize: 14 }}>Rostering</strong>
+        <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
+          <Punto color="rojo" />
+          <span style={{ fontSize: 13, fontWeight: 700, color: total.rojo ? C.rojo : C.tenue }}>
+            {total.rojo}
+          </span>
+          <span style={{ fontSize: 11.5, color: C.gris }}>sin asignar</span>
+        </span>
+        <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
+          <Punto color="ambar" />
+          <span style={{ fontSize: 13, fontWeight: 700, color: total.ambar ? C.ambar : C.tenue }}>
+            {total.ambar}
+          </span>
+          <span style={{ fontSize: 11.5, color: C.gris }}>sin ruta</span>
+        </span>
+        <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
+          <Punto color="verde" />
+          <span style={{ fontSize: 13, fontWeight: 700, color: C.verde }}>{total.verde}</span>
+          <span style={{ fontSize: 11.5, color: C.gris }}>en regla</span>
+        </span>
+        <span style={{ marginLeft: "auto", fontSize: 11, color: C.tenue }}>
+          captura {filas[0]?.captura_hora || "—"}
+          {visto ? ` · visto ${visto.toLocaleTimeString("es-MX", { hour: "2-digit", minute: "2-digit" })}` : ""}
+        </span>
+      </div>
+
+      {centros.length === 0 && (
+        <div style={{ fontSize: 13, color: C.gris }}>No hay viajes en la captura.</div>
+      )}
+
+      {centros.map((g) => {
+        const open = abiertos.has(g.sc);
+        const borde = g.color === "rojo" ? C.rojo : g.color === "ambar" ? C.ambar : "var(--borde)";
+        return (
+          <div key={g.sc} style={{ border: `1px solid ${borde}`, borderRadius: 11,
+            marginBottom: 8, overflow: "hidden", background: "#fff" }}>
+
+            {/* Cabecera del centro: el semáforo y el desglose. Plegada por
+                defecto — el tablero se lee de un vistazo y se abre solo lo
+                que hay que trabajar. */}
+            <button onClick={() => alternar(g.sc)}
+              style={{ width: "100%", textAlign: "left", border: "none", cursor: "pointer",
+                background: g.color === "rojo" ? C.rojoBg : g.color === "ambar" ? C.ambarBg : "transparent",
+                padding: "9px 13px", display: "flex", alignItems: "center", gap: 11,
+                flexWrap: "wrap" }}>
+              <span style={{ fontSize: 10, color: C.gris }}>{open ? "▾" : "▸"}</span>
+              <Punto color={g.color} />
+              <strong style={{ fontSize: 13, minWidth: 64 }}>{g.sc}</strong>
+              <span style={{ fontSize: 11.5, color: C.gris }}>
+                {g.viajes.length} viaje{g.viajes.length > 1 ? "s" : ""}
+              </span>
+              {g.rojo > 0 && <Pill color="rojo">{g.rojo} sin asignar</Pill>}
+              {g.ambar > 0 && <Pill color="ambar">{g.ambar} sin ruta</Pill>}
+              {g.rojo === 0 && g.ambar === 0 && <Pill color="verde">completo</Pill>}
+            </button>
+
+            {open && (
+              <div style={{ padding: "0 13px 10px" }}>
+                <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 11.5,
+                  tableLayout: "fixed" }}>
+                  <thead>
+                    <tr style={{ color: C.tenue, textAlign: "left", fontSize: 9.5,
+                      textTransform: "uppercase", letterSpacing: 0.3 }}>
+                      <th style={{ fontWeight: 600, padding: "4px 6px 5px 0", width: "12%" }}>Cita</th>
+                      <th style={{ fontWeight: 600, padding: "4px 6px 5px 0", width: "17%" }}>Estado</th>
+                      <th style={{ fontWeight: 600, padding: "4px 6px 5px 0", width: "20%" }}>Chofer</th>
+                      <th style={{ fontWeight: 600, padding: "4px 6px 5px 0", width: "13%" }}>Placa</th>
+                      <th style={{ fontWeight: 600, padding: "4px 6px 5px 0", width: "16%" }}>Ruta</th>
+                      <th style={{ fontWeight: 600, padding: "4px 0 5px 0" }}>Avance</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {g.viajes.map((v) => {
+                      const s = semaforo(v);
+                      const falta = v.estado === "SIN_ASIGNAR" || v.estado === "POR_VENCER"
+                                 || v.estado === "PERDIDO";
+                      return (
+                        <tr key={v.travel_id} style={{ borderTop: "1px solid var(--borde)" }}>
+                          <td style={{ padding: "5px 6px 5px 0", whiteSpace: "nowrap",
+                            fontVariantNumeric: "tabular-nums" }}>
+                            <div>{(v.eta_visible || "").slice(0, 5)}</div>
+                            {/* El contador solo donde hay algo que correr: en un
+                                viaje terminado el tiempo restante no significa nada. */}
+                            {falta && (
+                              <div style={{ fontSize: 9.5, color: v.min_hasta_eta < 0 ? C.rojo : C.ambar }}>
+                                {reloj(v.min_hasta_eta)}
+                              </div>
+                            )}
+                          </td>
+                          <td style={{ padding: "5px 6px 5px 0" }}>
+                            <Pill color={s}>{ETIQUETA[v.estado] || v.estado}</Pill>
+                          </td>
+                          <td style={{ padding: "5px 6px 5px 0", overflow: "hidden",
+                            textOverflow: "ellipsis", whiteSpace: "nowrap" }}
+                            title={v.driver_name || ""}>
+                            {v.driver_name || <span style={{ color: C.rojo }}>sin chofer</span>}
+                            {/* Si la ruta la está manejando otra persona, el
+                                rostering quedó desactualizado. */}
+                            {v.chofer_cambiado && (
+                              <div style={{ fontSize: 9.5, color: C.ambar }}>
+                                en ruta va otro
+                              </div>
+                            )}
+                          </td>
+                          <td style={{ padding: "5px 6px 5px 0", fontVariantNumeric: "tabular-nums",
+                            overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                            {v.vehicle_plate || <span style={{ color: C.rojo }}>sin placa</span>}
+                          </td>
+                          <td style={{ padding: "5px 6px 5px 0", overflow: "hidden",
+                            textOverflow: "ellipsis", whiteSpace: "nowrap" }}
+                            title={v.ruta_region || ""}>
+                            {v.ruta_nombre
+                              ? <>
+                                  <div>{v.ruta_nombre}</div>
+                                  {v.ruta_paradas && (
+                                    <div style={{ fontSize: 9.5, color: C.tenue }}>
+                                      {v.ruta_paradas} paradas
+                                    </div>
+                                  )}
+                                </>
+                              : <span style={{ color: C.ambar }}>sin ruta</span>}
+                          </td>
+                          <td style={{ padding: "5px 0" }}>
+                            <Avance total={v.pkg_total} entregados={v.pkg_delivered} />
+                            {v.id_ruta && (
+                              <div style={{ fontSize: 9.5, color: C.tenue,
+                                fontVariantNumeric: "tabular-nums" }}>
+                                #{v.id_ruta}
+                                {v.min_atraso_salida > 15 ? ` · salió ${v.min_atraso_salida} min tarde` : ""}
+                              </div>
+                            )}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
