@@ -682,9 +682,15 @@ export default function TorreControl() {
               {conAlerta.flatMap((v) => [
                 <tr key={v.travel_id} style={{ borderTop: "1px solid var(--borde)",
                   background: v.alerta_inactividad_vehiculo ? C.rojoBg : "transparent" }}>
+                  {/* El id numérico arriba porque es con lo que se busca en
+                      Monitoreo y en el buscador de casos; el nombre abajo en
+                      chico, que sirve para ubicarse pero no para pegar. */}
                   <td style={{ padding: "6px 6px 6px 13px", fontVariantNumeric: "tabular-nums",
                     whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-                    {v.ruta_nombre || `#${v.id_ruta}`}
+                    <div>{v.id_ruta || "—"}</div>
+                    {v.ruta_nombre && (
+                      <div style={{ fontSize: 9.5, color: C.tenue }}>{v.ruta_nombre}</div>
+                    )}
                   </td>
                   <td style={{ padding: "6px", fontWeight: 600 }}>{v.sc}</td>
                   <td style={{ padding: "6px", overflow: "hidden",
@@ -708,7 +714,7 @@ export default function TorreControl() {
                     <td colSpan={6} style={{ padding: "0 13px 10px",
                       background: "var(--fondo, #fafafa)" }}>
                       {panel.tipo === "zona"
-                        ? <PanelZona idRuta={v.id_ruta} fecha={v.fecha_operativa} />
+                        ? <PanelZona idRuta={v.id_ruta} fecha={dia} />
                         : <PanelIncidencias idRuta={v.id_ruta} />}
                     </td>
                   </tr>
@@ -844,19 +850,17 @@ export default function TorreControl() {
                           <td style={{ padding: "5px 6px 5px 0", overflow: "hidden",
                             textOverflow: "ellipsis", whiteSpace: "nowrap" }}
                             title={v.ruta_region || ""}>
-                            {v.ruta_nombre ? (
+                            {v.id_ruta || v.ruta_nombre ? (
                               <>
-                                <div>{v.ruta_nombre}</div>
-                                {v.ruta_paradas && (
-                                  <div style={{ fontSize: 9.5, color: C.tenue }}>
-                                    {v.ruta_paradas} paradas
-                                  </div>
-                                )}
+                                <div style={{ fontVariantNumeric: "tabular-nums" }}>
+                                  {v.id_ruta || v.ruta_nombre}
+                                </div>
+                                <div style={{ fontSize: 9.5, color: C.tenue }}>
+                                  {[v.id_ruta ? v.ruta_nombre : null,
+                                    v.ruta_paradas ? `${v.ruta_paradas} paradas` : null]
+                                    .filter(Boolean).join(" · ")}
+                                </div>
                               </>
-                            ) : v.id_ruta ? (
-                              <span style={{ fontVariantNumeric: "tabular-nums" }}>
-                                #{v.id_ruta}
-                              </span>
                             ) : (
                               <span style={{ color: C.tenue }}>—</span>
                             )}
@@ -889,7 +893,7 @@ export default function TorreControl() {
                             <td colSpan={6} style={{ padding: "0 0 10px",
                               background: "var(--fondo, #fafafa)" }}>
                               {panel.tipo === "zona"
-                                ? <PanelZona idRuta={v.id_ruta} fecha={v.fecha_operativa} />
+                                ? <PanelZona idRuta={v.id_ruta} fecha={dia} />
                                 : <PanelIncidencias idRuta={v.id_ruta} />}
                             </td>
                           </tr>
