@@ -230,10 +230,19 @@ export default function TorreControl() {
     if (!filas) return [];
     const m = new Map();
     for (const v of filas) {
-      if (!m.has(v.sc)) m.set(v.sc, { sc: v.sc, viajes: [], rojo: 0, ambar: 0, verde: 0 });
+      if (!m.has(v.sc)) m.set(v.sc, { sc: v.sc, viajes: [], rojo: 0, ambar: 0, verde: 0,
+        inc: 0, pnr: 0, ale: 0, zonaAlta: 0, zonaMedia: 0 });
       const g = m.get(v.sc);
       g.viajes.push(v);
       g[semaforo(v)]++;
+      // Las señales también se suman al centro: con todo plegado, el detalle
+      // de la fila no se ve, y un tablero que obliga a abrir trece centros
+      // para saber dónde hay algo no es un tablero.
+      g.inc  += v.incidencias_abiertas || 0;
+      g.pnr  += v.pnr || 0;
+      g.ale  += v.alertas || 0;
+      if (v.zona_alta)  g.zonaAlta++;
+      if (v.zona_media) g.zonaMedia++;
     }
     const peso = { rojo: 0, ambar: 1, verde: 2 };
     return [...m.values()].map((g) => ({
@@ -243,8 +252,12 @@ export default function TorreControl() {
         peso[semaforo(a)] - peso[semaforo(b)]
         || (a.min_hasta_eta ?? 0) - (b.min_hasta_eta ?? 0)),
     })).sort((a, b) =>
-      peso[a.color] - peso[b.color] || b.rojo - a.rojo || b.ambar - a.ambar
-      || a.sc.localeCompare(b.sc));
+      peso[a.color] - peso[b.color] || b.rojo - a.rojo
+      // Después del rostering ordena lo que de verdad está pasando en la
+      // calle: incidencias abiertas, reclamos y zonas peligrosas. Un centro
+      // en verde con tres incidencias sube sobre uno limpio.
+      || (b.inc + b.pnr + b.zonaAlta) - (a.inc + a.pnr + a.zonaAlta)
+      || b.ambar - a.ambar || a.sc.localeCompare(b.sc));
   }, [filas]);
 
   const total = useMemo(() => centros.reduce((a, g) => ({
@@ -374,7 +387,38 @@ export default function TorreControl() {
               </span>
               {g.rojo > 0 && <Pill color="rojo">{g.rojo} sin resolver</Pill>}
               {g.ambar > 0 && <Pill color="ambar">{g.ambar} por vencer</Pill>}
-              {g.rojo === 0 && g.ambar === 0 && <Pill color="verde">en regla</Pill>}
+              {g.rojo === 0 && g.ambar === 0 && g.inc === 0 && g.pnr === 0
+                && g.zonaAlta === 0 && <Pill color="verde">en regla</Pill>}
+
+              {/* Las señales del centro, a la derecha y en texto, no en
+                  pastilla: son avisos de "mira esto", y una pastilla las
+                  pondría al mismo nivel que el estado del rostering, que es
+                  lo único que va a bitácora. */}
+              <span style={{ marginLeft: "auto", display: "inline-flex", gap: 10,
+                paddingRight: 4 }}>
+                {g.inc > 0 && (
+                  <span style={{ fontSize: 11, color: C.rojo }}>
+                    {g.inc} incidencia{g.inc > 1 ? "s" : ""}
+                  </span>
+                )}
+                {g.pnr > 0 && (
+                  <span style={{ fontSize: 11, color: C.rojo }}>{g.pnr} PNR</span>
+                )}
+                {g.zonaAlta > 0 ? (
+                  <span style={{ fontSize: 11, color: C.rojo }}>
+                    {g.zonaAlta} en zona alta
+                  </span>
+                ) : g.zonaMedia > 0 ? (
+                  <span style={{ fontSize: 11, color: C.ambar }}>
+                    {g.zonaMedia} en zona media
+                  </span>
+                ) : null}
+                {g.ale > 0 && (
+                  <span style={{ fontSize: 11, color: C.ambar }}>
+                    {g.ale} alerta{g.ale > 1 ? "s" : ""}
+                  </span>
+                )}
+              </span>
             </button>
 
             {open && (
