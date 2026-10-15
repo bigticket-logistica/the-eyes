@@ -147,6 +147,21 @@ function Señales({ v }) {
   );
 }
 
+// Un indicador del día. El color solo aparece cuando el número pide atención:
+// un cero en "detenidas" no necesita ser verde para que se entienda que está
+// bien, y pintar todo de colores hace que ninguno destaque.
+function Kpi({ titulo, valor, sub, color }) {
+  return (
+    <div style={{ background: "#fff", border: "1px solid var(--borde)",
+      borderRadius: 10, padding: "9px 14px", minWidth: 128 }}>
+      <div style={{ fontSize: 10.5, color: C.gris }}>{titulo}</div>
+      <div style={{ fontSize: 21, fontWeight: 600, lineHeight: 1.2,
+        color: color || "inherit" }}>{valor}</div>
+      <div style={{ fontSize: 10, color: C.tenue }}>{sub}</div>
+    </div>
+  );
+}
+
 function Punto({ color }) {
   const c = color === "rojo" ? C.rojo : color === "ambar" ? C.ambar : C.verde;
   return <span style={{ display: "inline-block", width: 9, height: 9,
@@ -206,7 +221,9 @@ export default function TorreControl() {
             + "id_ruta, ruta_status, salida_real, min_atraso_salida, "
             + "pkg_total, pkg_delivered, chofer_cambiado, captura, captura_hora, "
             + "alertas, incidencias, incidencias_abiertas, pnr, pnr_monto, "
-            + "paradas_en_zona, zona_alta, zona_media")
+            + "paradas_en_zona, zona_alta, zona_media, pkg_not_delivered, "
+            + "alerta_ruta_demorada, alerta_inactividad_vehiculo, "
+            + "alerta_despacho_demorado, alerta_stemout_demorado")
       .eq("fecha_operativa", dia)
       .order("sc").order("eta_visible");
     if (error) { setError(error.message); return; }
@@ -258,6 +275,35 @@ export default function TorreControl() {
       // en verde con tres incidencias sube sobre uno limpio.
       || (b.inc + b.pnr + b.zonaAlta) - (a.inc + a.pnr + a.zonaAlta)
       || b.ambar - a.ambar || a.sc.localeCompare(b.sc));
+  }, [filas]);
+
+  // ── Los indicadores del día ─────────────────────────────────────────────
+  //   Salen de las mismas filas que el tablero, no de otra consulta: así no
+  //   puede pasar que el encabezado diga una cosa y el detalle otra, que es el
+  //   problema clásico de tener dos pantallas con la misma información.
+  //
+  //   Solo cuentan los viajes que tienen ruta operando. Un viaje sin ruta no
+  //   tiene paquetes ni avance, y meterlo en el denominador hunde el
+  //   porcentaje sin que nadie haya hecho nada mal.
+  const kpi = useMemo(() => {
+    if (!filas) return null;
+    const conRuta = filas.filter((f) => f.id_ruta);
+    const sum = (k) => conRuta.reduce((a, f) => a + (f[k] || 0), 0);
+    const cargados = sum("pkg_total");
+    return {
+      cargados,
+      entregados: sum("pkg_delivered"),
+      pct: cargados ? Math.round((sum("pkg_delivered") / cargados) * 100) : 0,
+      rutas: conRuta.length,
+      activas: conRuta.filter((f) => f.ruta_status === "active").length,
+      cerradas: conRuta.filter((f) => f.ruta_status === "close").length,
+      detenidas: conRuta.filter((f) => f.alerta_inactividad_vehiculo).length,
+      // Tres alertas distintas que significan lo mismo para quien mira: la
+      // carga no se está moviendo como debería.
+      demoradas: conRuta.filter((f) => f.alerta_ruta_demorada
+        || f.alerta_despacho_demorado || f.alerta_stemout_demorado).length,
+      fallidos: sum("pkg_not_delivered"),
+    };
   }, [filas]);
 
   const total = useMemo(() => centros.reduce((a, g) => ({
@@ -356,6 +402,24 @@ export default function TorreControl() {
           </button>
         </span>
       </div>
+
+      {/* Los indicadores del día, antes del tablero. Responden "cómo va la
+          operación"; el tablero de abajo responde "dónde hay que meterse". */}
+      {kpi && kpi.rutas > 0 && (
+        <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 14 }}>
+          <Kpi titulo="Avance de reparto" valor={`${kpi.pct}%`}
+            sub={`${kpi.entregados.toLocaleString("es-MX")} / ${kpi.cargados.toLocaleString("es-MX")} paquetes`}
+            color="var(--navy)" />
+          <Kpi titulo="Rutas operando" valor={kpi.rutas}
+            sub={`${kpi.activas} en ruta · ${kpi.cerradas} cerradas`} />
+          <Kpi titulo="Detenidas" valor={kpi.detenidas} sub="vehículo sin actividad"
+            color={kpi.detenidas ? C.rojo : C.verde} />
+          <Kpi titulo="Demoradas" valor={kpi.demoradas} sub="ruta, despacho o stem-out"
+            color={kpi.demoradas ? C.ambar : C.verde} />
+          <Kpi titulo="No entregados" valor={kpi.fallidos.toLocaleString("es-MX")}
+            sub="reparto de hoy" color={kpi.fallidos ? C.ambar : undefined} />
+        </div>
+      )}
 
       {centros.length === 0 && (
         <div style={{ fontSize: 13, color: C.gris }}>No hay viajes en la captura.</div>
