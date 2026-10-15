@@ -1,5 +1,7 @@
-import { useState, useEffect, useMemo, useCallback } from "react";
+import { useState, useEffect, useMemo, useCallback, useRef, Fragment } from "react";
 import { sb } from "../shared/supabase.js";
+import L from "leaflet";
+import "leaflet/dist/leaflet.css";
 
 // ═══════════════════════════════════════════════════════════════════════════
 // TORRE DE CONTROL MX
@@ -103,6 +105,15 @@ const ETIQUETA = {
 
 // El contador hacia la cita. En negativo se lee como atraso, no como tiempo
 // restante: "hace 2:15" dice algo distinto que "-2:15".
+// Día y hora en formato de México, corto. Las incidencias traen timestamp
+// completo y en la tabla solo cabe lo justo.
+function fechaCorta(ts) {
+  if (!ts) return "";
+  return new Date(ts).toLocaleString("es-MX", {
+    timeZone: "America/Mexico_City", day: "2-digit", month: "2-digit",
+    hour: "2-digit", minute: "2-digit", hour12: false });
+}
+
 function reloj(min) {
   if (min == null) return "—";
   const m = Math.abs(Math.round(min));
@@ -116,7 +127,7 @@ function reloj(min) {
 //
 // Ninguna cambia el color del renglón. Son avisos de "mira esto", no estados
 // del viaje: el rojo está reservado para lo que va a bitácora.
-function Señales({ v }) {
+function Señales({ v, onPanel }) {
   const marcas = [];
   if (v.incidencias_abiertas > 0) {
     marcas.push(["inc", `${v.incidencias_abiertas} abierta${v.incidencias_abiertas > 1 ? "s" : ""}`, C.rojo]);
@@ -149,11 +160,27 @@ function Señales({ v }) {
   if (!marcas.length) return null;
   return (
     <span style={{ display: "inline-flex", gap: 7, flexWrap: "wrap" }}>
-      {marcas.map(([k, txt, col]) => (
-        <span key={k} style={{ fontSize: 9.5, color: col, whiteSpace: "nowrap" }}>
-          {txt}
-        </span>
-      ))}
+      {marcas.map(([k, txt, col]) => {
+        // Incidencias y zona abren panel; las alertas no, porque de ellas
+        // solo tenemos el booleano y no habría nada que mostrar adentro.
+        const abre = k === "inc" ? "inc" : k === "zon" ? "zona" : null;
+        if (!abre) {
+          return (
+            <span key={k} style={{ fontSize: 9.5, color: col, whiteSpace: "nowrap" }}>
+              {txt}
+            </span>
+          );
+        }
+        return (
+          <button key={k} onClick={(e) => { e.stopPropagation(); onPanel(abre); }}
+            style={{ fontSize: 9.5, color: col, whiteSpace: "nowrap", border: "none",
+              background: "none", padding: 0, cursor: "pointer",
+              textDecoration: "underline", textDecorationStyle: "dotted",
+              textUnderlineOffset: 2, fontFamily: "inherit" }}>
+            {txt}
+          </button>
+        );
+      })}
     </span>
   );
 }
@@ -170,6 +197,170 @@ function Kpi({ titulo, valor, sub, color }) {
         color: color || "inherit" }}>{valor}</div>
       <div style={{ fontSize: 10, color: C.tenue }}>{sub}</div>
     </div>
+  );
+}
+
+// ── Panel de zona peligrosa ────────────────────────────────────────────────
+//   El mapa con el polígono, la camioneta y las paradas. Se pide aparte y solo
+//   al abrir: vw_seg_rutas_en_zona trae el arreglo completo de paradas con sus
+//   coordenadas, y cargarlo para las trece rutas de un día sería traer miles
+//   de puntos que nadie va a mirar.
+function PanelZona({ idRuta, fecha }) {
+  const [d, setD] = useState(null);
+  const [err, setErr] = useState(null);
+  const div = useRef(null);
+  const mapa = useRef(null);
+
+  useEffect(() => {
+    let vivo = true;
+    (async () => {
+      const { data, error } = await sb.from("vw_seg_rutas_en_zona")
+        .select("zonas, paradas, veh_lat, veh_lng, veh_metros_a_zona, "
+              + "paradas_en_zona, en_zona_pendientes, conductor_nombre, placa")
+        .eq("fecha", fecha).eq("ruta_id", idRuta).maybeSingle();
+      if (!vivo) return;
+      if (error) { setErr(error.message); return; }
+      setD(data);
+    })();
+    return () => { vivo = false; };
+  }, [idRuta, fecha]);
+
+  useEffect(() => {
+    if (!d || !div.current || mapa.current) return;
+    const pts = (d.paradas || []).filter((p) => p.lat && p.lng);
+    if (!pts.length && !d.veh_lat) return;
+
+    const m = L.map(div.current, { attributionControl: false, zoomControl: true });
+    L.tileLayer("https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png",
+      { maxZoom: 19 }).addTo(m);
+
+    // Pendiente en ámbar, entregada en verde apagado. El que importa es el
+    // pendiente: es el paquete que todavía hay que ir a dejar ahí adentro.
+    for (const p of pts) {
+      const pend = p.estado !== "complete";
+      L.circleMarker([p.lat, p.lng], {
+        radius: pend ? 5 : 3.5,
+        color: pend ? "#C25A08" : "#1D9E75",
+        fillColor: pend ? "#C25A08" : "#1D9E75",
+        fillOpacity: pend ? 0.9 : 0.35, weight: 1,
+      }).addTo(m).bindTooltip(
+        `#${p.secuencia} · ${pend ? "pendiente" : "entregado"}<br>${p.envio_id}`,
+        { direction: "top" });
+    }
+
+    const todos = pts.map((p) => [p.lat, p.lng]);
+    if (d.veh_lat && d.veh_lng) {
+      L.circleMarker([d.veh_lat, d.veh_lng], {
+        radius: 7, color: "#1a3a6b", fillColor: "#1a3a6b",
+        fillOpacity: 1, weight: 2,
+      }).addTo(m).bindTooltip("camioneta", { direction: "top" });
+      todos.push([d.veh_lat, d.veh_lng]);
+    }
+    if (todos.length) m.fitBounds(L.latLngBounds(todos).pad(0.25));
+    mapa.current = m;
+    // El contenedor nace dentro de un bloque que se acaba de desplegar, así
+    // que leaflet mide mal el alto si no se le dice que vuelva a mirar.
+    setTimeout(() => m.invalidateSize(), 80);
+    return () => { m.remove(); mapa.current = null; };
+  }, [d]);
+
+  if (err) return <div style={{ fontSize: 11, color: C.rojo, padding: 8 }}>{err}</div>;
+  if (!d) return <div style={{ fontSize: 11, color: C.tenue, padding: 8 }}>Cargando zona…</div>;
+
+  const zonas = d.zonas || [];
+  return (
+    <div style={{ padding: "8px 0" }}>
+      <div style={{ display: "flex", gap: 14, flexWrap: "wrap", fontSize: 11,
+        marginBottom: 7 }}>
+        {zonas.map((z) => (
+          <span key={z.id} style={{ fontWeight: 600,
+            color: z.nivel === "alto" ? C.rojo : C.ambar }}>
+            {z.nombre} · {z.nivel}
+          </span>
+        ))}
+        <span style={{ color: C.gris }}>
+          {d.paradas_en_zona} paradas en zona · {d.en_zona_pendientes} pendientes
+        </span>
+        {d.veh_metros_a_zona != null && (
+          <span style={{ color: d.veh_metros_a_zona < 200 ? C.rojo : C.gris }}>
+            {/* Menos de 200 metros es estar adentro para efectos prácticos:
+                el GPS tiene ese margen de error. */}
+            camioneta a {d.veh_metros_a_zona} m
+          </span>
+        )}
+      </div>
+      <div ref={div} style={{ height: 260, borderRadius: 8, overflow: "hidden",
+        border: "1px solid var(--borde)" }} />
+    </div>
+  );
+}
+
+// ── Panel de incidencias ───────────────────────────────────────────────────
+//   Los casos de MELI sobre esa ruta. Las etiquetas vienen en null en los
+//   casos recién creados —MELI las completa después— así que se traducen los
+//   ids, que sí llegan siempre.
+const MOTIVO = {
+  BAD_ADDRESS: "Domicilio incorrecto",
+  BUYER_ABSENT: "No había nadie",
+  CLOSED_BUSINESS: "Negocio cerrado",
+  NOT_IN_MY_ZONE: "Fuera de zona",
+};
+const ESTADO_INC = {
+  NEW: "Nueva", OPEN: "Abierta", ON_HOLD: "En espera",
+  CHECKING: "Revisando", CLOSED: "Cerrada", CANCELLED: "Anulada",
+};
+
+function PanelIncidencias({ idRuta }) {
+  const [filas, setFilas] = useState(null);
+
+  useEffect(() => {
+    let vivo = true;
+    (async () => {
+      const { data } = await sb.from("crm_inc_casos")
+        .select("case_id, motivo_id, motivo_label, estado_id, estado_label, "
+              + "prioridad, fecha_caso, direccion_entrega, avance_ruta")
+        .eq("route_id", String(idRuta))
+        .order("fecha_caso", { ascending: false });
+      if (vivo) setFilas(data || []);
+    })();
+    return () => { vivo = false; };
+  }, [idRuta]);
+
+  if (!filas) return <div style={{ fontSize: 11, color: C.tenue, padding: 8 }}>Cargando…</div>;
+  if (!filas.length) return <div style={{ fontSize: 11, color: C.tenue, padding: 8 }}>Sin incidencias.</div>;
+
+  return (
+    <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 11,
+      marginTop: 4 }}>
+      <tbody>
+        {filas.map((f) => {
+          const abierta = ["NEW","OPEN","ON_HOLD","CHECKING"].includes(f.estado_id);
+          const dir = f.direccion_entrega || {};
+          return (
+            <tr key={f.case_id} style={{ borderTop: "1px solid var(--borde)" }}>
+              <td style={{ padding: "4px 8px 4px 0", fontVariantNumeric: "tabular-nums",
+                whiteSpace: "nowrap", color: C.tenue }}>#{f.case_id}</td>
+              <td style={{ padding: "4px 8px", fontWeight: abierta ? 600 : 400 }}>
+                {f.motivo_label || MOTIVO[f.motivo_id] || f.motivo_id || "—"}
+              </td>
+              <td style={{ padding: "4px 8px", whiteSpace: "nowrap",
+                color: abierta ? C.rojo : C.tenue }}>
+                {f.estado_label || ESTADO_INC[f.estado_id] || f.estado_id}
+              </td>
+              <td style={{ padding: "4px 8px", color: C.gris, overflow: "hidden",
+                textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 240 }}
+                title={[dir.calle, dir.numero, dir.barrio, dir.ciudad].filter(Boolean).join(", ")}>
+                {[dir.calle, dir.numero].filter(Boolean).join(" ") || "—"}
+              </td>
+              <td style={{ padding: "4px 0 4px 8px", color: C.tenue, whiteSpace: "nowrap",
+                fontVariantNumeric: "tabular-nums" }}>
+                {f.fecha_caso ? fechaCorta(f.fecha_caso) : ""}
+              </td>
+            </tr>
+          );
+        })}
+      </tbody>
+    </table>
   );
 }
 
@@ -226,6 +417,9 @@ export default function TorreControl() {
   const [filas, setFilas] = useState(null);
   const [error, setError] = useState(null);
   const [abiertos, setAbiertos] = useState(new Set());
+  // Un solo panel abierto a la vez, identificado por viaje y tipo: dos mapas
+  // montados al mismo tiempo pelean por el alto del contenedor.
+  const [panel, setPanel] = useState(null);
 
   const esHoy = dia === hoyMx();
 
@@ -340,6 +534,9 @@ export default function TorreControl() {
   const total = useMemo(() => centros.reduce((a, g) => ({
     rojo: a.rojo + g.rojo, ambar: a.ambar + g.ambar, verde: a.verde + g.verde,
   }), { rojo: 0, ambar: 0, verde: 0 }), [centros]);
+
+  const abrirPanel = (travelId, tipo) => setPanel((p) =>
+    p && p.id === travelId && p.tipo === tipo ? null : { id: travelId, tipo });
 
   const alternar = (sc) => setAbiertos((s) => {
     const n = new Set(s);
@@ -482,7 +679,7 @@ export default function TorreControl() {
               </tr>
             </thead>
             <tbody>
-              {conAlerta.map((v) => (
+              {conAlerta.flatMap((v) => [
                 <tr key={v.travel_id} style={{ borderTop: "1px solid var(--borde)",
                   background: v.alerta_inactividad_vehiculo ? C.rojoBg : "transparent" }}>
                   <td style={{ padding: "6px 6px 6px 13px", fontVariantNumeric: "tabular-nums",
@@ -503,10 +700,20 @@ export default function TorreControl() {
                       fallidos={v.pkg_not_delivered} />
                   </td>
                   <td style={{ padding: "6px 13px 6px 6px" }}>
-                    <Señales v={v} />
+                    <Señales v={v} onPanel={(t) => abrirPanel(v.travel_id, t)} />
                   </td>
-                </tr>
-              ))}
+                </tr>,
+                panel && panel.id === v.travel_id ? (
+                  <tr key={`${v.travel_id}-p`}>
+                    <td colSpan={6} style={{ padding: "0 13px 10px",
+                      background: "var(--fondo, #fafafa)" }}>
+                      {panel.tipo === "zona"
+                        ? <PanelZona idRuta={v.id_ruta} fecha={v.fecha_operativa} />
+                        : <PanelIncidencias idRuta={v.id_ruta} />}
+                    </td>
+                  </tr>
+                ) : null,
+              ])}
             </tbody>
           </table>
         </div>
@@ -592,11 +799,11 @@ export default function TorreControl() {
                     </tr>
                   </thead>
                   <tbody>
-                    {g.viajes.map((v) => {
+                    {g.viajes.flatMap((v) => {
                       const s = semaforo(v);
                       const falta = v.estado === "SIN_ASIGNAR" || v.estado === "POR_VENCER"
                                  || v.estado === "PERDIDO";
-                      return (
+                      return [
                         <tr key={v.travel_id} style={{ borderTop: "1px solid var(--borde)",
                           // La fila con problema va teñida: una pastilla sola
                           // se pierde cuando hay quince renglones.
@@ -674,10 +881,20 @@ export default function TorreControl() {
                             )}
                           </td>
                           <td style={{ padding: "5px 0" }}>
-                            <Señales v={v} />
+                            <Señales v={v} onPanel={(t) => abrirPanel(v.travel_id, t)} />
                           </td>
-                        </tr>
-                      );
+                        </tr>,
+                        panel && panel.id === v.travel_id ? (
+                          <tr key={`${v.travel_id}-p`}>
+                            <td colSpan={6} style={{ padding: "0 0 10px",
+                              background: "var(--fondo, #fafafa)" }}>
+                              {panel.tipo === "zona"
+                                ? <PanelZona idRuta={v.id_ruta} fecha={v.fecha_operativa} />
+                                : <PanelIncidencias idRuta={v.id_ruta} />}
+                            </td>
+                          </tr>
+                        ) : null,
+                      ];
                     })}
                   </tbody>
                 </table>
