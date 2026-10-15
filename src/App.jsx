@@ -4,7 +4,6 @@ import Login from "./modulos/Login.jsx";
 import Ticketera from "./modulos/Ticketera.jsx";
 import Historico from "./modulos/Historico.jsx";
 import Consultas from "./modulos/Consultas.jsx";
-import DetalleDia from "./modulos/DetalleDia.jsx";
 import Directorio from "./modulos/Directorio.jsx";
 import Bitacora from "./modulos/Bitacora.jsx";
 import Correos from "./modulos/Correos.jsx";
@@ -13,7 +12,6 @@ import Anomalias from "./modulos/Anomalias.jsx";
 import Posventa from "./modulos/Posventa.jsx";
 import Poligonos from "./modulos/Poligonos.jsx";
 import TorreControl from "./modulos/TorreControl.jsx";
-import Rostering from "./modulos/Rostering.jsx";
 import Salud from "./modulos/Salud.jsx";
 import Topbar from "./componentes/Topbar.jsx";
 import { AlertasProvider, ContenedorToasts } from "./shared/alertas.jsx";
@@ -62,7 +60,6 @@ export default function App() {
         <div style={{ flex: 1, overflow: "hidden" }}>
           <Routes>
             <Route path="/" element={<Ticketera />} />
-            <Route path="/detalle-dia" element={<DetalleDia />} />
             <Route path="/correos" element={<Correos />} />
             <Route path="/bitacora" element={<Bitacora />} />
             <Route path="/directorio" element={<Directorio />} />
@@ -77,7 +74,6 @@ export default function App() {
             <Route path="/posventa" element={<Posventa />} />
             <Route path="/poligonos" element={<Poligonos />} />
             <Route path="/torre" element={<TorreControl />} />
-            <Route path="/rostering" element={<Rostering />} />
             <Route path="/salud" element={<Salud />} />
             <Route path="/login" element={<Navigate to="/" replace />} />
             <Route path="*" element={<Navigate to="/" replace />} />
