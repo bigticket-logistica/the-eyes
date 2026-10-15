@@ -12,6 +12,7 @@ import Mensajes from "./modulos/Mensajes.jsx";
 import Anomalias from "./modulos/Anomalias.jsx";
 import Posventa from "./modulos/Posventa.jsx";
 import Poligonos from "./modulos/Poligonos.jsx";
+import Rostering from "./modulos/Rostering.jsx";
 import Salud from "./modulos/Salud.jsx";
 import Topbar from "./componentes/Topbar.jsx";
 import { AlertasProvider, ContenedorToasts } from "./shared/alertas.jsx";
@@ -74,6 +75,7 @@ export default function App() {
                 cuando llegue lo que sigue. */}
             <Route path="/posventa" element={<Posventa />} />
             <Route path="/poligonos" element={<Poligonos />} />
+            <Route path="/rostering" element={<Rostering />} />
             <Route path="/salud" element={<Salud />} />
             <Route path="/login" element={<Navigate to="/" replace />} />
             <Route path="*" element={<Navigate to="/" replace />} />
