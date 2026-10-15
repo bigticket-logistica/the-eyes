@@ -316,7 +316,10 @@ export default function Rostering() {
               <span style={{ fontSize: 10, color: C.gris }}>{open ? "▾" : "▸"}</span>
               <Punto color={g.color} />
               <strong style={{ fontSize: 13, minWidth: 64 }}>{g.sc}</strong>
-              <span style={{ fontSize: 11.5, color: C.gris }}>
+              {/* Ancho fijo: "1 viaje" y "7 viajes" miden distinto y las
+                  pastillas de la derecha quedaban desalineadas entre filas. */}
+              <span style={{ fontSize: 11.5, color: C.gris, minWidth: 62,
+                display: "inline-block" }}>
                 {g.viajes.length} viaje{g.viajes.length > 1 ? "s" : ""}
               </span>
               {g.rojo > 0 && <Pill color="rojo">{g.rojo} sin resolver</Pill>}
