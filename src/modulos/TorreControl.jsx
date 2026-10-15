@@ -127,8 +127,19 @@ function Señales({ v }) {
     marcas.push(["pnr", `${v.pnr} PNR`
       + (v.pnr_monto > 0 ? ` $${Math.round(v.pnr_monto).toLocaleString("es-MX")}` : ""), C.rojo]);
   }
-  if (v.alertas > 0) {
-    marcas.push(["ale", `${v.alertas} alerta${v.alertas > 1 ? "s" : ""}`, C.ambar]);
+  // Las alertas por su nombre y no como número: "2 alertas" no dice si hay
+  // que llamar al chofer o esperar. La inactividad del vehículo va en rojo
+  // porque significa que la camioneta no se mueve.
+  if (v.alerta_inactividad_vehiculo) marcas.push(["det", "detenida", C.rojo]);
+  if (v.alerta_ruta_demorada)        marcas.push(["dem", "demorada", C.ambar]);
+  if (v.alerta_despacho_demorado)    marcas.push(["des", "despacho tarde", C.ambar]);
+  if (v.alerta_stemout_demorado)     marcas.push(["sto", "stem-out tarde", C.ambar]);
+  // El resto de las siete alertas de MELI, sin desglosar: saca pendiente y
+  // parada comercial son menos urgentes y no justifican una etiqueta propia.
+  const nombradas = (v.alerta_inactividad_vehiculo ? 1 : 0) + (v.alerta_ruta_demorada ? 1 : 0)
+    + (v.alerta_despacho_demorado ? 1 : 0) + (v.alerta_stemout_demorado ? 1 : 0);
+  if (v.alertas > nombradas) {
+    marcas.push(["ale", `+${v.alertas - nombradas}`, C.tenue]);
   }
   // Zona alta y media no piden lo mismo: una parada en zona alta vale más que
   // diez en media, y un contador solo no distingue.
@@ -182,7 +193,7 @@ function Pill({ color, children }) {
 // Barra de avance de la ruta. Solo aparece si la ruta existe y tiene paquetes:
 // una barra en cero para un viaje que no arrancó se lee como "va mal" cuando
 // en realidad todavía no empieza.
-function Avance({ total, entregados }) {
+function Avance({ total, entregados, fallidos }) {
   if (!total) return <span style={{ fontSize: 11, color: C.tenue }}>—</span>;
   const pct = Math.round((entregados / total) * 100);
   return (
@@ -194,6 +205,11 @@ function Avance({ total, entregados }) {
       </span>
       <span style={{ fontSize: 11, fontVariantNumeric: "tabular-nums", color: C.gris }}>
         {entregados}/{total}
+        {/* Los no entregados al lado y en ámbar: un 90% de avance con quince
+            fallidos no es el mismo día que un 90% limpio. */}
+        {fallidos > 0 && (
+          <span style={{ color: C.ambar }}> · {fallidos} fallidos</span>
+        )}
       </span>
     </span>
   );
@@ -304,6 +320,21 @@ export default function TorreControl() {
         || f.alerta_despacho_demorado || f.alerta_stemout_demorado).length,
       fallidos: sum("pkg_not_delivered"),
     };
+  }, [filas]);
+
+  // Las rutas con alerta de todos los centros juntas. Van arriba y fuera del
+  // acordeón porque son lo que pasa AHORA en la calle: si están repartidas en
+  // trece centros plegados, nadie las ve hasta que ya es tarde.
+  //
+  // Detenida primero: la camioneta sin actividad es lo único de esta lista
+  // donde cada minuto cuenta.
+  const conAlerta = useMemo(() => {
+    if (!filas) return [];
+    return filas.filter((f) => f.id_ruta && f.alertas > 0)
+      .sort((a, b) =>
+        (b.alerta_inactividad_vehiculo ? 1 : 0) - (a.alerta_inactividad_vehiculo ? 1 : 0)
+        || b.alertas - a.alertas
+        || (a.pkg_delivered / (a.pkg_total || 1)) - (b.pkg_delivered / (b.pkg_total || 1)));
   }, [filas]);
 
   const total = useMemo(() => centros.reduce((a, g) => ({
@@ -418,6 +449,66 @@ export default function TorreControl() {
             color={kpi.demoradas ? C.ambar : C.verde} />
           <Kpi titulo="No entregados" valor={kpi.fallidos.toLocaleString("es-MX")}
             sub="reparto de hoy" color={kpi.fallidos ? C.ambar : undefined} />
+        </div>
+      )}
+
+      {/* ── Rutas con alerta ─────────────────────────────────────────────
+          Lo que está pasando en la calle, antes del tablero por centro. */}
+      {conAlerta.length > 0 && (
+        <div style={{ border: `1px solid ${C.ambar}`, borderRadius: 11,
+          marginBottom: 12, overflow: "hidden", background: "#fff" }}>
+          <div style={{ padding: "8px 13px", background: C.ambarBg,
+            display: "flex", alignItems: "baseline", gap: 10 }}>
+            <strong style={{ fontSize: 13, color: C.ambar }}>
+              {conAlerta.length} ruta{conAlerta.length > 1 ? "s" : ""} con alerta
+            </strong>
+            <span style={{ fontSize: 11, color: C.gris }}>
+              {kpi?.detenidas > 0 && `${kpi.detenidas} detenida${kpi.detenidas > 1 ? "s" : ""} · `}
+              {kpi?.demoradas > 0 && `${kpi.demoradas} con demora · `}
+              cualquier alerta de MELI
+            </span>
+          </div>
+          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 11.5,
+            tableLayout: "fixed" }}>
+            <thead>
+              <tr style={{ color: C.tenue, textAlign: "left", fontSize: 9.5,
+                textTransform: "uppercase", letterSpacing: 0.3 }}>
+                <th style={{ fontWeight: 600, padding: "5px 6px 5px 13px", width: "15%" }}>Ruta</th>
+                <th style={{ fontWeight: 600, padding: "5px 6px", width: "9%" }}>SC</th>
+                <th style={{ fontWeight: 600, padding: "5px 6px", width: "22%" }}>Conductor</th>
+                <th style={{ fontWeight: 600, padding: "5px 6px", width: "12%" }}>Placa</th>
+                <th style={{ fontWeight: 600, padding: "5px 6px", width: "21%" }}>Avance</th>
+                <th style={{ fontWeight: 600, padding: "5px 13px 5px 6px" }}>Alertas</th>
+              </tr>
+            </thead>
+            <tbody>
+              {conAlerta.map((v) => (
+                <tr key={v.travel_id} style={{ borderTop: "1px solid var(--borde)",
+                  background: v.alerta_inactividad_vehiculo ? C.rojoBg : "transparent" }}>
+                  <td style={{ padding: "6px 6px 6px 13px", fontVariantNumeric: "tabular-nums",
+                    whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                    {v.ruta_nombre || `#${v.id_ruta}`}
+                  </td>
+                  <td style={{ padding: "6px", fontWeight: 600 }}>{v.sc}</td>
+                  <td style={{ padding: "6px", overflow: "hidden",
+                    textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                    {v.chofer_ruta || v.driver_name || "—"}
+                  </td>
+                  <td style={{ padding: "6px", fontVariantNumeric: "tabular-nums",
+                    overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                    {v.vehicle_plate || "—"}
+                  </td>
+                  <td style={{ padding: "6px" }}>
+                    <Avance total={v.pkg_total} entregados={v.pkg_delivered}
+                      fallidos={v.pkg_not_delivered} />
+                  </td>
+                  <td style={{ padding: "6px 13px 6px 6px" }}>
+                    <Señales v={v} />
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
         </div>
       )}
 
@@ -568,7 +659,8 @@ export default function TorreControl() {
                               decía nada y una columna entera para decirlo. */}
                           <td style={{ padding: "5px 6px 5px 0" }}>
                             {v.id_ruta
-                              ? <Avance total={v.pkg_total} entregados={v.pkg_delivered} />
+                              ? <Avance total={v.pkg_total} entregados={v.pkg_delivered}
+                                  fallidos={v.pkg_not_delivered} />
                               : <span style={{ fontSize: 11, fontWeight: s === "verde" ? 400 : 600,
                                   color: s === "rojo" ? C.rojo : s === "ambar" ? C.ambar : C.gris }}>
                                   {ETIQUETA[v.estado] || v.estado}
