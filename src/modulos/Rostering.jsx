@@ -54,33 +54,39 @@ const C = {
 
 // Un viaje cae en un solo semáforo. El orden de la evaluación es el orden de
 // gravedad: primero lo que ya no tiene arreglo, al final lo que está bien.
-// Rojo es lo que el supervisor tiene que responder en bitácora: el viaje no
-// salió, o no alcanzó a tener chofer y placa, o MELI lo canceló. Nada más.
+// Rojo es lo que el supervisor tiene que responder en bitácora. Son dos
+// preguntas distintas y las dos terminan en plata:
 //
-// SIN_RUTEAR quedó fuera a propósito. Daba 37 alertas de 84 viajes y no era
-// ninguna: un viaje con chofer y placa cuya carga salió está bien, aunque el
-// supervisor no haya cerrado el tercer campo en MELI. Ensuciaba el tablero
-// hasta volverlo ilegible, que es la forma más rápida de que nadie lo mire.
+//   sin ruta   el viaje nunca se ruteó y tampoco operó — puede ser una
+//              cancelación que nadie registró
+//   no salió   tenía chofer, placa y ruta, y la camioneta no se movió —
+//              puede ser un no show
+//
+// El atraso NO entra. Un viaje que salió 47 minutos tarde salió: los paquetes
+// se mueven y no hay nada que explicar. Marcarlo en color competía con los
+// dos de arriba, que son los que de verdad hay que contestar.
+//
+// SIN_RUTEAR solo se dispara cuando tampoco hay ruta operando: un viaje con
+// carga en la calle nunca cae ahí aunque el supervisor no haya cerrado el
+// campo en MELI. Esa distinción la hace la vista, no esta función.
 function semaforo(v) {
   if (v.estado === "NO_SALIO" || v.estado === "PERDIDO"
-   || v.estado === "SIN_ASIGNAR" || v.estado === "CANCELADO") return "rojo";
-  if (v.estado === "POR_VENCER" || v.estado === "SALIO_RETRASADO") return "ambar";
+   || v.estado === "SIN_ASIGNAR" || v.estado === "SIN_RUTEAR"
+   || v.estado === "CANCELADO") return "rojo";
+  if (v.estado === "POR_VENCER") return "ambar";
   return "verde";
 }
 
-// Lo que se muestra en la celda de avance cuando no hay barra que dibujar.
-// La columna Estado se eliminó: con el color del semáforo y estas palabras
-// alcanza, y liberar esa columna le da aire a chofer y ruta.
 const ETIQUETA = {
   PERDIDO:         "cita vencida",
   NO_SALIO:        "no salió",
   SIN_ASIGNAR:     "sin chofer ni placa",
   POR_VENCER:      "por vencer",
-  SIN_RUTEAR:      "sin rutear en MELI",
+  SIN_RUTEAR:      "sin ruta",
   POR_SALIR:       "por salir",
   OPERANDO:        "en ruta",
   TERMINADO:       "terminado",
-  SALIO_RETRASADO: "salió tarde",
+  SALIO_RETRASADO: "en ruta",
   CANCELADO:       "cancelado",
 };
 
@@ -258,7 +264,7 @@ export default function Rostering() {
           <span style={{ fontSize: 13, fontWeight: 700, color: total.ambar ? C.ambar : C.tenue }}>
             {total.ambar}
           </span>
-          <span style={{ fontSize: 11.5, color: C.gris }}>con atraso</span>
+          <span style={{ fontSize: 11.5, color: C.gris }}>por vencer</span>
         </span>
         <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
           <Punto color="verde" />
@@ -314,7 +320,7 @@ export default function Rostering() {
                 {g.viajes.length} viaje{g.viajes.length > 1 ? "s" : ""}
               </span>
               {g.rojo > 0 && <Pill color="rojo">{g.rojo} sin resolver</Pill>}
-              {g.ambar > 0 && <Pill color="ambar">{g.ambar} con atraso</Pill>}
+              {g.ambar > 0 && <Pill color="ambar">{g.ambar} por vencer</Pill>}
               {g.rojo === 0 && g.ambar === 0 && <Pill color="verde">en regla</Pill>}
             </button>
 
@@ -405,8 +411,10 @@ export default function Rostering() {
                                   color: s === "rojo" ? C.rojo : s === "ambar" ? C.ambar : C.gris }}>
                                   {ETIQUETA[v.estado] || v.estado}
                                 </span>}
+                            {/* El atraso se informa en gris, como dato. En
+                                color competía con las alertas reales. */}
                             {v.estado === "SALIO_RETRASADO" && (
-                              <div style={{ fontSize: 9.5, color: C.ambar }}>
+                              <div style={{ fontSize: 9.5, color: C.tenue }}>
                                 salió {v.min_atraso_salida} min tarde
                               </div>
                             )}
