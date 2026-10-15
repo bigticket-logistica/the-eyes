@@ -145,13 +145,10 @@ function Señales({ v, onPanel }) {
   if (v.alerta_ruta_demorada)        marcas.push(["dem", "demorada", C.ambar]);
   if (v.alerta_despacho_demorado)    marcas.push(["des", "despacho tarde", C.ambar]);
   if (v.alerta_stemout_demorado)     marcas.push(["sto", "stem-out tarde", C.ambar]);
-  // El resto de las siete alertas de MELI, sin desglosar: saca pendiente y
-  // parada comercial son menos urgentes y no justifican una etiqueta propia.
-  const nombradas = (v.alerta_inactividad_vehiculo ? 1 : 0) + (v.alerta_ruta_demorada ? 1 : 0)
-    + (v.alerta_despacho_demorado ? 1 : 0) + (v.alerta_stemout_demorado ? 1 : 0);
-  if (v.alertas > nombradas) {
-    marcas.push(["ale", `+${v.alertas - nombradas}`, C.tenue]);
-  }
+  // Las seis con nombre. El "+2" de antes no decía nada: quien lo leía tenía
+  // que ir a Monitoreo igual, que es justo lo que la Torre viene a evitar.
+  if (v.alerta_saca_pendiente)  marcas.push(["sac", "saca pendiente", C.ambar]);
+  if (v.alerta_parada_comercial) marcas.push(["par", "parada comercial", C.tenue]);
   // Zona alta y media no piden lo mismo: una parada en zona alta vale más que
   // diez en media, y un contador solo no distingue.
   if (v.zona_alta) marcas.push(["zon", `zona alta · ${v.paradas_en_zona}`, C.rojo]);
@@ -163,7 +160,8 @@ function Señales({ v, onPanel }) {
       {marcas.map(([k, txt, col]) => {
         // Incidencias y zona abren panel; las alertas no, porque de ellas
         // solo tenemos el booleano y no habría nada que mostrar adentro.
-        const abre = k === "inc" ? "inc" : k === "zon" ? "zona" : null;
+        const abre = k === "inc" ? "inc" : k === "zon" ? "zona"
+          : k === "pnr" ? "pnr" : null;
         if (!abre) {
           return (
             <span key={k} style={{ fontSize: 9.5, color: col, whiteSpace: "nowrap" }}>
@@ -188,14 +186,38 @@ function Señales({ v, onPanel }) {
 // Un indicador del día. El color solo aparece cuando el número pide atención:
 // un cero en "detenidas" no necesita ser verde para que se entienda que está
 // bien, y pintar todo de colores hace que ninguno destaque.
-function Kpi({ titulo, valor, sub, color }) {
+function Kpi({ titulo, valor, sub, color, activo, onClick }) {
+  const clicable = !!onClick;
   return (
-    <div style={{ background: "#fff", border: "1px solid var(--borde)",
-      borderRadius: 10, padding: "9px 14px", minWidth: 128 }}>
-      <div style={{ fontSize: 10.5, color: C.gris }}>{titulo}</div>
+    <button onClick={onClick} disabled={!clicable}
+      style={{ background: activo ? "var(--navy, #1a3a6b)" : "#fff",
+        border: `1px solid ${activo ? "var(--navy, #1a3a6b)" : "var(--borde)"}`,
+        borderRadius: 10, padding: "9px 14px", minWidth: 128, textAlign: "left",
+        cursor: clicable ? "pointer" : "default", font: "inherit" }}>
+      <div style={{ fontSize: 10.5, color: activo ? "#fff" : C.gris }}>{titulo}</div>
       <div style={{ fontSize: 21, fontWeight: 600, lineHeight: 1.2,
-        color: color || "inherit" }}>{valor}</div>
-      <div style={{ fontSize: 10, color: C.tenue }}>{sub}</div>
+        color: activo ? "#fff" : (color || "inherit") }}>{valor}</div>
+      <div style={{ fontSize: 10, color: activo ? "rgba(255,255,255,.75)" : C.tenue }}>
+        {sub}
+      </div>
+    </button>
+  );
+}
+
+// Los dos mundos. La separación no es decorativa: el rostering es lo que pasa
+// ANTES de que el camión salga y lo resuelve el supervisor en bitácora; la
+// operación es lo que pasa DESPUÉS y lo resuelve la torre llamando al chofer.
+// Mezclarlos en una fila de tarjetas hacía que se leyeran como lo mismo.
+function Mundo({ titulo, nota, children }) {
+  return (
+    <div style={{ border: "1px solid var(--borde)", borderRadius: 12,
+      padding: "10px 12px 12px", background: "var(--fondo, #fafafa)", flex: 1,
+      minWidth: 320 }}>
+      <div style={{ display: "flex", alignItems: "baseline", gap: 8, marginBottom: 8 }}>
+        <strong style={{ fontSize: 12 }}>{titulo}</strong>
+        <span style={{ fontSize: 10.5, color: C.tenue }}>{nota}</span>
+      </div>
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>{children}</div>
     </div>
   );
 }
@@ -364,6 +386,73 @@ function PanelIncidencias({ idRuta }) {
   );
 }
 
+// ── Panel de PNR ───────────────────────────────────────────────────────────
+//   Los reclamos abiertos de esa ruta con su monto. El monto es lo que decide
+//   si vale la pena interrumpir al supervisor: tres PNR de $190 no son lo
+//   mismo que uno de $3.000.
+function PanelPnr({ idRuta }) {
+  const [filas, setFilas] = useState(null);
+
+  useEffect(() => {
+    let vivo = true;
+    (async () => {
+      const { data } = await sb.from("pnr_casos_mx")
+        .select("case_id, shipment_id, monto, moneda, sub_estado, conductor, "
+              + "fecha_caso, cerrado_en")
+        .eq("route_id", String(idRuta))
+        .order("fecha_caso", { ascending: false });
+      if (vivo) setFilas(data || []);
+    })();
+    return () => { vivo = false; };
+  }, [idRuta]);
+
+  if (!filas) return <div style={{ fontSize: 11, color: C.tenue, padding: 8 }}>Cargando…</div>;
+  if (!filas.length) return <div style={{ fontSize: 11, color: C.tenue, padding: 8 }}>Sin PNR.</div>;
+
+  return (
+    <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 11, marginTop: 4 }}>
+      <tbody>
+        {filas.map((f) => {
+          const abierto = !f.cerrado_en;
+          return (
+            <tr key={f.case_id} style={{ borderTop: "1px solid var(--borde)" }}>
+              <td style={{ padding: "4px 8px 4px 0", fontVariantNumeric: "tabular-nums",
+                whiteSpace: "nowrap", color: C.tenue }}>#{f.case_id}</td>
+              <td style={{ padding: "4px 8px", fontVariantNumeric: "tabular-nums",
+                color: C.gris }}>{f.shipment_id || "—"}</td>
+              <td style={{ padding: "4px 8px", fontWeight: 600,
+                fontVariantNumeric: "tabular-nums",
+                color: abierto ? C.rojo : C.tenue }}>
+                {f.monto ? `$${Math.round(f.monto).toLocaleString("es-MX")}` : "—"}
+              </td>
+              <td style={{ padding: "4px 8px", whiteSpace: "nowrap",
+                color: abierto ? C.rojo : C.tenue }}>
+                {ESTADO_PNR[f.sub_estado] || f.sub_estado || (abierto ? "abierto" : "cerrado")}
+              </td>
+              <td style={{ padding: "4px 0 4px 8px", color: C.tenue, whiteSpace: "nowrap",
+                fontVariantNumeric: "tabular-nums" }}>
+                {f.fecha_caso ? fechaCorta(f.fecha_caso) : ""}
+              </td>
+            </tr>
+          );
+        })}
+      </tbody>
+    </table>
+  );
+}
+
+// Los sub-estados de MELI con los nombres que usa Logistic, para que el
+// analista lea lo mismo en las dos pantallas.
+const ESTADO_PNR = {
+  WAITING_RECEIPT: "Esperando comprobante",
+  UPLOADED_RECEIPT: "Comprobante cargado",
+  WITHOUT_RECEIPT: "Sin comprobante",
+  ON_REVIEW: "Revisión en curso",
+  TO_BILL: "Con penalidad",
+  BILLED: "Enviado a facturación",
+  NOT_BILLED: "Anulado",
+};
+
 function Punto({ color }) {
   const c = color === "rojo" ? C.rojo : color === "ambar" ? C.ambar : C.verde;
   return <span style={{ display: "inline-block", width: 9, height: 9,
@@ -420,6 +509,10 @@ export default function TorreControl() {
   // Un solo panel abierto a la vez, identificado por viaje y tipo: dos mapas
   // montados al mismo tiempo pelean por el alto del contenedor.
   const [panel, setPanel] = useState(null);
+  // Un filtro a la vez. Dos combinados darían conjuntos vacíos sin que se
+  // entienda por qué, y el tablero tiene que explicarse solo.
+  const [filtro, setFiltro] = useState(null);
+  const [verAlertas, setVerAlertas] = useState(false);
 
   const esHoy = dia === hoyMx();
 
@@ -433,7 +526,8 @@ export default function TorreControl() {
             + "alertas, incidencias, incidencias_abiertas, pnr, pnr_monto, "
             + "paradas_en_zona, zona_alta, zona_media, pkg_not_delivered, "
             + "alerta_ruta_demorada, alerta_inactividad_vehiculo, "
-            + "alerta_despacho_demorado, alerta_stemout_demorado")
+            + "alerta_despacho_demorado, alerta_stemout_demorado, "
+            + "alerta_saca_pendiente, alerta_parada_comercial")
       .eq("fecha_operativa", dia)
       .order("sc").order("eta_visible");
     if (error) { setError(error.message); return; }
@@ -453,10 +547,24 @@ export default function TorreControl() {
   // Agrupado por centro, con el peor semáforo arriba. Dentro de cada centro
   // los viajes también van por gravedad: el analista abre el rojo y lo primero
   // que ve es lo que tiene que resolver.
+  // Qué deja pasar cada filtro. El del rostering mira el estado del viaje; el
+  // de operación mira lo que trae la ruta.
+  const PASA = {
+    sin_resolver: (f) => semaforo(f) === "rojo",
+    sin_rutear:   (f) => f.estado === "SIN_RUTEAR",
+    no_salio:     (f) => f.estado === "NO_SALIO" || f.estado === "PERDIDO",
+    detenidas:    (f) => f.alerta_inactividad_vehiculo,
+    demoradas:    (f) => f.alerta_ruta_demorada || f.alerta_despacho_demorado
+                      || f.alerta_stemout_demorado,
+    fallidos:     (f) => (f.pkg_not_delivered || 0) > 0,
+    operando:     (f) => !!f.id_ruta,
+  };
+
   const centros = useMemo(() => {
     if (!filas) return [];
     const m = new Map();
-    for (const v of filas) {
+    const fn = filtro ? PASA[filtro] : null;
+    for (const v of (fn ? filas.filter(fn) : filas)) {
       if (!m.has(v.sc)) m.set(v.sc, { sc: v.sc, viajes: [], rojo: 0, ambar: 0, verde: 0,
         inc: 0, pnr: 0, ale: 0, zonaAlta: 0, zonaMedia: 0 });
       const g = m.get(v.sc);
@@ -513,6 +621,9 @@ export default function TorreControl() {
       demoradas: conRuta.filter((f) => f.alerta_ruta_demorada
         || f.alerta_despacho_demorado || f.alerta_stemout_demorado).length,
       fallidos: sum("pkg_not_delivered"),
+      viajes: filas.length,
+      noSalio: filas.filter((f) => f.estado === "NO_SALIO" || f.estado === "PERDIDO").length,
+      sinRutear: filas.filter((f) => f.estado === "SIN_RUTEAR").length,
     };
   }, [filas]);
 
@@ -529,7 +640,7 @@ export default function TorreControl() {
         (b.alerta_inactividad_vehiculo ? 1 : 0) - (a.alerta_inactividad_vehiculo ? 1 : 0)
         || b.alertas - a.alertas
         || (a.pkg_delivered / (a.pkg_total || 1)) - (b.pkg_delivered / (b.pkg_total || 1)));
-  }, [filas]);
+  }, [filas, filtro]);
 
   const total = useMemo(() => centros.reduce((a, g) => ({
     rojo: a.rojo + g.rojo, ambar: a.ambar + g.ambar, verde: a.verde + g.verde,
@@ -631,21 +742,49 @@ export default function TorreControl() {
         </span>
       </div>
 
-      {/* Los indicadores del día, antes del tablero. Responden "cómo va la
-          operación"; el tablero de abajo responde "dónde hay que meterse". */}
-      {kpi && kpi.rutas > 0 && (
+      {/* ── Los dos mundos ───────────────────────────────────────────────
+          Cada tarjeta filtra el tablero de abajo. Un clic la enciende, otro
+          la apaga; solo una a la vez. */}
+      {kpi && (
         <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 14 }}>
-          <Kpi titulo="Avance de reparto" valor={`${kpi.pct}%`}
-            sub={`${kpi.entregados.toLocaleString("es-MX")} / ${kpi.cargados.toLocaleString("es-MX")} paquetes`}
-            color="var(--navy)" />
-          <Kpi titulo="Rutas operando" valor={kpi.rutas}
-            sub={`${kpi.activas} en ruta · ${kpi.cerradas} cerradas`} />
-          <Kpi titulo="Detenidas" valor={kpi.detenidas} sub="vehículo sin actividad"
-            color={kpi.detenidas ? C.rojo : C.verde} />
-          <Kpi titulo="Demoradas" valor={kpi.demoradas} sub="ruta, despacho o stem-out"
-            color={kpi.demoradas ? C.ambar : C.verde} />
-          <Kpi titulo="No entregados" valor={kpi.fallidos.toLocaleString("es-MX")}
-            sub="reparto de hoy" color={kpi.fallidos ? C.ambar : undefined} />
+
+          <Mundo titulo="Rostering" nota="antes de salir · lo responde el supervisor">
+            <Kpi titulo="Viajes del día" valor={kpi.viajes}
+              sub={`${kpi.rutas} salieron`}
+              activo={filtro === null} onClick={() => setFiltro(null)} />
+            <Kpi titulo="Sin resolver" valor={total.rojo} sub="no show o cancelación"
+              color={total.rojo ? C.rojo : C.verde}
+              activo={filtro === "sin_resolver"}
+              onClick={() => setFiltro(filtro === "sin_resolver" ? null : "sin_resolver")} />
+            <Kpi titulo="No salieron" valor={kpi.noSalio} sub="con chofer y placa"
+              color={kpi.noSalio ? C.rojo : C.verde}
+              activo={filtro === "no_salio"}
+              onClick={() => setFiltro(filtro === "no_salio" ? null : "no_salio")} />
+            <Kpi titulo="Sin rutear" valor={kpi.sinRutear} sub="falta la ruta en MELI"
+              color={kpi.sinRutear ? C.ambar : C.verde}
+              activo={filtro === "sin_rutear"}
+              onClick={() => setFiltro(filtro === "sin_rutear" ? null : "sin_rutear")} />
+          </Mundo>
+
+          <Mundo titulo="Operación" nota="en la calle · lo resuelve la torre">
+            <Kpi titulo="Avance de reparto" valor={`${kpi.pct}%`}
+              sub={`${kpi.entregados.toLocaleString("es-MX")} / ${kpi.cargados.toLocaleString("es-MX")} paquetes`}
+              color="var(--navy)"
+              activo={filtro === "operando"}
+              onClick={() => setFiltro(filtro === "operando" ? null : "operando")} />
+            <Kpi titulo="Detenidas" valor={kpi.detenidas} sub="vehículo sin actividad"
+              color={kpi.detenidas ? C.rojo : C.verde}
+              activo={filtro === "detenidas"}
+              onClick={() => setFiltro(filtro === "detenidas" ? null : "detenidas")} />
+            <Kpi titulo="Demoradas" valor={kpi.demoradas} sub="ruta, despacho o stem-out"
+              color={kpi.demoradas ? C.ambar : C.verde}
+              activo={filtro === "demoradas"}
+              onClick={() => setFiltro(filtro === "demoradas" ? null : "demoradas")} />
+            <Kpi titulo="No entregados" valor={kpi.fallidos.toLocaleString("es-MX")}
+              sub="reparto de hoy" color={kpi.fallidos ? C.ambar : undefined}
+              activo={filtro === "fallidos"}
+              onClick={() => setFiltro(filtro === "fallidos" ? null : "fallidos")} />
+          </Mundo>
         </div>
       )}
 
@@ -654,8 +793,13 @@ export default function TorreControl() {
       {conAlerta.length > 0 && (
         <div style={{ border: `1px solid ${C.ambar}`, borderRadius: 11,
           marginBottom: 12, overflow: "hidden", background: "#fff" }}>
-          <div style={{ padding: "8px 13px", background: C.ambarBg,
-            display: "flex", alignItems: "baseline", gap: 10 }}>
+          {/* Plegado por defecto, como los centros: once rutas con alerta
+              ocupan media pantalla y empujan el tablero fuera de la vista. */}
+          <button onClick={() => setVerAlertas((v) => !v)}
+            style={{ width: "100%", padding: "8px 13px", background: C.ambarBg,
+              display: "flex", alignItems: "baseline", gap: 10, border: "none",
+              cursor: "pointer", textAlign: "left", font: "inherit" }}>
+            <span style={{ fontSize: 10, color: C.ambar }}>{verAlertas ? "▾" : "▸"}</span>
             <strong style={{ fontSize: 13, color: C.ambar }}>
               {conAlerta.length} ruta{conAlerta.length > 1 ? "s" : ""} con alerta
             </strong>
@@ -664,7 +808,8 @@ export default function TorreControl() {
               {kpi?.demoradas > 0 && `${kpi.demoradas} con demora · `}
               cualquier alerta de MELI
             </span>
-          </div>
+          </button>
+          {verAlertas && (
           <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 11.5,
             tableLayout: "fixed" }}>
             <thead>
@@ -713,8 +858,8 @@ export default function TorreControl() {
                   <tr key={`${v.travel_id}-p`}>
                     <td colSpan={6} style={{ padding: "0 13px 10px",
                       background: "var(--fondo, #fafafa)" }}>
-                      {panel.tipo === "zona"
-                        ? <PanelZona idRuta={v.id_ruta} fecha={dia} />
+                      {panel.tipo === "zona" ? <PanelZona idRuta={v.id_ruta} fecha={dia} />
+                        : panel.tipo === "pnr" ? <PanelPnr idRuta={v.id_ruta} />
                         : <PanelIncidencias idRuta={v.id_ruta} />}
                     </td>
                   </tr>
@@ -722,6 +867,7 @@ export default function TorreControl() {
               ])}
             </tbody>
           </table>
+          )}
         </div>
       )}
 
@@ -892,8 +1038,8 @@ export default function TorreControl() {
                           <tr key={`${v.travel_id}-p`}>
                             <td colSpan={6} style={{ padding: "0 0 10px",
                               background: "var(--fondo, #fafafa)" }}>
-                              {panel.tipo === "zona"
-                                ? <PanelZona idRuta={v.id_ruta} fecha={dia} />
+                              {panel.tipo === "zona" ? <PanelZona idRuta={v.id_ruta} fecha={dia} />
+                                : panel.tipo === "pnr" ? <PanelPnr idRuta={v.id_ruta} />
                                 : <PanelIncidencias idRuta={v.id_ruta} />}
                             </td>
                           </tr>
