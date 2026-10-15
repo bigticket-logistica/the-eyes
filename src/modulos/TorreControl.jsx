@@ -901,8 +901,12 @@ export default function TorreControl() {
               </span>
               {g.rojo > 0 && <Pill color="rojo">{g.rojo} sin resolver</Pill>}
               {g.ambar > 0 && <Pill color="ambar">{g.ambar} por vencer</Pill>}
-              {g.rojo === 0 && g.ambar === 0 && g.inc === 0 && g.pnr === 0
-                && g.zonaAlta === 0 && <Pill color="verde">en regla</Pill>}
+              {/* "En regla" habla del rostering y nada más, que es lo que
+                  cuentan las dos pastillas de la izquierda. Las señales de la
+                  calle ya se muestran a la derecha; incluirlas acá dejaba al
+                  centro sin ninguna etiqueta —ni verde ni de aviso— que es
+                  peor que cualquiera de las dos. */}
+              {g.rojo === 0 && g.ambar === 0 && <Pill color="verde">en regla</Pill>}
 
               {/* Las señales del centro, a la derecha y en texto, no en
                   pastilla: son avisos de "mira esto", y una pastilla las
