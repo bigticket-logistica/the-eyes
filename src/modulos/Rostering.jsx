@@ -42,8 +42,10 @@ import { sb } from "../shared/supabase.js";
 const C = {
   verde:    "#1D9E75",
   verdeBg:  "#E1F5EE",
-  ambar:    "#BA7517",
-  ambarBg:  "#FAEEDA",
+  // El naranja de Bigticket, no un ámbar genérico: #BA7517 se lee café y
+  // rompe con el resto de la Torre.
+  ambar:    "#C25A08",
+  ambarBg:  "#FDEEDF",
   rojo:     "#E24B4A",
   rojoBg:   "#FCEBEB",
   gris:     "var(--texto-suave)",
@@ -52,13 +54,17 @@ const C = {
 
 // Un viaje cae en un solo semáforo. El orden de la evaluación es el orden de
 // gravedad: primero lo que ya no tiene arreglo, al final lo que está bien.
+// Rojo es lo que el supervisor tiene que responder en bitácora: el viaje no
+// salió, o no alcanzó a tener chofer y placa, o MELI lo canceló. Nada más.
+//
+// SIN_RUTEAR quedó fuera a propósito. Daba 37 alertas de 84 viajes y no era
+// ninguna: un viaje con chofer y placa cuya carga salió está bien, aunque el
+// supervisor no haya cerrado el tercer campo en MELI. Ensuciaba el tablero
+// hasta volverlo ilegible, que es la forma más rápida de que nadie lo mire.
 function semaforo(v) {
-  if (v.estado === "PERDIDO" || v.estado === "NO_SALIO") return "rojo";
-  if (v.estado === "SIN_ASIGNAR" || v.estado === "POR_VENCER") return "rojo";
-  // Sin rutear y salida tarde son avisos, no fallas: el viaje existe y la
-  // carga se movió. Pero los dos cuestan después — uno en la medición de
-  // MELI, el otro en la hora de entrega.
-  if (v.estado === "SIN_RUTEAR" || v.estado === "SALIO_RETRASADO") return "ambar";
+  if (v.estado === "NO_SALIO" || v.estado === "PERDIDO"
+   || v.estado === "SIN_ASIGNAR" || v.estado === "CANCELADO") return "rojo";
+  if (v.estado === "POR_VENCER" || v.estado === "SALIO_RETRASADO") return "ambar";
   return "verde";
 }
 
@@ -247,14 +253,14 @@ export default function Rostering() {
           <span style={{ fontSize: 13, fontWeight: 700, color: total.rojo ? C.rojo : C.tenue }}>
             {total.rojo}
           </span>
-          <span style={{ fontSize: 11.5, color: C.gris }}>sin asignar</span>
+          <span style={{ fontSize: 11.5, color: C.gris }}>piden respuesta</span>
         </span>
         <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
           <Punto color="ambar" />
           <span style={{ fontSize: 13, fontWeight: 700, color: total.ambar ? C.ambar : C.tenue }}>
             {total.ambar}
           </span>
-          <span style={{ fontSize: 11.5, color: C.gris }}>sin ruta</span>
+          <span style={{ fontSize: 11.5, color: C.gris }}>con atraso</span>
         </span>
         <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
           <Punto color="verde" />
@@ -262,11 +268,8 @@ export default function Rostering() {
           <span style={{ fontSize: 11.5, color: C.gris }}>en regla</span>
         </span>
         <span style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 9 }}>
-          <span style={{ fontSize: 11, color: C.tenue }}>
-            captura {filas[0]?.captura_hora || "—"}
-            {esHoy && visto
-              ? ` · visto ${visto.toLocaleTimeString("es-MX", { hour: "2-digit", minute: "2-digit" })}`
-              : ""}
+          <span style={{ fontSize: 11, color: C.tenue, whiteSpace: "nowrap" }}>
+            {filas[0]?.captura_hora ? `captura ${filas[0].captura_hora}` : ""}
           </span>
           {/* El día se elige acá. Hasta 30 días atrás, que es lo que guarda la
               vista; más atrás los datos existen pero no se consultan. */}
@@ -309,9 +312,9 @@ export default function Rostering() {
               <span style={{ fontSize: 11.5, color: C.gris }}>
                 {g.viajes.length} viaje{g.viajes.length > 1 ? "s" : ""}
               </span>
-              {g.rojo > 0 && <Pill color="rojo">{g.rojo} sin asignar</Pill>}
-              {g.ambar > 0 && <Pill color="ambar">{g.ambar} sin ruta</Pill>}
-              {g.rojo === 0 && g.ambar === 0 && <Pill color="verde">completo</Pill>}
+              {g.rojo > 0 && <Pill color="rojo">{g.rojo} sin resolver</Pill>}
+              {g.ambar > 0 && <Pill color="ambar">{g.ambar} con atraso</Pill>}
+              {g.rojo === 0 && g.ambar === 0 && <Pill color="verde">en regla</Pill>}
             </button>
 
             {open && (
@@ -365,19 +368,31 @@ export default function Rostering() {
                             overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                             {v.vehicle_plate || <span style={{ color: C.rojo }}>sin placa</span>}
                           </td>
+                          {/* Esta columna identifica, no evalúa. Primero el
+                              nombre del rostering; si el supervisor no cerró
+                              ese campo pero la ruta existe igual, va su id,
+                              que es con lo que se busca en Monitoreo.
+                              Decir "sin ruta" al lado de una barra al 80% era
+                              ruido: la ruta está, lo que falta es el papeleo. */}
                           <td style={{ padding: "5px 6px 5px 0", overflow: "hidden",
                             textOverflow: "ellipsis", whiteSpace: "nowrap" }}
                             title={v.ruta_region || ""}>
-                            {v.ruta_nombre
-                              ? <>
-                                  <div>{v.ruta_nombre}</div>
-                                  {v.ruta_paradas && (
-                                    <div style={{ fontSize: 9.5, color: C.tenue }}>
-                                      {v.ruta_paradas} paradas
-                                    </div>
-                                  )}
-                                </>
-                              : <span style={{ color: C.ambar }}>sin ruta</span>}
+                            {v.ruta_nombre ? (
+                              <>
+                                <div>{v.ruta_nombre}</div>
+                                {v.ruta_paradas && (
+                                  <div style={{ fontSize: 9.5, color: C.tenue }}>
+                                    {v.ruta_paradas} paradas
+                                  </div>
+                                )}
+                              </>
+                            ) : v.id_ruta ? (
+                              <span style={{ fontVariantNumeric: "tabular-nums" }}>
+                                #{v.id_ruta}
+                              </span>
+                            ) : (
+                              <span style={{ color: C.tenue }}>—</span>
+                            )}
                           </td>
                           {/* La celda de avance carga el estado cuando no hay
                               barra que dibujar. Antes había un guión que no
@@ -389,12 +404,9 @@ export default function Rostering() {
                                   color: s === "rojo" ? C.rojo : s === "ambar" ? C.ambar : C.gris }}>
                                   {ETIQUETA[v.estado] || v.estado}
                                 </span>}
-                            {v.id_ruta && (
-                              <div style={{ fontSize: 9.5, fontVariantNumeric: "tabular-nums",
-                                color: v.estado === "SALIO_RETRASADO" ? C.ambar : C.tenue }}>
-                                #{v.id_ruta}
-                                {v.estado === "SALIO_RETRASADO"
-                                  ? ` · salió ${v.min_atraso_salida} min tarde` : ""}
+                            {v.estado === "SALIO_RETRASADO" && (
+                              <div style={{ fontSize: 9.5, color: C.ambar }}>
+                                salió {v.min_atraso_salida} min tarde
                               </div>
                             )}
                           </td>
