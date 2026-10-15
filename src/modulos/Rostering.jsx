@@ -55,19 +55,27 @@ const C = {
 function semaforo(v) {
   if (v.estado === "PERDIDO" || v.estado === "NO_SALIO") return "rojo";
   if (v.estado === "SIN_ASIGNAR" || v.estado === "POR_VENCER") return "rojo";
-  if (v.estado === "ROSTEREADO_SIN_RUTA") return "ambar";
+  // Sin rutear y salida tarde son avisos, no fallas: el viaje existe y la
+  // carga se movió. Pero los dos cuestan después — uno en la medición de
+  // MELI, el otro en la hora de entrega.
+  if (v.estado === "SIN_RUTEAR" || v.estado === "SALIO_RETRASADO") return "ambar";
   return "verde";
 }
 
+// Lo que se muestra en la celda de avance cuando no hay barra que dibujar.
+// La columna Estado se eliminó: con el color del semáforo y estas palabras
+// alcanza, y liberar esa columna le da aire a chofer y ruta.
 const ETIQUETA = {
-  PERDIDO:             "Cita vencida sin asignar",
-  NO_SALIO:            "No salió",
-  SIN_ASIGNAR:         "Sin chofer ni placa",
-  POR_VENCER:          "Por vencer",
-  ROSTEREADO_SIN_RUTA: "Sin ruta asignada",
-  LISTO_PARA_SALIR:    "Listo para salir",
-  OPERANDO:            "En ruta",
-  TERMINADO:           "Terminado",
+  PERDIDO:         "cita vencida",
+  NO_SALIO:        "no salió",
+  SIN_ASIGNAR:     "sin chofer ni placa",
+  POR_VENCER:      "por vencer",
+  SIN_RUTEAR:      "sin rutear en MELI",
+  POR_SALIR:       "por salir",
+  OPERANDO:        "en ruta",
+  TERMINADO:       "terminado",
+  SALIO_RETRASADO: "salió tarde",
+  CANCELADO:       "cancelado",
 };
 
 // El contador hacia la cita. En negativo se lee como atraso, no como tiempo
@@ -116,33 +124,44 @@ function Avance({ total, entregados }) {
   );
 }
 
+// La fecha operativa de México, que es la que importa: a las 00:30 de Chile
+// en México todavía es el día anterior y el rostering vigente es el de ayer.
+function hoyMx() {
+  return new Date(Date.now() - 6 * 3600 * 1000).toISOString().slice(0, 10);
+}
+
 export default function Rostering() {
+  const [dia, setDia] = useState(hoyMx);
   const [filas, setFilas] = useState(null);
   const [error, setError] = useState(null);
   const [abiertos, setAbiertos] = useState(new Set());
   const [visto, setVisto] = useState(null);
 
+  const esHoy = dia === hoyMx();
+
   const cargar = useCallback(async () => {
-    const { data, error } = await sb.from("vw_torre_rostering_vivo")
+    const { data, error } = await sb.from("vw_torre_rostering_dia")
       .select("travel_id, sc, servicio, vehiculo, flota, estado, travel_status, "
             + "driver_name, vehicle_plate, ruta_id, ruta_nombre, ruta_paradas, "
             + "ruta_region, eta_visible, min_hasta_eta, min_hasta_lockdate, "
             + "id_ruta, ruta_status, salida_real, min_atraso_salida, "
             + "pkg_total, pkg_delivered, chofer_cambiado, captura_hora")
+      .eq("fecha_operativa", dia)
       .order("sc").order("eta_visible");
     if (error) { setError(error.message); return; }
     setError(null);
     setFilas(data || []);
     setVisto(new Date());
-  }, []);
+  }, [dia]);
 
   useEffect(() => {
     cargar();
-    // El rostering se captura cada 5 minutos; releer cada uno mantiene el
-    // contador vivo sin pedirle más a la base de lo que la base sabe.
+    // El refresco automático solo corre sobre el día de hoy. Un día cerrado ya
+    // no cambia, y recargarlo cada minuto es tráfico que no aporta.
+    if (!esHoy) return;
     const t = setInterval(() => { if (!document.hidden) cargar(); }, 60000);
     return () => clearInterval(t);
-  }, [cargar]);
+  }, [cargar, esHoy]);
 
   // Agrupado por centro, con el peor semáforo arriba. Dentro de cada centro
   // los viajes también van por gravedad: el analista abre el rojo y lo primero
@@ -177,6 +196,33 @@ export default function Rostering() {
     n.has(sc) ? n.delete(sc) : n.add(sc);
     return n;
   });
+
+  // ── La descarga ─────────────────────────────────────────────────────────
+  //   CSV con punto y coma y BOM, no xlsx. Excel en español lee la coma como
+  //   separador decimal: con comas, "104, 106" entra en una sola columna, y
+  //   sin el BOM los acentos salen rotos. Esto se abre con doble clic.
+  function descargar() {
+    if (!filas || !filas.length) return;
+    const cols = ["sc", "travel_id", "estado", "eta_visible", "driver_name",
+      "vehicle_plate", "ruta_nombre", "ruta_paradas", "ruta_region", "id_ruta",
+      "salida_real", "min_atraso_salida", "pkg_total", "pkg_delivered",
+      "servicio", "flota", "travel_status", "chofer_cambiado"];
+    const esc = (v) => {
+      if (v == null) return "";
+      const t = String(v);
+      return /[;"\n]/.test(t) ? `"${t.replace(/"/g, '""')}"` : t;
+    };
+    const txt = "\uFEFF" + [cols.join(";"),
+      ...filas.map((f) => cols.map((c) => esc(f[c])).join(";"))].join("\n");
+    const url = URL.createObjectURL(new Blob([txt], { type: "text/csv;charset=utf-8" }));
+    const a = document.createElement("a");
+    a.href = url;
+    // La fecha va en el nombre: tres descargas de días distintos no pueden
+    // quedar como rostering.csv, (1) y (2).
+    a.download = `rostering_${dia}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }
 
   if (error) {
     return <div style={{ padding: 20, color: C.rojo, fontSize: 13 }}>
@@ -215,9 +261,26 @@ export default function Rostering() {
           <span style={{ fontSize: 13, fontWeight: 700, color: C.verde }}>{total.verde}</span>
           <span style={{ fontSize: 11.5, color: C.gris }}>en regla</span>
         </span>
-        <span style={{ marginLeft: "auto", fontSize: 11, color: C.tenue }}>
-          captura {filas[0]?.captura_hora || "—"}
-          {visto ? ` · visto ${visto.toLocaleTimeString("es-MX", { hour: "2-digit", minute: "2-digit" })}` : ""}
+        <span style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 9 }}>
+          <span style={{ fontSize: 11, color: C.tenue }}>
+            captura {filas[0]?.captura_hora || "—"}
+            {esHoy && visto
+              ? ` · visto ${visto.toLocaleTimeString("es-MX", { hour: "2-digit", minute: "2-digit" })}`
+              : ""}
+          </span>
+          {/* El día se elige acá. Hasta 30 días atrás, que es lo que guarda la
+              vista; más atrás los datos existen pero no se consultan. */}
+          <input type="date" value={dia} max={hoyMx()}
+            onChange={(e) => { setDia(e.target.value); setFilas(null); setAbiertos(new Set()); }}
+            style={{ fontSize: 11.5, padding: "3px 6px", borderRadius: 7,
+              border: "1px solid var(--borde)", background: "#fff" }} />
+          <button onClick={descargar} disabled={!filas?.length}
+            style={{ fontSize: 11.5, padding: "4px 10px", borderRadius: 7,
+              border: "1px solid var(--borde)", background: "#fff",
+              cursor: filas?.length ? "pointer" : "default",
+              color: filas?.length ? "inherit" : C.tenue }}>
+            Descargar
+          </button>
         </span>
       </div>
 
@@ -258,11 +321,10 @@ export default function Rostering() {
                   <thead>
                     <tr style={{ color: C.tenue, textAlign: "left", fontSize: 9.5,
                       textTransform: "uppercase", letterSpacing: 0.3 }}>
-                      <th style={{ fontWeight: 600, padding: "4px 6px 5px 0", width: "12%" }}>Cita</th>
-                      <th style={{ fontWeight: 600, padding: "4px 6px 5px 0", width: "17%" }}>Estado</th>
-                      <th style={{ fontWeight: 600, padding: "4px 6px 5px 0", width: "20%" }}>Chofer</th>
-                      <th style={{ fontWeight: 600, padding: "4px 6px 5px 0", width: "13%" }}>Placa</th>
-                      <th style={{ fontWeight: 600, padding: "4px 6px 5px 0", width: "16%" }}>Ruta</th>
+                      <th style={{ fontWeight: 600, padding: "4px 6px 5px 0", width: "11%" }}>Cita</th>
+                      <th style={{ fontWeight: 600, padding: "4px 6px 5px 0", width: "27%" }}>Chofer</th>
+                      <th style={{ fontWeight: 600, padding: "4px 6px 5px 0", width: "15%" }}>Placa</th>
+                      <th style={{ fontWeight: 600, padding: "4px 6px 5px 0", width: "20%" }}>Ruta</th>
                       <th style={{ fontWeight: 600, padding: "4px 0 5px 0" }}>Avance</th>
                     </tr>
                   </thead>
@@ -272,7 +334,10 @@ export default function Rostering() {
                       const falta = v.estado === "SIN_ASIGNAR" || v.estado === "POR_VENCER"
                                  || v.estado === "PERDIDO";
                       return (
-                        <tr key={v.travel_id} style={{ borderTop: "1px solid var(--borde)" }}>
+                        <tr key={v.travel_id} style={{ borderTop: "1px solid var(--borde)",
+                          // La fila con problema va teñida: una pastilla sola
+                          // se pierde cuando hay quince renglones.
+                          background: s === "rojo" ? C.rojoBg : s === "ambar" ? C.ambarBg : "transparent" }}>
                           <td style={{ padding: "5px 6px 5px 0", whiteSpace: "nowrap",
                             fontVariantNumeric: "tabular-nums" }}>
                             <div>{(v.eta_visible || "").slice(0, 5)}</div>
@@ -283,9 +348,6 @@ export default function Rostering() {
                                 {reloj(v.min_hasta_eta)}
                               </div>
                             )}
-                          </td>
-                          <td style={{ padding: "5px 6px 5px 0" }}>
-                            <Pill color={s}>{ETIQUETA[v.estado] || v.estado}</Pill>
                           </td>
                           <td style={{ padding: "5px 6px 5px 0", overflow: "hidden",
                             textOverflow: "ellipsis", whiteSpace: "nowrap" }}
@@ -317,13 +379,22 @@ export default function Rostering() {
                                 </>
                               : <span style={{ color: C.ambar }}>sin ruta</span>}
                           </td>
+                          {/* La celda de avance carga el estado cuando no hay
+                              barra que dibujar. Antes había un guión que no
+                              decía nada y una columna entera para decirlo. */}
                           <td style={{ padding: "5px 0" }}>
-                            <Avance total={v.pkg_total} entregados={v.pkg_delivered} />
+                            {v.id_ruta
+                              ? <Avance total={v.pkg_total} entregados={v.pkg_delivered} />
+                              : <span style={{ fontSize: 11, fontWeight: s === "verde" ? 400 : 600,
+                                  color: s === "rojo" ? C.rojo : s === "ambar" ? C.ambar : C.gris }}>
+                                  {ETIQUETA[v.estado] || v.estado}
+                                </span>}
                             {v.id_ruta && (
-                              <div style={{ fontSize: 9.5, color: C.tenue,
-                                fontVariantNumeric: "tabular-nums" }}>
+                              <div style={{ fontSize: 9.5, fontVariantNumeric: "tabular-nums",
+                                color: v.estado === "SALIO_RETRASADO" ? C.ambar : C.tenue }}>
                                 #{v.id_ruta}
-                                {v.min_atraso_salida > 15 ? ` · salió ${v.min_atraso_salida} min tarde` : ""}
+                                {v.estado === "SALIO_RETRASADO"
+                                  ? ` · salió ${v.min_atraso_salida} min tarde` : ""}
                               </div>
                             )}
                           </td>
