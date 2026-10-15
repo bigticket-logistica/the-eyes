@@ -646,6 +646,16 @@ export default function TorreControl() {
     rojo: a.rojo + g.rojo, ambar: a.ambar + g.ambar, verde: a.verde + g.verde,
   }), { rojo: 0, ambar: 0, verde: 0 }), [centros]);
 
+  // Cambiar de filtro cierra lo que estuviera abierto. Dos razones: un mapa de
+  // Leaflet montado se redibuja entero en cada cambio de estado y eso es lo
+  // que hacía lento el filtro; y dejar abierto el centro del conjunto anterior
+  // confunde más de lo que ayuda.
+  const cambiarFiltro = (f) => {
+    setFiltro((actual) => (actual === f ? null : f));
+    setPanel(null);
+    setAbiertos(new Set());
+  };
+
   const abrirPanel = (travelId, tipo) => setPanel((p) =>
     p && p.id === travelId && p.tipo === tipo ? null : { id: travelId, tipo });
 
@@ -751,19 +761,19 @@ export default function TorreControl() {
           <Mundo titulo="Rostering" nota="antes de salir · lo responde el supervisor">
             <Kpi titulo="Viajes del día" valor={kpi.viajes}
               sub={`${kpi.rutas} salieron`}
-              activo={filtro === null} onClick={() => setFiltro(null)} />
+              activo={filtro === null} onClick={() => cambiarFiltro(null)} />
             <Kpi titulo="Sin resolver" valor={total.rojo} sub="no show o cancelación"
               color={total.rojo ? C.rojo : C.verde}
               activo={filtro === "sin_resolver"}
-              onClick={() => setFiltro(filtro === "sin_resolver" ? null : "sin_resolver")} />
+              onClick={() => cambiarFiltro("sin_resolver")} />
             <Kpi titulo="No salieron" valor={kpi.noSalio} sub="con chofer y placa"
               color={kpi.noSalio ? C.rojo : C.verde}
               activo={filtro === "no_salio"}
-              onClick={() => setFiltro(filtro === "no_salio" ? null : "no_salio")} />
+              onClick={() => cambiarFiltro("no_salio")} />
             <Kpi titulo="Sin rutear" valor={kpi.sinRutear} sub="falta la ruta en MELI"
               color={kpi.sinRutear ? C.ambar : C.verde}
               activo={filtro === "sin_rutear"}
-              onClick={() => setFiltro(filtro === "sin_rutear" ? null : "sin_rutear")} />
+              onClick={() => cambiarFiltro("sin_rutear")} />
           </Mundo>
 
           <Mundo titulo="Operación" nota="en la calle · lo resuelve la torre">
@@ -771,19 +781,19 @@ export default function TorreControl() {
               sub={`${kpi.entregados.toLocaleString("es-MX")} / ${kpi.cargados.toLocaleString("es-MX")} paquetes`}
               color="var(--navy)"
               activo={filtro === "operando"}
-              onClick={() => setFiltro(filtro === "operando" ? null : "operando")} />
+              onClick={() => cambiarFiltro("operando")} />
             <Kpi titulo="Detenidas" valor={kpi.detenidas} sub="vehículo sin actividad"
               color={kpi.detenidas ? C.rojo : C.verde}
               activo={filtro === "detenidas"}
-              onClick={() => setFiltro(filtro === "detenidas" ? null : "detenidas")} />
+              onClick={() => cambiarFiltro("detenidas")} />
             <Kpi titulo="Demoradas" valor={kpi.demoradas} sub="ruta, despacho o stem-out"
               color={kpi.demoradas ? C.ambar : C.verde}
               activo={filtro === "demoradas"}
-              onClick={() => setFiltro(filtro === "demoradas" ? null : "demoradas")} />
+              onClick={() => cambiarFiltro("demoradas")} />
             <Kpi titulo="No entregados" valor={kpi.fallidos.toLocaleString("es-MX")}
               sub="reparto de hoy" color={kpi.fallidos ? C.ambar : undefined}
               activo={filtro === "fallidos"}
-              onClick={() => setFiltro(filtro === "fallidos" ? null : "fallidos")} />
+              onClick={() => cambiarFiltro("fallidos")} />
           </Mundo>
         </div>
       )}
