@@ -141,7 +141,6 @@ export default function Rostering() {
   const [filas, setFilas] = useState(null);
   const [error, setError] = useState(null);
   const [abiertos, setAbiertos] = useState(new Set());
-  const [visto, setVisto] = useState(null);
 
   const esHoy = dia === hoyMx();
 
@@ -151,13 +150,12 @@ export default function Rostering() {
             + "driver_name, vehicle_plate, ruta_id, ruta_nombre, ruta_paradas, "
             + "ruta_region, eta_visible, min_hasta_eta, min_hasta_lockdate, "
             + "id_ruta, ruta_status, salida_real, min_atraso_salida, "
-            + "pkg_total, pkg_delivered, chofer_cambiado, captura_hora")
+            + "pkg_total, pkg_delivered, chofer_cambiado, captura, captura_hora")
       .eq("fecha_operativa", dia)
       .order("sc").order("eta_visible");
     if (error) { setError(error.message); return; }
     setError(null);
     setFilas(data || []);
-    setVisto(new Date());
   }, [dia]);
 
   useEffect(() => {
@@ -245,8 +243,8 @@ export default function Rostering() {
       {/* ── Resumen ──────────────────────────────────────────────────────
           Tres cifras y nada más. Si rojo y ámbar están en cero, la jornada
           está limpia y no hace falta abrir ningún centro. */}
-      <div style={{ display: "flex", alignItems: "center", gap: 18, flexWrap: "wrap",
-        marginBottom: 12 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 18,
+        marginBottom: 12, whiteSpace: "nowrap" }}>
         <strong style={{ fontSize: 14 }}>Rostering</strong>
         <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
           <Punto color="rojo" />
@@ -269,7 +267,10 @@ export default function Rostering() {
         </span>
         <span style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 9 }}>
           <span style={{ fontSize: 11, color: C.tenue, whiteSpace: "nowrap" }}>
-            {filas[0]?.captura_hora ? `captura ${filas[0].captura_hora}` : ""}
+            {/* La etiqueta de la corrida, no la hora en que se escribió la
+                fila: una pasada que arranca 19:55 y demora dos minutos
+                termina escribiendo 19:57, y eso no es una captura. */}
+            {filas[0]?.captura ? `captura ${filas[0].captura}` : ""}
           </span>
           {/* El día se elige acá. Hasta 30 días atrás, que es lo que guarda la
               vista; más atrás los datos existen pero no se consultan. */}
