@@ -221,7 +221,6 @@ export default function Topbar() {
         <nav style={{ display: "flex", alignItems: "center", gap: 2, marginLeft: 2, overflowX: "auto" }}>
           <Tab to="/torre">Torre de Control</Tab>
           <Tab to="/">Incidencias</Tab>
-          <Tab to="/detalle-dia">Detalle</Tab>
           <Tab to="/consultas" badge={noLeidos}>Consultas</Tab>
           <Tab to="/correos" badge={correosNoLeidos}>Correos</Tab>
           <Tab to="/mensajes" badge={chatNoLeidos}>Mensajes</Tab>
@@ -229,7 +228,6 @@ export default function Topbar() {
           <Tab to="/directorio">Directorio</Tab>
           <Tab to="/anomalias">Anomalías</Tab>
           <Tab to="/poligonos" badge={segAlertas}>Polígonos</Tab>
-          <Tab to="/rostering">Rostering</Tab>
           {/* Posventa va después de Anomalías: las dos se miran cuando el día
               operativo ya cerró, a diferencia de las primeras que se usan en
               vivo. El badge cuenta los casos que nadie abrió. */}
