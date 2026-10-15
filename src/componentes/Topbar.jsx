@@ -219,6 +219,7 @@ export default function Topbar() {
         </div>
 
         <nav style={{ display: "flex", alignItems: "center", gap: 2, marginLeft: 2, overflowX: "auto" }}>
+          <Tab to="/torre">Torre de Control</Tab>
           <Tab to="/">Incidencias</Tab>
           <Tab to="/detalle-dia">Detalle</Tab>
           <Tab to="/consultas" badge={noLeidos}>Consultas</Tab>
