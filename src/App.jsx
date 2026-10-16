@@ -10,6 +10,7 @@ import Correos from "./modulos/Correos.jsx";
 import Mensajes from "./modulos/Mensajes.jsx";
 import Anomalias from "./modulos/Anomalias.jsx";
 import Posventa from "./modulos/Posventa.jsx";
+import DetalleDia from "./modulos/DetalleDia.jsx";
 import Poligonos from "./modulos/Poligonos.jsx";
 import TorreControl from "./modulos/TorreControl.jsx";
 import Salud from "./modulos/Salud.jsx";
@@ -72,6 +73,7 @@ export default function App() {
                 /posventa y no /pnr: la pestaña no tiene que cambiar de nombre
                 cuando llegue lo que sigue. */}
             <Route path="/posventa" element={<Posventa />} />
+            <Route path="/detalle-dia" element={<DetalleDia />} />
             <Route path="/poligonos" element={<Poligonos />} />
             <Route path="/torre" element={<TorreControl />} />
             <Route path="/salud" element={<Salud />} />
