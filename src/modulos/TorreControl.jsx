@@ -527,7 +527,7 @@ export default function TorreControl() {
             + "paradas_en_zona, zona_alta, zona_media, pkg_not_delivered, "
             + "alerta_ruta_demorada, alerta_inactividad_vehiculo, "
             + "alerta_despacho_demorado, alerta_stemout_demorado, "
-            + "alerta_saca_pendiente, alerta_parada_comercial")
+            + "alerta_saca_pendiente, alerta_parada_comercial, sc_ruta")
       .eq("fecha_operativa", dia)
       .order("sc").order("eta_visible");
     if (error) { setError(error.message); return; }
@@ -593,7 +593,7 @@ export default function TorreControl() {
       // en verde con tres incidencias sube sobre uno limpio.
       || (b.inc + b.pnr + b.zonaAlta) - (a.inc + a.pnr + a.zonaAlta)
       || b.ambar - a.ambar || a.sc.localeCompare(b.sc));
-  }, [filas]);
+  }, [filas, filtro]);
 
   // ── Los indicadores del día ─────────────────────────────────────────────
   //   Salen de las mismas filas que el tablero, no de otra consulta: así no
@@ -640,7 +640,7 @@ export default function TorreControl() {
         (b.alerta_inactividad_vehiculo ? 1 : 0) - (a.alerta_inactividad_vehiculo ? 1 : 0)
         || b.alertas - a.alertas
         || (a.pkg_delivered / (a.pkg_total || 1)) - (b.pkg_delivered / (b.pkg_total || 1)));
-  }, [filas, filtro]);
+  }, [filas]);
 
   const total = useMemo(() => centros.reduce((a, g) => ({
     rojo: a.rojo + g.rojo, ambar: a.ambar + g.ambar, verde: a.verde + g.verde,
@@ -847,7 +847,14 @@ export default function TorreControl() {
                       <div style={{ fontSize: 9.5, color: C.tenue }}>{v.ruta_nombre}</div>
                     )}
                   </td>
-                  <td style={{ padding: "6px", fontWeight: 600 }}>{v.sc}</td>
+                  <td style={{ padding: "6px", fontWeight: 600 }}>
+                    {v.sc}
+                    {v.sc_ruta && v.sc_ruta !== v.sc && (
+                      <div style={{ fontSize: 9.5, fontWeight: 400, color: C.ambar }}>
+                        salió de {v.sc_ruta}
+                      </div>
+                    )}
+                  </td>
                   <td style={{ padding: "6px", overflow: "hidden",
                     textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                     {v.chofer_ruta || v.driver_name || "—"}
@@ -1020,6 +1027,17 @@ export default function TorreControl() {
                                     v.ruta_paradas ? `${v.ruta_paradas} paradas` : null]
                                     .filter(Boolean).join(" · ")}
                                 </div>
+                                {/* El viaje se rosteó en un centro y la
+                                    camioneta salió de otro. Pasa con los
+                                    centros recién abiertos: MELI tarda en
+                                    mover el rostering, y mientras tanto el
+                                    centro nuevo acumula no-show que no son
+                                    suyos. */}
+                                {v.sc_ruta && v.sc_ruta !== v.sc && (
+                                  <div style={{ fontSize: 9.5, color: C.ambar }}>
+                                    salió desde {v.sc_ruta}
+                                  </div>
+                                )}
                               </>
                             ) : (
                               <span style={{ color: C.tenue }}>—</span>
