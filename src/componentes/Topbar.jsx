@@ -221,6 +221,7 @@ export default function Topbar() {
         <nav style={{ display: "flex", alignItems: "center", gap: 2, marginLeft: 2, overflowX: "auto" }}>
           <Tab to="/torre">Torre de Control</Tab>
           <Tab to="/">Incidencias</Tab>
+          <Tab to="/detalle-dia">Detalle</Tab>
           <Tab to="/consultas" badge={noLeidos}>Consultas</Tab>
           <Tab to="/correos" badge={correosNoLeidos}>Correos</Tab>
           <Tab to="/mensajes" badge={chatNoLeidos}>Mensajes</Tab>
