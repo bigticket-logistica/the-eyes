@@ -2232,6 +2232,10 @@ export default function Posventa() {
   const [casos, setCasos] = useState([]);
   const [cargando, setCargando] = useState(true);
   const [error, setError] = useState(null);
+  // Confirmación de que una acción salió bien. Hasta ahora solo se avisaba
+  // cuando algo fallaba: el analista apretaba "Aprobado", no veía nada y no
+  // sabía si había pasado.
+  const [confirmacion, setConfirmacion] = useState(null);
   const [filtro, setFiltro] = useState({ tipo: "grupo", valor: "responder" });
   const [periodo, setPeriodo] = useState("");
   const [busqueda, setBusqueda] = useState("");
@@ -2445,7 +2449,7 @@ export default function Posventa() {
     const desde = new Date(Date.now() - 30 * 86400000).toISOString();
     const hist = await sb.from("pnr_historial_mx")
       .select("*").gte("creado_en", desde).order("creado_en", { ascending: false }).limit(3000);
-    if (tablero.error) setError(tablero.error.message);
+    if (tablero.error) setError("No se pudo leer vw_pnr_detalle: " + tablero.error.message);
     else setCasos(tablero.data || []);
     if (!sup.error && sup.data) {
       const m = {};
@@ -2963,6 +2967,7 @@ export default function Posventa() {
 
   // Reabrir no borra las fotos rechazadas: son el registro de qué se mandó y
   // por qué no alcanzó. Si se borraran, la próxima discusión empieza de cero.
+  // Mismo criterio que al aprobar: el rechazo también necesita confirmación.
   async function repedirPruebas(t, motivo) {
     if (!t || !motivo) return;
     const { data, error } = await sb.from("pnr_tareas_mx").update({
@@ -2996,6 +3001,15 @@ export default function Posventa() {
       setError("Pruebas aprobadas, pero el aviso al supervisor no salió: "
         + (data.error_aviso || "la ventana de 24 h puede estar cerrada"));
     }
+    else {
+      // El mensaje dice qué se aprobó y qué se le mandó al supervisor, que es
+      // lo que el analista necesita confirmar.
+      setConfirmacion(t.estado === "sin_pruebas"
+        ? `Caso ${t.case_id} cerrado sin pruebas. Se le avisó al supervisor que ya puede cerrar en Logistic.`
+        : `Pruebas del caso ${t.case_id} aprobadas. Se le pidió al supervisor que cargue el comprobante.`);
+      setTimeout(() => setConfirmacion(null), 6000);
+    }
+
     const { data: fresca } = await sb.from("pnr_tareas_mx")
       .select("*").eq("id", t.id).single();
     if (fresca) setTareas((prev) => ({ ...prev, [fresca.case_id]: fresca }));
@@ -3130,10 +3144,20 @@ export default function Posventa() {
       ) : (
       <Fragment>
 
+      {/* El error ya no antepone "No se pudo leer vw_pnr_detalle": ese banner
+          lo usan también la aprobación y el rechazo, y el prefijo mandaba al
+          analista a buscar un problema de lectura que no existía. */}
       {error && (
         <div style={{ background: C.ladrilloTenue, border: `1px solid ${C.ladrillo}`, color: C.ladrillo,
           borderRadius: 10, padding: "10px 14px", fontSize: 12.5, marginBottom: 14 }}>
-          No se pudo leer vw_pnr_detalle: {error}
+          {error}
+        </div>
+      )}
+
+      {confirmacion && (
+        <div style={{ background: "#e9f3ef", border: `1px solid ${C.verde}`, color: C.verde,
+          borderRadius: 10, padding: "10px 14px", fontSize: 12.5, marginBottom: 14 }}>
+          {confirmacion}
         </div>
       )}
 
