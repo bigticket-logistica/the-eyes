@@ -2,7 +2,8 @@ import { useEffect, useState, useCallback } from "react";
 import { sb } from "../shared/supabase.js";
 import { diaMX } from "../shared/fechas.js";
 import { useAuth } from "../shared/auth.jsx";
-import { ETIQUETAS_CASO, motivoLegible } from "../shared/constantes.js";
+import { ETIQUETAS_CASO, motivoLegible, SERVICE_CENTERS_MX } from "../shared/constantes.js";
+import { resumenIA } from "../shared/mensajes.js";
 
 // ═══════════════════════════════════════════════════════════════════════════
 // BITÁCORA DEL DÍA
@@ -28,14 +29,33 @@ export default function Bitacora() {
   const [cargando, setCargando] = useState(true);
   const [error, setError] = useState("");
 
+  // ── Grupos de WhatsApp ────────────────────────────────────────────────
+  //   SMXRV1 y SMX22 no se comunican con la torre por el canal normal: tienen
+  //   grupos de WhatsApp donde MELI da instrucciones de entrega y resuelve
+  //   problemas en vivo. La API de WhatsApp Business no puede entrar a grupos
+  //   —Meta solo permite conversaciones uno a uno— así que lo que se lee ahí
+  //   no queda en ninguna parte.
+  //
+  //   El analista ya está en el grupo leyendo. Lo que falta no es enterarse:
+  //   es que quede registrado y ligado al centro. Por eso pega el volcado,
+  //   el modelo lo ordena, y el resumen entra a la bitácora del día.
+  const [grupos, setGrupos] = useState([]);
+  const [scGrupo, setScGrupo] = useState("");
+  const [textoGrupo, setTextoGrupo] = useState("");
+  const [analizando, setAnalizando] = useState(false);
+  const [errGrupo, setErrGrupo] = useState("");
+
   const cargar = useCallback(async (fecha) => {
     setError("");
     try {
-      const [ev, nsr, ci] = await Promise.all([
+      const [ev, nsr, ci, gr] = await Promise.all([
         sb.from("crm_bitacora_dia").select("*").eq("fecha", fecha).order("hora", { ascending: true }),
         sb.rpc("fn_ns_por_sc", { p_fecha: fecha }),
         sb.from("crm_bitacora_cierres").select("*").eq("fecha", fecha).maybeSingle(),
+        sb.from("crm_bitacora_grupos").select("*").eq("fecha", fecha)
+          .order("creado_en", { ascending: true }),
       ]);
+      setGrupos(gr.error ? [] : (gr.data || []));
       if (ev.error) throw ev.error;
       setEventos(ev.data || []);
       setNs(nsr.error ? [] : (nsr.data || []));
@@ -64,6 +84,28 @@ export default function Bitacora() {
       .subscribe();
     return () => { sb.removeChannel(canal); };
   }, [fechaSel, cargar]);
+
+  // Pega, analiza, guarda. El resumen se genera una vez y queda escrito: no
+  // se vuelve a pedir al modelo, porque el mismo texto podría resumirse
+  // distinto y la bitácora no puede cambiar después de registrada.
+  async function analizarGrupo() {
+    const texto = textoGrupo.trim();
+    if (!scGrupo) { setErrGrupo("Elige el service center."); return; }
+    if (texto.length < 40) { setErrGrupo("Pega la conversación del grupo."); return; }
+    setAnalizando(true); setErrGrupo("");
+    try {
+      const resumen = await resumenIA(texto);
+      const { error } = await sb.from("crm_bitacora_grupos").insert({
+        fecha: fechaSel, sc: scGrupo, conversacion: texto, resumen,
+        creado_por: analista?.nombre || analista?.email || null,
+      });
+      if (error) throw error;
+      setTextoGrupo(""); setScGrupo("");
+      await cargar(fechaSel);
+    } catch (e) {
+      setErrGrupo("No se pudo analizar: " + (e.message || e));
+    } finally { setAnalizando(false); }
+  }
 
   async function reabrir() {
     if (!window.confirm(`¿Reabrir la bitácora del ${fechaSel}?\n\nSe borra el registro de cierre y las cifras vuelven a calcularse en vivo. El correo ya enviado no se puede deshacer.`)) return;
@@ -142,6 +184,74 @@ export default function Bitacora() {
       )}
 
       {error && <div style={{ background: "#FCEBEB", color: "#791F1F", borderRadius: 8, padding: "10px 14px", marginBottom: 14, fontSize: 13 }}>{error}</div>}
+
+      {/* ── Grupos de WhatsApp ───────────────────────────────────────────
+          Va antes de las incidencias porque es lo único que hay que escribir:
+          el resto de la pantalla se llena solo. Si el analista entra a cerrar
+          el día y esto está abajo, se le pasa.
+
+          Al cerrar la bitácora desaparece el formulario: lo registrado queda,
+          pero no se puede agregar más a un día ya cerrado y enviado. */}
+      <div style={{ background: "#fff", border: "1px solid var(--borde)", borderRadius: 10,
+        overflow: "hidden", marginBottom: 18 }}>
+        <div style={{ padding: "10px 14px", borderBottom: "1px solid var(--borde)",
+          display: "flex", alignItems: "baseline", gap: 8 }}>
+          <span style={{ fontWeight: 600, fontSize: 13 }}>Grupos de WhatsApp</span>
+          {grupos.length > 0 && (
+            <span style={{ fontSize: 20, fontWeight: 700, color: "var(--navy)" }}>{grupos.length}</span>
+          )}
+          <span style={{ fontSize: 11.5, color: "var(--texto-suave)" }}>
+            lo que MELI indicó en el grupo del SC
+          </span>
+        </div>
+
+        {grupos.map((g) => (
+          <div key={g.id} style={{ padding: "11px 14px", borderBottom: "1px solid var(--borde)" }}>
+            <div style={{ display: "flex", alignItems: "baseline", gap: 9, marginBottom: 4 }}>
+              <strong style={{ fontSize: 13 }}>{g.sc}</strong>
+              <span style={{ fontSize: 11, color: "var(--texto-tenue)" }}>
+                {g.creado_por || ""}{g.creado_en ? ` · ${horaMX(g.creado_en)}` : ""}
+              </span>
+            </div>
+            <div style={{ fontSize: 12.5, lineHeight: 1.5, whiteSpace: "pre-wrap" }}>
+              {g.resumen || "—"}
+            </div>
+          </div>
+        ))}
+
+        {!cierre && (
+          <div style={{ padding: "11px 14px" }}>
+            <div style={{ display: "flex", gap: 8, marginBottom: 7, flexWrap: "wrap" }}>
+              <select value={scGrupo} onChange={(e) => setScGrupo(e.target.value)}
+                style={{ fontSize: 12.5, padding: "6px 9px", borderRadius: 7,
+                  border: "1px solid var(--borde)", minWidth: 150 }}>
+                <option value="">Service center…</option>
+                {SERVICE_CENTERS_MX.map((sc) => <option key={sc} value={sc}>{sc}</option>)}
+              </select>
+              <button onClick={analizarGrupo} disabled={analizando}
+                style={{ fontSize: 12.5, padding: "6px 14px", borderRadius: 7,
+                  border: "none", background: "var(--navy)", color: "#fff",
+                  cursor: analizando ? "default" : "pointer", opacity: analizando ? 0.6 : 1 }}>
+                {analizando ? "Analizando…" : "Analizar y registrar"}
+              </button>
+            </div>
+            <textarea value={textoGrupo} onChange={(e) => setTextoGrupo(e.target.value)}
+              placeholder="Pega acá la conversación del grupo tal como viene de WhatsApp."
+              rows={5}
+              style={{ width: "100%", fontSize: 12.5, padding: "8px 10px", borderRadius: 8,
+                border: "1px solid var(--borde)", fontFamily: "inherit", resize: "vertical" }} />
+            {errGrupo && (
+              <div style={{ fontSize: 12, color: "#791F1F", marginTop: 5 }}>{errGrupo}</div>
+            )}
+          </div>
+        )}
+
+        {cierre && grupos.length === 0 && (
+          <div style={{ padding: 18, textAlign: "center", color: "var(--texto-suave)", fontSize: 13 }}>
+            No se registró ningún grupo este día.
+          </div>
+        )}
+      </div>
 
       {/* ── Eventos graves ── */}
       {/* ─── INCIDENCIAS DEL DÍA ─── */}
