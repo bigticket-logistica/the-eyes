@@ -126,4 +126,8 @@ export const SERVICE_CENTERS_MX = [
   // operacion desde antes pero nunca entro a ninguna de las dos listas, asi
   // que la torre no lo capturaba y el front no lo ofrecia.
   "SMX9",
+  // SMX20 · apareció en el rostering el 21-oct-2026. Se detectó al filtrar la
+  // Torre por carrier: ya se capturaba pero no figuraba en ninguna de las dos
+  // listas. Falta asignarle supervisor en supervisores_bt.
+  "SMX20",
 ];

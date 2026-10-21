@@ -119,6 +119,38 @@ export async function crearCasoConsulta(conversacionId, analistaId) {
 
 // Genera un resumen operativo de la conversacion con IA (Edge Function ia-resumen).
 // transcript: texto plano "Conductor: ... / Analista: ..." linea por linea.
+// Resume la conversación de un grupo de WhatsApp de un centro: texto pegado,
+// capturas, o las dos cosas. Va a su propia Edge Function y no a ia-resumen
+// porque el prompt es otro —acá quien habla es MELI dando instrucciones, no
+// un conductor— y porque esa función no acepta imágenes.
+export async function resumenGrupoIA(texto, imagenes) {
+  const { data, error } = await sb.functions.invoke("ia-bitacora-grupo", {
+    body: { texto: texto || "", imagenes: imagenes || [] },
+  });
+  if (error) throw error;
+  if (data?.error) throw new Error(data.error);
+  return data?.resumen || "";
+}
+
+// Reduce una captura antes de mandarla. Las de WhatsApp vienen a resolución
+// de pantalla completa y pesan varios MB: a 1400px de ancho el texto se sigue
+// leyendo perfecto y el envío baja a una fracción. Sin esto, doce capturas no
+// entran en una sola llamada.
+export async function prepararCaptura(file) {
+  const bitmap = await createImageBitmap(file);
+  const max = 1400;
+  const escala = Math.min(1, max / Math.max(bitmap.width, bitmap.height));
+  const w = Math.round(bitmap.width * escala);
+  const h = Math.round(bitmap.height * escala);
+  const lienzo = document.createElement("canvas");
+  lienzo.width = w; lienzo.height = h;
+  lienzo.getContext("2d").drawImage(bitmap, 0, 0, w, h);
+  // JPEG al 82%: en capturas de texto la diferencia con PNG no se nota y pesa
+  // entre cinco y diez veces menos.
+  const url = lienzo.toDataURL("image/jpeg", 0.82);
+  return { mime: "image/jpeg", data: url.split(",")[1], preview: url };
+}
+
 export async function resumenIA(transcript) {
   const { data, error } = await sb.functions.invoke("ia-resumen", { body: { transcript } });
   if (error) throw error;
