@@ -3,7 +3,7 @@ import { sb } from "../shared/supabase.js";
 import { diaMX } from "../shared/fechas.js";
 import { useAuth } from "../shared/auth.jsx";
 import { ETIQUETAS_CASO, motivoLegible, SERVICE_CENTERS_MX } from "../shared/constantes.js";
-import { resumenIA } from "../shared/mensajes.js";
+import { resumenGrupoIA, prepararCaptura } from "../shared/mensajes.js";
 
 // ═══════════════════════════════════════════════════════════════════════════
 // BITÁCORA DEL DÍA
@@ -42,6 +42,7 @@ export default function Bitacora() {
   const [grupos, setGrupos] = useState([]);
   const [scGrupo, setScGrupo] = useState("");
   const [textoGrupo, setTextoGrupo] = useState("");
+  const [capturas, setCapturas] = useState([]);
   const [analizando, setAnalizando] = useState(false);
   const [errGrupo, setErrGrupo] = useState("");
 
@@ -88,19 +89,49 @@ export default function Bitacora() {
   // Pega, analiza, guarda. El resumen se genera una vez y queda escrito: no
   // se vuelve a pedir al modelo, porque el mismo texto podría resumirse
   // distinto y la bitácora no puede cambiar después de registrada.
+  // Las capturas entran de dos maneras: pegadas con Ctrl+V sobre el recuadro,
+  // que es como las tiene el analista después de recortar la pantalla, o
+  // elegidas desde el disco. Las dos terminan en la misma lista.
+  async function sumarCapturas(archivos) {
+    const imgs = [...archivos].filter((f) => f.type.startsWith("image/"));
+    if (!imgs.length) return;
+    setErrGrupo("");
+    const listas = [];
+    for (const f of imgs) {
+      try { listas.push(await prepararCaptura(f)); }
+      catch { setErrGrupo("Una de las imágenes no se pudo leer."); }
+    }
+    setCapturas((prev) => {
+      const total = [...prev, ...listas];
+      // Doce es el tope que acepta el análisis. Más que eso es volcar el día
+      // entero y el resumen se vuelve tan largo como la conversación.
+      if (total.length > 12) setErrGrupo("Máximo 12 capturas por análisis.");
+      return total.slice(0, 12);
+    });
+  }
+
+  function alPegar(e) {
+    const archivos = [...(e.clipboardData?.files || [])];
+    if (archivos.length) { e.preventDefault(); sumarCapturas(archivos); }
+  }
+
   async function analizarGrupo() {
     const texto = textoGrupo.trim();
     if (!scGrupo) { setErrGrupo("Elige el service center."); return; }
-    if (texto.length < 40) { setErrGrupo("Pega la conversación del grupo."); return; }
+    if (texto.length < 40 && !capturas.length) {
+      setErrGrupo("Pega la conversación o adjunta capturas."); return;
+    }
     setAnalizando(true); setErrGrupo("");
     try {
-      const resumen = await resumenIA(texto);
+      const resumen = await resumenGrupoIA(texto,
+        capturas.map(({ mime, data }) => ({ mime, data })));
       const { error } = await sb.from("crm_bitacora_grupos").insert({
         fecha: fechaSel, sc: scGrupo, conversacion: texto, resumen,
+        capturas: capturas.length,
         creado_por: analista?.nombre || analista?.email || null,
       });
       if (error) throw error;
-      setTextoGrupo(""); setScGrupo("");
+      setTextoGrupo(""); setScGrupo(""); setCapturas([]);
       await cargar(fechaSel);
     } catch (e) {
       setErrGrupo("No se pudo analizar: " + (e.message || e));
@@ -211,6 +242,7 @@ export default function Bitacora() {
               <strong style={{ fontSize: 13 }}>{g.sc}</strong>
               <span style={{ fontSize: 11, color: "var(--texto-tenue)" }}>
                 {g.creado_por || ""}{g.creado_en ? ` · ${horaMX(g.creado_en)}` : ""}
+                {g.capturas > 0 ? ` · ${g.capturas} captura${g.capturas > 1 ? "s" : ""}` : ""}
               </span>
             </div>
             <div style={{ fontSize: 12.5, lineHeight: 1.5, whiteSpace: "pre-wrap" }}>
@@ -235,11 +267,46 @@ export default function Bitacora() {
                 {analizando ? "Analizando…" : "Analizar y registrar"}
               </button>
             </div>
+            {/* El pegado va sobre el recuadro: así el analista recorta la
+                pantalla del grupo y hace Ctrl+V sin buscar un botón. El
+                adjunto queda para cuando ya tiene los archivos guardados. */}
             <textarea value={textoGrupo} onChange={(e) => setTextoGrupo(e.target.value)}
-              placeholder="Pega acá la conversación del grupo tal como viene de WhatsApp."
+              onPaste={alPegar}
+              placeholder="Pega la conversación del grupo, o pega capturas con Ctrl+V. Puedes combinar las dos."
               rows={5}
               style={{ width: "100%", fontSize: 12.5, padding: "8px 10px", borderRadius: 8,
                 border: "1px solid var(--borde)", fontFamily: "inherit", resize: "vertical" }} />
+
+            {capturas.length > 0 && (
+              <div style={{ display: "flex", gap: 7, flexWrap: "wrap", marginTop: 7 }}>
+                {capturas.map((c, i) => (
+                  <div key={i} style={{ position: "relative" }}>
+                    <img src={c.preview} alt=""
+                      style={{ height: 62, borderRadius: 6, border: "1px solid var(--borde)",
+                        display: "block" }} />
+                    <button onClick={() => setCapturas((p) => p.filter((_, j) => j !== i))}
+                      title="Quitar"
+                      style={{ position: "absolute", top: -6, right: -6, width: 18, height: 18,
+                        borderRadius: "50%", border: "none", background: "#791F1F", color: "#fff",
+                        fontSize: 11, lineHeight: 1, cursor: "pointer", padding: 0 }}>×</button>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            <div style={{ marginTop: 7 }}>
+              <label style={{ fontSize: 11.5, color: "var(--navy)", cursor: "pointer",
+                textDecoration: "underline", textDecorationStyle: "dotted" }}>
+                adjuntar capturas
+                <input type="file" accept="image/*" multiple hidden
+                  onChange={(e) => { sumarCapturas(e.target.files); e.target.value = ""; }} />
+              </label>
+              {capturas.length > 0 && (
+                <span style={{ fontSize: 11, color: "var(--texto-tenue)", marginLeft: 8 }}>
+                  {capturas.length} de 12
+                </span>
+              )}
+            </div>
             {errGrupo && (
               <div style={{ fontSize: 12, color: "#791F1F", marginTop: 5 }}>{errGrupo}</div>
             )}
