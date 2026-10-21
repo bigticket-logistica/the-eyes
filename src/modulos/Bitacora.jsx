@@ -115,6 +115,16 @@ export default function Bitacora() {
     if (archivos.length) { e.preventDefault(); sumarCapturas(archivos); }
   }
 
+  // Solo con la bitácora abierta. Una vez cerrada y enviada, el registro ya
+  // salió en el PDF del correo: borrarlo dejaría la pantalla diciendo una
+  // cosa y el informe que recibieron diciendo otra.
+  async function borrarGrupo(g) {
+    if (!window.confirm(`¿Borrar el registro de ${g.sc}? No se puede deshacer.`)) return;
+    const { error } = await sb.from("crm_bitacora_grupos").delete().eq("id", g.id);
+    if (error) { setErrGrupo("No se pudo borrar: " + error.message); return; }
+    await cargar(fechaSel);
+  }
+
   async function analizarGrupo() {
     const texto = textoGrupo.trim();
     if (!scGrupo) { setErrGrupo("Elige el service center."); return; }
@@ -244,6 +254,14 @@ export default function Bitacora() {
                 {g.creado_por || ""}{g.creado_en ? ` · ${horaMX(g.creado_en)}` : ""}
                 {g.capturas > 0 ? ` · ${g.capturas} captura${g.capturas > 1 ? "s" : ""}` : ""}
               </span>
+              {!cierre && (
+                <button onClick={() => borrarGrupo(g)}
+                  style={{ marginLeft: "auto", fontSize: 11, color: "#791F1F", border: "none",
+                    background: "none", cursor: "pointer", padding: 0,
+                    textDecoration: "underline", textDecorationStyle: "dotted" }}>
+                  borrar
+                </button>
+              )}
             </div>
             <div style={{ fontSize: 12.5, lineHeight: 1.5, whiteSpace: "pre-wrap" }}>
               {g.resumen || "—"}
