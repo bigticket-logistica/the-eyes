@@ -128,6 +128,8 @@ export const SERVICE_CENTERS_MX = [
   "SMX9",
   // SMX20 · apareció en el rostering el 21-oct-2026. Se detectó al filtrar la
   // Torre por carrier: ya se capturaba pero no figuraba en ninguna de las dos
-  // listas. Falta asignarle supervisor en supervisores_bt.
+  // listas. Asignado a Juan Mancilla el mismo día.
   "SMX20",
+  // SPY2 · asignado a Ivan Gomez, agregado el 05-nov-2026.
+  "SPY2",
 ];
