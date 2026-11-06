@@ -132,4 +132,9 @@ export const SERVICE_CENTERS_MX = [
   "SMX20",
   // SPY2 · asignado a Ivan Gomez, agregado el 05-nov-2026.
   "SPY2",
+  // SVH2 · Walter Sarracino, y SMD1 · Ivan Gomez. Aperturas anunciadas por
+  // MELI para el 09-nov-2026, agregadas antes para que la torre los capture
+  // desde el primer día.
+  "SVH2",
+  "SMD1",
 ];
