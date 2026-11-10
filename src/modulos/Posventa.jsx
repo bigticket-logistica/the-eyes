@@ -2429,12 +2429,25 @@ export default function Posventa() {
       // pedirlo caso por caso.
       sb.from("vw_pnr_supervisor").select("*"),
     ]);
-    // Las tareas vivas del periodo, para que el panel muestre si ya se pidió la
-    // foto y en qué quedó, en vez de ofrecer crearla otra vez.
+    // Todas las tareas, en cualquier estado. Antes se filtraba por las activas
+    // —pendiente, vista, completada, sin_pruebas— y eso escondía las pruebas:
+    // cuando MELI cierra el caso la tarea pasa a 'caso_cerrado', queda fuera de
+    // la lista, y con ella desaparecían las fotos que el supervisor ya había
+    // subido. Cada día se cierran más casos, así que cada día se veían menos.
+    //
+    // Es el mismo error que tenía vw_pnr_sla_tareas: usar el estado como señal
+    // cuando el estado se pisa solo. Una prueba cargada es un hecho y tiene que
+    // seguir viéndose aunque el caso ya esté cerrado.
+    //
+    // Ordenadas por creación para que, si un caso tiene más de una tarea, la
+    // más nueva quede encima al armar el mapa por case_id. Sin orden ganaba
+    // cualquiera, y al sumar las cerradas una vieja podía tapar a la activa.
+    //
+    // Volumen al 09-nov-2026: 904 tareas y 435 vueltas, lejos del tope.
     const [tar, vlt] = await Promise.all([
       sb.from("pnr_tareas_mx")
         .select("id, case_id, sc, estado, supervisor_nombre, creada_en, fotos, comentario, veces_pedida, motivo_reabrir, aprobada_en, aprobada_por, aprobada_por_email, aprobada_nota")
-        .in("estado", ["pendiente", "vista", "completada", "sin_pruebas"])
+        .order("creada_en", { ascending: true })
         .limit(5000),
       sb.from("pnr_tareas_vueltas").select("*").order("vuelta").limit(5000),
     ]);
