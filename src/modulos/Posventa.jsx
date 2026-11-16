@@ -10,6 +10,11 @@ import { puedeActuar } from "../shared/permisos.js";
 
 // Trae TODAS las filas de una consulta, de a mil.
 //
+// No se llama traerTodo a propósito: el componente ya tiene una función local
+// con ese nombre, que recibe el nombre de una tabla. Con el mismo nombre, la
+// local tapaba a esta y recibía una función en vez de una tabla, y la pestaña
+// entera caía con "relation must be a non-empty string" (16-nov-2026).
+//
 // Supabase corta cada respuesta en 1000 filas, y ese tope gana sobre cualquier
 // .limit() que se le ponga a la consulta: pedir 5000 devuelve 1000 sin avisar.
 // Para las pruebas de los supervisores eso no es aceptable —la regla es que se
@@ -22,7 +27,7 @@ import { puedeActuar } from "../shared/permisos.js";
 //
 // Devuelve { data, error } igual que una consulta normal, para que el código
 // que la usa no tenga que cambiar.
-async function traerTodo(armar, tanda = 1000) {
+async function traerEnTandas(armar, tanda = 1000) {
   const filas = [];
   for (let desde = 0; ; desde += tanda) {
     const { data, error } = await armar().range(desde, desde + tanda - 1);
@@ -2480,11 +2485,11 @@ export default function Posventa() {
     //   cargada y la Torre no la mostraba. Pedir de a mil hasta agotar no tiene
     //   techo.
     const [tar, vlt] = await Promise.all([
-      traerTodo(() => sb.from("pnr_tareas_mx")
+      traerEnTandas(() => sb.from("pnr_tareas_mx")
         .select("id, case_id, sc, estado, supervisor_nombre, creada_en, fotos, comentario, veces_pedida, motivo_reabrir, aprobada_en, aprobada_por, aprobada_por_email, aprobada_nota")
         .order("creada_en", { ascending: true })
         .order("id", { ascending: true })),
-      traerTodo(() => sb.from("pnr_tareas_vueltas").select("*")
+      traerEnTandas(() => sb.from("pnr_tareas_vueltas").select("*")
         .order("vuelta", { ascending: true })
         .order("id", { ascending: true })),
     ]);
