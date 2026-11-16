@@ -8,6 +8,31 @@ import DevolucionesPosventa from "./DevolucionesPosventa.jsx";
 import { useAuth } from "../shared/auth.jsx";
 import { puedeActuar } from "../shared/permisos.js";
 
+// Trae TODAS las filas de una consulta, de a mil.
+//
+// Supabase corta cada respuesta en 1000 filas, y ese tope gana sobre cualquier
+// .limit() que se le ponga a la consulta: pedir 5000 devuelve 1000 sin avisar.
+// Para las pruebas de los supervisores eso no es aceptable —la regla es que se
+// ven siempre— así que se pide en tandas hasta que una venga incompleta.
+//
+// `armar` devuelve la consulta desde cero en cada vuelta: un mismo objeto de
+// consulta no se puede reusar con otro rango. La consulta tiene que traer un
+// orden total (por ejemplo fecha y después id): si dos filas empatan en el
+// orden, entre una tanda y la siguiente pueden repetirse o saltarse.
+//
+// Devuelve { data, error } igual que una consulta normal, para que el código
+// que la usa no tenga que cambiar.
+async function traerTodo(armar, tanda = 1000) {
+  const filas = [];
+  for (let desde = 0; ; desde += tanda) {
+    const { data, error } = await armar().range(desde, desde + tanda - 1);
+    if (error) return { data: filas.length ? filas : null, error };
+    filas.push(...(data || []));
+    if (!data || data.length < tanda) break;
+  }
+  return { data: filas, error: null };
+}
+
 // ── Posventa ───────────────────────────────────────────────────────────────
 // PNR y Devoluciones, como dos vistas del mismo módulo. La de PNR lee
 // vw_pnr_tablero completa (155 filas hoy, unos pocos miles
@@ -2443,13 +2468,25 @@ export default function Posventa() {
     // más nueva quede encima al armar el mapa por case_id. Sin orden ganaba
     // cualquiera, y al sumar las cerradas una vieja podía tapar a la activa.
     //
-    // Volumen al 09-nov-2026: 904 tareas y 435 vueltas, lejos del tope.
+    // ── REGLA DE ORO ─────────────────────────────────────────────────────
+    //   La evidencia que carga un supervisor, su comentario, la respuesta del
+    //   analista y cada vuelta se ven SIEMPRE: da igual el estado de la tarea
+    //   o del PNR. Nada de lo que se cargue puede quedar fuera de la pantalla.
+    //
+    //   Por eso se trae TODO, en tandas. Supabase devuelve como máximo 1000
+    //   filas por consulta y ese tope gana sobre cualquier .limit() que se
+    //   ponga acá. El 9-nov había 904 tareas y entraban; el 16-nov eran 1062 y
+    //   las 62 más nuevas quedaban fuera — la 222167173 de SVH2 tenía su foto
+    //   cargada y la Torre no la mostraba. Pedir de a mil hasta agotar no tiene
+    //   techo.
     const [tar, vlt] = await Promise.all([
-      sb.from("pnr_tareas_mx")
+      traerTodo(() => sb.from("pnr_tareas_mx")
         .select("id, case_id, sc, estado, supervisor_nombre, creada_en, fotos, comentario, veces_pedida, motivo_reabrir, aprobada_en, aprobada_por, aprobada_por_email, aprobada_nota")
         .order("creada_en", { ascending: true })
-        .limit(5000),
-      sb.from("pnr_tareas_vueltas").select("*").order("vuelta").limit(5000),
+        .order("id", { ascending: true })),
+      traerTodo(() => sb.from("pnr_tareas_vueltas").select("*")
+        .order("vuelta", { ascending: true })
+        .order("id", { ascending: true })),
     ]);
 
     await cargarTelefonos();
