@@ -137,4 +137,14 @@ export const SERVICE_CENTERS_MX = [
   // desde el primer día.
   "SVH2",
   "SMD1",
+  // Centros agregados el 16-nov-2026 por si entran en operación. Todavía sin
+  // supervisor asignado en supervisores_bt: mientras no lo tengan, la torre
+  // los captura pero sus PNR no le llegan a nadie. Agrupados por nivel según
+  // la lista de origen.
+  // L1
+  "SCQ2",
+  // L2
+  "SLE3", "SML3", "SMT4", "SMX15",
+  // L3
+  "SCB1", "SCV3", "SDC2",
 ];
