@@ -1,9 +1,9 @@
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { sb } from "../shared/supabase.js";
 import { puedeActuar, esObservador } from "../shared/permisos.js";
 import { useAuth } from "../shared/auth.jsx";
 import { hace, fechaHora, diaMX } from "../shared/fechas.js";
-import { listarConversaciones, mensajesDeConversacion, crearCasoConsulta, conversacionPorTelefono, ventanaAbierta, enviarMensaje, resumenIA, consultarPaquete, consultarRuta } from "../shared/mensajes.js";
+import { listarConversaciones, mensajesDeConversacion, crearCasoConsulta, conversacionPorTelefono, ventanaAbierta, enviarMensaje, resumenIA, consultarPaquete, consultarRuta, adjuntoPendiente } from "../shared/mensajes.js";
 import { useAlertas } from "../shared/alertas.jsx";
 import { ETIQUETAS_CASO, SERVICE_CENTERS_MX } from "../shared/constantes.js";
 import Burbuja from "../componentes/Burbuja.jsx";
@@ -1495,6 +1495,10 @@ export default function Consultas() {
     lista.map((c) => leidosRef.current.has(c.id) ? { ...c, no_leidos: 0 } : c), []);
 
   const [nombresLista, setNombresLista] = useState({});
+  // Un archivo pegado con Ctrl+V o arrastrado sobre el compositor. Se le pasa
+  // al botón de adjuntos, que lo trata igual que uno elegido con el clip.
+  const [archivoPegado, setArchivoPegado] = useState(null);
+  const [arrastrando, setArrastrando] = useState(false);
 
   // Los borradores de Biggy son simulaciones de lo que RESPONDERÍA si estuviera
   // activo: nadie tiene que hacer nada con ellos. En el hilo de una analista son
@@ -1519,17 +1523,29 @@ export default function Consultas() {
     setEstadoTk(mapa);
   }, [fechaSel]);
 
+  // Cada carga completa lleva un número. Si mientras esperaba la respuesta salió
+  // otra carga más nueva, esta se descarta al llegar: antes la que tardaba más
+  // podía pisar a la reciente y la lista saltaba hacia atrás.
+  const seqConvsRef = useRef(0);
   const cargarConvs = useCallback(async () => {
+    const yo = ++seqConvsRef.current;
     try {
       const lista = aplicarLeidos(await listarConversaciones());
+      if (yo !== seqConvsRef.current) return;
       setConvs(lista);
-      setNombresLista(await nombresParaLista(lista));
+      const nombres = await nombresParaLista(lista);
+      if (yo !== seqConvsRef.current) return;
+      setNombresLista(nombres);
     }
     catch (e) { setError(e.message); }
   }, [aplicarLeidos]);
 
+  // Si el analista abre otra conversación mientras esta todavía carga, la
+  // respuesta vieja se descarta. Antes llegaba después y pintaba los mensajes de
+  // la conversación anterior encima de la nueva.
   const cargarHilo = useCallback(async (conv) => {
     const msgs = await mensajesDeConversacion(conv.id);
+    if (selRef.current?.id !== conv.id) return;
     setMensajes(msgs);
     const caseIds = [...new Set(msgs.map((m) => m.case_id).filter(Boolean))];
     const mapa = {};
@@ -1543,11 +1559,141 @@ export default function Consultas() {
         if (ABIERTOS.includes(c.estado_id) && c.origen === "consulta") abierto = c;
       }
     }
+    if (selRef.current?.id !== conv.id) return;
     setCasos(mapa);
     setTicketAbierto(abierto);
     setHaySinCaso(msgs.some((m) => !m.case_id && m.direccion === "entrante"));
     const cv = await conversacionPorTelefono(conv.telefono);
+    if (selRef.current?.id !== conv.id) return;
     setConversacion(cv);
+  }, []);
+
+  // ═════════════════════════════════════════════════════════════════════════
+  //  APLICAR CAMBIOS EN VEZ DE RECARGAR
+  //
+  //  Cada aviso en vivo trae la fila que cambió. Antes se ignoraba ese dato y se
+  //  volvía a pedir todo: con cada mensaje que entraba, la lista recargaba sus
+  //  100 conversaciones y buscaba nombres en el directorio, y el hilo abierto
+  //  recargaba sus 400 mensajes con sus casos. Una foto son tres avisos —llega,
+  //  se descarga, se transcribe—, o sea tres recargas completas. Con muchas
+  //  conversaciones a la vez, la pantalla se trababa.
+  //
+  //  Ahora el aviso se aplica directo: un mensaje nuevo se agrega al final, una
+  //  foto que terminó de bajar reemplaza solo su burbuja. Las cargas completas
+  //  quedan para abrir una conversación y como red de seguridad cada minuto,
+  //  por si algún aviso se perdió en el camino.
+  // ═════════════════════════════════════════════════════════════════════════
+  const conversacionRef = useRef(null);
+  conversacionRef.current = conversacion;
+  const nombresRef = useRef({});
+  nombresRef.current = nombresLista;
+  const mensajesRef = useRef([]);
+  mensajesRef.current = mensajes;
+
+  // Una recarga completa del hilo, pero agrupando pedidos cercanos: si llegan
+  // cinco avisos que la necesitan en medio segundo, corre una sola vez.
+  const recargaHiloRef = useRef(null);
+  const programarRecargaHilo = useCallback(() => {
+    if (recargaHiloRef.current) return;
+    recargaHiloRef.current = setTimeout(() => {
+      recargaHiloRef.current = null;
+      if (selRef.current) cargarHilo(selRef.current);
+    }, 400);
+  }, [cargarHilo]);
+
+  const aplicarMensaje = useCallback((p) => {
+    if (p.eventType === "DELETE") {
+      const id = p.old?.id;
+      if (id) setMensajes((prev) => prev.filter((m) => m.id !== id));
+      return;
+    }
+    const fila = p.new;
+    if (!fila?.id || fila.conversacion_id !== selRef.current?.id) return;
+    setMensajes((prev) => {
+      const i = prev.findIndex((m) => m.id === fila.id);
+      if (i >= 0) {
+        // Se mezcla con lo que ya había para no perder campos que la carga
+        // completa traía y el aviso no.
+        const nuevo = prev.slice();
+        nuevo[i] = { ...prev[i], ...fila };
+        return nuevo;
+      }
+      const nuevo = [...prev, fila];
+      // Lo normal es que el mensaje nuevo sea el último. Si llegó desordenado
+      // —un aviso atrasado—, se reordena por hora.
+      const ult = prev[prev.length - 1];
+      if (ult && new Date(fila.creado_en) < new Date(ult.creado_en)) {
+        nuevo.sort((a, b) => new Date(a.creado_en) - new Date(b.creado_en));
+      }
+      return nuevo;
+    });
+    if (!fila.case_id && fila.direccion === "entrante") setHaySinCaso(true);
+    // Un mensaje con un caso que el hilo todavía no conoce cambia los tickets
+    // y sus líneas de cierre: para eso sí se recarga entero. Pasa pocas veces.
+    if (fila.case_id && casosRef.current && casosRef.current[fila.case_id] === undefined) {
+      programarRecargaHilo();
+    }
+  }, [programarRecargaHilo]);
+
+  // La lista junta los avisos de 150 ms y los aplica de una vez. En una ráfaga
+  // de veinte mensajes, eso es un solo redibujo en vez de veinte.
+  const pendConvRef = useRef(new Map());
+  const flushConvRef = useRef(null);
+  const aplicarConvs = useCallback(() => {
+    flushConvRef.current = null;
+    const lote = [...pendConvRef.current.values()];
+    pendConvRef.current.clear();
+    if (!lote.length) return;
+
+    setConvs((prev) => {
+      const mapa = new Map(prev.map((c) => [c.id, c]));
+      for (const p of lote) {
+        if (p.eventType === "DELETE") { if (p.old?.id) mapa.delete(p.old.id); continue; }
+        const f = p.new;
+        if (!f?.id) continue;
+        const fila = leidosRef.current.has(f.id) ? { ...f, no_leidos: 0 } : f;
+        mapa.set(f.id, { ...(mapa.get(f.id) || {}), ...fila });
+      }
+      // Mismo orden y tope que la carga completa: lo más reciente arriba, 100.
+      const t = (c) => (c.ultimo_mensaje_en ? new Date(c.ultimo_mensaje_en).getTime() : 0);
+      return [...mapa.values()].sort((a, b) => t(b) - t(a)).slice(0, 100);
+    });
+
+    // La conversación abierta decide la ventana de 24 h. Si el conductor acaba
+    // de escribir, el compositor tiene que habilitarse sin recargar nada.
+    const abierta = lote.find((p) => p.new?.id && p.new.id === conversacionRef.current?.id);
+    if (abierta) setConversacion((c) => (c ? { ...c, ...abierta.new } : c));
+
+    // Nombres solo de teléfonos que todavía no se buscaron. Antes la búsqueda en
+    // el directorio corría con cada mensaje, aunque ningún nombre cambiara.
+    const sinNombre = lote.map((p) => p.new)
+      .filter((f) => f?.id && !f.conductor_nombre && nombresRef.current[f.telefono] === undefined);
+    if (sinNombre.length) {
+      nombresParaLista(sinNombre).then((nuevos) => {
+        if (Object.keys(nuevos).length) setNombresLista((prev) => ({ ...prev, ...nuevos }));
+      });
+    }
+  }, []);
+  const recibirConv = useCallback((p) => {
+    const id = p.new?.id || p.old?.id;
+    if (!id) return;
+    pendConvRef.current.set(id, p);       // el último aviso de cada una gana
+    if (!flushConvRef.current) flushConvRef.current = setTimeout(aplicarConvs, 150);
+  }, [aplicarConvs]);
+
+  // Las fotos y audios que todavía se están descargando o transcribiendo. Se
+  // piden solo esas filas, no el hilo entero.
+  const refrescarMadurando = useCallback(async () => {
+    const conv = selRef.current;
+    if (!conv) return;
+    const ids = mensajesRef.current.filter(adjuntoPendiente).map((m) => m.id);
+    if (!ids.length) return;
+    const { data } = await sb.from("crm_inc_mensajes")
+      .select("id, media_url, media_path, media_mime, media_bytes, media_estado, transcripcion, transcriptor, estado_entrega")
+      .in("id", ids);
+    if (!data?.length || selRef.current?.id !== conv.id) return;
+    const porId = new Map(data.map((d) => [d.id, d]));
+    setMensajes((prev) => prev.map((m) => (porId.has(m.id) ? { ...m, ...porId.get(m.id) } : m)));
   }, []);
 
   ticketRef.current = ticketAbierto;
@@ -1568,19 +1714,40 @@ export default function Consultas() {
 
   // Se recarga al cambiar el día, cuando llega algo nuevo a la lista, y cada
   // 30 s para que el reloj avance sin depender de eventos.
+  // Depende del CONJUNTO de conversaciones, no de la lista entera. Antes cada
+  // mensaje reordenaba la lista y eso disparaba esta consulta y reiniciaba su
+  // reloj; ahora solo corre si entra o sale una conversación.
+  const idsConvs = useMemo(() => convs.map((c) => c.id).sort().join(","), [convs]);
   useEffect(() => {
     cargarEstadoTickets();
     const t = setInterval(cargarEstadoTickets, 30000);
     return () => clearInterval(t);
-  }, [cargarEstadoTickets, convs]);
+  }, [cargarEstadoTickets, idsConvs]);
   useEffect(() => { marcarVistos(); }, [marcarVistos]);
 
   useEffect(() => {
     const canal = sb.channel("consultas-lista")
-      .on("postgres_changes", { event: "*", schema: "public", table: "crm_inc_conversaciones" }, cargarConvs)
+      .on("postgres_changes", { event: "*", schema: "public", table: "crm_inc_conversaciones" }, recibirConv)
       .subscribe();
-    return () => { sb.removeChannel(canal); };
-  }, [cargarConvs]);
+    return () => {
+      sb.removeChannel(canal);
+      if (flushConvRef.current) { clearTimeout(flushConvRef.current); flushConvRef.current = null; }
+    };
+  }, [recibirConv]);
+
+  // Red de seguridad: una carga completa cada minuto y al volver a la pestaña.
+  // Si un aviso se perdió —el navegador durmió, la red parpadeó—, a lo más
+  // queda un minuto desactualizado en vez de para siempre.
+  useEffect(() => {
+    const t = setInterval(() => { if (!document.hidden) cargarConvs(); }, 60000);
+    const alVolver = () => {
+      if (document.hidden) return;
+      cargarConvs();
+      if (selRef.current) cargarHilo(selRef.current);
+    };
+    document.addEventListener("visibilitychange", alVolver);
+    return () => { clearInterval(t); document.removeEventListener("visibilitychange", alVolver); };
+  }, [cargarConvs, cargarHilo]);
 
   useEffect(() => {
     if (!sel) return;
@@ -1590,19 +1757,19 @@ export default function Consultas() {
       // después del mensaje, la descripción de Vision después). Sin escuchar
       // UPDATE, la imagen quedaba en "en cola de descarga…" hasta refrescar.
       .on("postgres_changes", { event: "*", schema: "public", table: "crm_inc_mensajes", filter: `conversacion_id=eq.${sel.id}` },
-        () => { if (selRef.current) cargarHilo(selRef.current); })
+        aplicarMensaje)
       .subscribe();
     return () => { sb.removeChannel(canal); };
-  }, [sel, cargarHilo]);
+  }, [sel, aplicarMensaje]);
 
   // Respaldo del Realtime: mientras haya un adjunto sin bajar o sin transcribir,
   // refrescar cada 5 s. Se apaga solo cuando todo maduró (o a los 3 min, por si
   // el worker está caído). Así la foto aparece aunque el evento se pierda.
   useEffect(() => {
     if (!sel || !hayAdjuntoMadurando(mensajes)) return;
-    const t = setInterval(() => { if (selRef.current) cargarHilo(selRef.current); }, 5000);
+    const t = setInterval(refrescarMadurando, 5000);
     return () => clearInterval(t);
-  }, [sel, mensajes, cargarHilo]);
+  }, [sel, mensajes, refrescarMadurando]);
 
   // Al abrir una conversación hay que quedar SIEMPRE al final del historial.
   // scrollIntoView con smooth no alcanza: las imágenes y los reproductores de
@@ -1715,6 +1882,10 @@ export default function Consultas() {
   }
 
   async function abrirConv(conv) {
+    // selRef se fija acá, en el mismo clic, y no al redibujar: cargarHilo
+    // compara contra él para descartar respuestas viejas, y si quedara con la
+    // conversación anterior descartaría justo la carga de la que se abrió.
+    selRef.current = conv;
     setSel(conv); setCargando(true); setError(null);
     // La conversación abierta vive en la URL: si el módulo se remonta (F5,
     // deploy, remount), se restaura sola en vez de volver a la lista.
@@ -2198,10 +2369,33 @@ export default function Consultas() {
                     Ventana de 24h cerrada. El conductor debe escribir primero para responder texto libre.
                   </div>
                 )}
-                <div style={{ padding: "11px 16px", display: "flex", gap: 8, alignItems: "flex-end", flexWrap: "wrap" }}>
+                {/* Se puede arrastrar un archivo encima del compositor: entra por
+                    el mismo camino que el clip, con vista previa antes de enviar. */}
+                <div
+                  onDragOver={(e) => {
+                    if (accion || ticketDeOtro) return;
+                    if ([...(e.dataTransfer?.types || [])].includes("Files")) {
+                      e.preventDefault();
+                      if (!arrastrando) setArrastrando(true);
+                    }
+                  }}
+                  onDragLeave={(e) => {
+                    if (!e.currentTarget.contains(e.relatedTarget)) setArrastrando(false);
+                  }}
+                  onDrop={(e) => {
+                    setArrastrando(false);
+                    const f = e.dataTransfer?.files?.[0];
+                    if (!f || accion || ticketDeOtro) return;
+                    e.preventDefault();
+                    setArchivoPegado(f);
+                  }}
+                  style={{ padding: "11px 16px", display: "flex", gap: 8, alignItems: "flex-end", flexWrap: "wrap",
+                    outline: arrastrando ? "2px dashed var(--navy)" : "none", outlineOffset: -4,
+                    background: arrastrando ? "#f0f5fb" : "transparent" }}>
                   <BotonAdjunto telefono={sel?.telefono} caseId={ticketAbierto?.case_id}
                     conversacionId={sel?.id} disabled={accion || ticketDeOtro}
-                    onEnviado={() => cargarHilo(sel)} />
+                    onEnviado={() => cargarHilo(sel)}
+                    archivoExterno={archivoPegado} onExternoTomado={() => setArchivoPegado(null)} />
                   <GrabadorAudio telefono={sel?.telefono} caseId={ticketAbierto?.case_id}
                     conversacionId={sel?.id} disabled={accion || ticketDeOtro}
                     onEnviado={() => cargarHilo(sel)} />
@@ -2215,9 +2409,26 @@ export default function Consultas() {
                       sola línea no se alcanza a revisar lo escrito */}
                   <textarea value={texto} rows={2} onChange={(e) => setTexto(e.target.value)}
                     onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); enviar(); } }}
+                    onPaste={(e) => {
+                      // Ctrl+V con una captura o un archivo copiado: abre la vista
+                      // previa para enviarlo, sin guardarlo ni buscarlo.
+                      //
+                      // Pero solo si no viene texto. Al copiar celdas de Excel o un
+                      // párrafo de Word, el portapapeles trae el texto Y una imagen
+                      // de lo copiado; si se tomara la imagen, pegar texto desde
+                      // esos programas dejaría de funcionar.
+                      const cd = e.clipboardData;
+                      if (!cd) return;
+                      const hayTexto = (cd.getData("text/plain") || "").trim().length > 0;
+                      const f = cd.files?.[0];
+                      if (f && !hayTexto) {
+                        e.preventDefault();
+                        setArchivoPegado(f);
+                      }
+                    }}
                     placeholder={ticketDeOtro
                       ? `Ticket de ${nombresAnalistas[ticketAbierto.analista_actual] || "otro analista"} — traspásatelo para escribir`
-                      : "Escribe al conductor…  (Enter envía · Shift+Enter salta línea)"}
+                      : "Escribe al conductor…  (Enter envía · Shift+Enter salta línea · Ctrl+V pega una captura)"}
                     disabled={accion || ticketDeOtro}
                     style={{
                       flex: 1, minWidth: 200, fontFamily: "inherit", fontSize: 13,
