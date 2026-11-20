@@ -14,6 +14,8 @@ import DetalleDia from "./modulos/DetalleDia.jsx";
 import Poligonos from "./modulos/Poligonos.jsx";
 import TorreControl from "./modulos/TorreControl.jsx";
 import Salud from "./modulos/Salud.jsx";
+import IncidenciasCL from "./modulos/IncidenciasCL.jsx";
+import { PaisProvider, usePais } from "./shared/pais.jsx";
 import Topbar from "./componentes/Topbar.jsx";
 import { AlertasProvider, ContenedorToasts } from "./shared/alertas.jsx";
 import AvisosPosventa from "./componentes/AvisosPosventa.jsx";
@@ -55,11 +57,12 @@ export default function App() {
 
   // Sesión + analista: app completa
   return (
+    <PaisProvider>
     <AlertasProvider>
       <div style={{ display: "flex", flexDirection: "column", height: "100vh" }}>
         <Topbar />
         <div style={{ flex: 1, overflow: "hidden" }}>
-          <Routes>
+          <RutasPorPais>
             <Route path="/" element={<Ticketera />} />
             <Route path="/correos" element={<Correos />} />
             <Route path="/bitacora" element={<Bitacora />} />
@@ -79,7 +82,7 @@ export default function App() {
             <Route path="/salud" element={<Salud />} />
             <Route path="/login" element={<Navigate to="/" replace />} />
             <Route path="*" element={<Navigate to="/" replace />} />
-          </Routes>
+          </RutasPorPais>
         </div>
       </div>
       <ContenedorToasts />
@@ -89,5 +92,24 @@ export default function App() {
           mismo rincón de la pantalla. */}
       <AvisosPosventa />
     </AlertasProvider>
+    </PaisProvider>
   );
+}
+
+
+// Chile tiene por ahora una sola pestaña, Incidencias. Cualquier otra
+// dirección vuelve ahí: una pestaña de México abierta con Chile elegido
+// mostraría datos de México bajo la etiqueta de Chile, que es peor que no
+// mostrar nada. Las rutas de México se dejan tal cual, como hijos.
+function RutasPorPais({ children }) {
+  const { pais } = usePais();
+  if (pais === "CL") {
+    return (
+      <Routes>
+        <Route path="/" element={<IncidenciasCL />} />
+        <Route path="*" element={<Navigate to="/" replace />} />
+      </Routes>
+    );
+  }
+  return <Routes>{children}</Routes>;
 }
