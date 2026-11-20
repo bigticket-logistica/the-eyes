@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import { sb } from "../shared/supabase.js";
 import { useSonidoPnr, sonarPnr } from "../shared/sonido-pnr.js";
+import { usePais } from "../shared/pais.jsx";
 
 // ═══════════════════════════════════════════════════════════════════════════
 // AVISOS DEL CANAL DE POSVENTA
@@ -30,6 +31,11 @@ export default function AvisosPosventa() {
   // que el analista cambia el volumen.
   const cfg = useRef(sonido);
   cfg.current = sonido;
+  // Los PNR de este aviso son de México: con Chile elegido no suenan. Suena lo
+  // de la ventana abierta.
+  const { pais } = usePais();
+  const paisRef = useRef(pais);
+  paisRef.current = pais;
 
   useEffect(() => {
     const canal = sb.channel("pnr-avisos-globales")
@@ -55,15 +61,16 @@ export default function AvisosPosventa() {
                 ubicacion: "compartió su ubicación" }[m.tipo_contenido] || "envió un adjunto";
 
           const aviso = { id: m.id, quien, resumen, caseId: m.case_id };
-          setAvisos((prev) => [...prev.slice(-2), aviso]);
-          if (cfg.current.activo) sonarPnr(cfg.current.nivel);
+          if (paisRef.current === "MX") setAvisos((prev) => [...prev.slice(-2), aviso]);
+          if (cfg.current.activo && paisRef.current === "MX") sonarPnr(cfg.current.nivel);
           setTimeout(() => setAvisos((prev) => prev.filter((a) => a.id !== aviso.id)), VIDA_MS);
         })
       .subscribe();
     return () => { sb.removeChannel(canal); };
   }, []);
 
-  if (!avisos.length) return null;
+  // Con Chile elegido, ni los nuevos ni los que ya estaban: México ve México.
+  if (pais !== "MX" || !avisos.length) return null;
 
   return (
     <div style={{
