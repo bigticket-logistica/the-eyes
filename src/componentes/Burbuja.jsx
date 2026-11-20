@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, memo } from "react";
 import { sb } from "../shared/supabase.js";
 import { fechaHora } from "../shared/fechas.js";
 
@@ -217,7 +217,7 @@ function Transcripcion({ m }) {
 }
 
 // ── Burbuja ─────────────────────────────────────────────────────────────────
-export default function Burbuja({ m }) {
+function Burbuja({ m }) {
   const saliente = m.direccion === "saliente";
   const esIA = m.emisor === "ia";
   const esTexto = TEXTO_PLANO.includes(m.tipo_contenido);
@@ -258,3 +258,9 @@ export default function Burbuja({ m }) {
     </div>
   );
 }
+
+// Memorizada: una burbuja solo se redibuja si cambió SU mensaje. El hilo ahora
+// aplica cada aviso en vez de recargar, así que los mensajes que no cambiaron
+// conservan el mismo objeto y React los salta. Sin esto, cada mensaje nuevo
+// redibujaba las 400 burbujas, con sus mapas y sus imágenes.
+export default memo(Burbuja);

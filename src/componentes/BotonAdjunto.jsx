@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useRef, useState, useEffect } from "react";
 import { enviarAdjunto, validarAdjunto, tipoDeArchivo } from "../shared/mensajes.js";
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -12,7 +12,43 @@ import { enviarAdjunto, validarAdjunto, tipoDeArchivo } from "../shared/mensajes
 
 const ICONO = { image: "🖼", audio: "🎧", video: "🎬", document: "📄" };
 
-export default function BotonAdjunto({ telefono, caseId, conversacionId, disabled, onEnviado }) {
+// ── Imágenes que llegan pegadas o arrastradas ───────────────────────────────
+//   WhatsApp acepta solo JPG o PNG de hasta 5 MB. Una captura de dos monitores
+//   en PNG puede pasar de eso, y una imagen copiada desde el navegador suele
+//   venir en WebP. En vez de rechazarla con un error, se convierte a JPG —y se
+//   achica si es enorme— antes de mostrar la vista previa: pegar tiene que
+//   funcionar siempre, sin que el analista sepa de formatos.
+const LIMITE_IMAGEN = 4.5 * 1024 * 1024;      // margen bajo los 5 MB de Meta
+const LADO_MAX = 2560;
+
+async function normalizarImagen(file) {
+  const tipo = (file.type || "").toLowerCase();
+  const aceptado = tipo === "image/jpeg" || tipo === "image/png";
+  if (aceptado && file.size <= LIMITE_IMAGEN) return file;
+  try {
+    const bitmap = await createImageBitmap(file);
+    const escala = Math.min(1, LADO_MAX / Math.max(bitmap.width, bitmap.height));
+    const w = Math.round(bitmap.width * escala), h = Math.round(bitmap.height * escala);
+    const lienzo = document.createElement("canvas");
+    lienzo.width = w; lienzo.height = h;
+    const ctx = lienzo.getContext("2d");
+    ctx.fillStyle = "#fff";                     // un PNG transparente no queda negro
+    ctx.fillRect(0, 0, w, h);
+    ctx.drawImage(bitmap, 0, 0, w, h);
+    const blob = await new Promise((r) => lienzo.toBlob(r, "image/jpeg", 0.88));
+    if (!blob) return file;
+    const nombre = (file.name || "captura").replace(/\.[^.]+$/, "") + ".jpg";
+    return new File([blob], nombre, { type: "image/jpeg" });
+  } catch {
+    return file;                                // si no se puede convertir, que valide como venga
+  }
+}
+
+// archivoExterno: un archivo que no vino del selector —pegado con Ctrl+V o
+// arrastrado sobre el compositor—. Entra por el mismo camino que uno elegido:
+// validación, vista previa, texto opcional y Enviar.
+export default function BotonAdjunto({ telefono, caseId, conversacionId, disabled, onEnviado,
+                                       archivoExterno, onExternoTomado }) {
   const inputRef = useRef(null);
   const [pendiente, setPendiente] = useState(null);   // { file, tipo, preview }
   const [caption, setCaption] = useState("");
@@ -22,6 +58,14 @@ export default function BotonAdjunto({ telefono, caseId, conversacionId, disable
     const file = e.target.files?.[0];
     e.target.value = "";                              // permite reelegir el mismo archivo
     if (!file) return;
+    tomar(file);
+  }
+
+  // Un solo camino para el archivo, venga de donde venga.
+  async function tomar(original) {
+    const file = (original.type || "").startsWith("image/")
+      ? await normalizarImagen(original)
+      : original;
     const problema = validarAdjunto(file);
     if (problema) { setEstado(problema); return; }
     setEstado(null);
@@ -31,6 +75,14 @@ export default function BotonAdjunto({ telefono, caseId, conversacionId, disable
       preview: tipo === "image" ? URL.createObjectURL(file) : null,
     });
   }
+
+  useEffect(() => {
+    if (!archivoExterno) return;
+    if (!disabled) tomar(archivoExterno);
+    onExternoTomado?.();
+    // tomar no cambia entre renders de forma que importe acá
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [archivoExterno]);
 
   function cancelar() {
     if (pendiente?.preview) URL.revokeObjectURL(pendiente.preview);
@@ -103,7 +155,7 @@ export default function BotonAdjunto({ telefono, caseId, conversacionId, disable
                 )}
 
                 {pendiente.tipo !== "audio" && (
-                  <input value={caption} onChange={(e) => setCaption(e.target.value)}
+                  <input value={caption} onChange={(e) => setCaption(e.target.value)} autoFocus
                     onKeyDown={(e) => { if (e.key === "Enter") enviar(); }}
                     placeholder="Mensaje que acompaña (opcional)…"
                     style={{
