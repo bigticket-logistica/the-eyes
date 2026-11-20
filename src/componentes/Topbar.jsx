@@ -6,6 +6,7 @@ import { useChatNoLeidos } from "../modulos/Mensajes.jsx";
 import { usePnrSinVer } from "../modulos/Posventa.jsx";
 import { useSegAlertas } from "../modulos/Poligonos.jsx";
 import { useSonidoPnr } from "../shared/sonido-pnr.js";
+import { usePais, PAISES } from "../shared/pais.jsx";
 
 function iniciales(nombre) {
   if (!nombre) return "··";
@@ -182,6 +183,7 @@ function PanelSonidoPnr() {
 
 export default function Topbar() {
   const { analista, salir } = useAuth();
+  const { pais, setPais } = usePais();
   const { noLeidos, correosNoLeidos, sonidoActivo, setSonidoActivo,
           nivelSonido, setNivelSonido, probarSonido } = useAlertas();
   const chatNoLeidos = useChatNoLeidos();
@@ -212,12 +214,42 @@ export default function Topbar() {
           <span style={{ color: "#fff", fontWeight: 600, fontSize: 14, whiteSpace: "nowrap" }}>
             Torre de Control
           </span>
-          <span style={{ color: "#bcd0ec", fontSize: 10.5, letterSpacing: 0.4, whiteSpace: "nowrap" }}
-            title={`Operación ${analista?.pais || "MX"}`}>
-            {analista?.pais || "MX"}
-          </span>
+          {/* El país dejó de ser solo una etiqueta: ahora elige qué operación
+              mira la torre. Se queda en el mismo lugar y del mismo tamaño
+              para no mover nada del encabezado. Si el despliegue no tiene
+              las variables de Chile, se ve como antes, sin selector. */}
+          {PAISES.length > 1 ? (
+            <span style={{ display: "inline-flex", gap: 2 }}>
+              {PAISES.map((p) => (
+                <button key={p} onClick={() => setPais(p)}
+                  title={p === "CL" ? "Operación Chile" : "Operación México"}
+                  style={{
+                    fontSize: 10.5, letterSpacing: 0.4, padding: "0 5px", lineHeight: 1.5,
+                    border: "none", borderRadius: 3, cursor: "pointer",
+                    background: pais === p ? "var(--naranja)" : "transparent",
+                    color: pais === p ? "#fff" : "#bcd0ec",
+                    fontWeight: pais === p ? 600 : 400,
+                  }}>
+                  {p}
+                </button>
+              ))}
+            </span>
+          ) : (
+            <span style={{ color: "#bcd0ec", fontSize: 10.5, letterSpacing: 0.4, whiteSpace: "nowrap" }}
+              title="Operación MX">
+              MX
+            </span>
+          )}
         </div>
 
+        {/* Con Chile elegido el menú muestra solo lo que Chile ya tiene. Las
+            pestañas de México no se esconden por estética: abrirlas con Chile
+            elegido mostraría datos de México con la etiqueta de Chile. */}
+        {pais === "CL" ? (
+        <nav style={{ display: "flex", alignItems: "center", gap: 2, marginLeft: 2, overflowX: "auto" }}>
+          <Tab to="/">Incidencias</Tab>
+        </nav>
+        ) : (
         <nav style={{ display: "flex", alignItems: "center", gap: 2, marginLeft: 2, overflowX: "auto" }}>
           <Tab to="/torre">Torre de Control</Tab>
           <Tab to="/">Incidencias</Tab>
@@ -243,6 +275,7 @@ export default function Topbar() {
           {analista?.rol === "admin" && <Tab to="/salud">Salud</Tab>}
           <Tab to="/historico">Histórico</Tab>
         </nav>
+        )}
       </div>
 
       <div style={{ display: "flex", alignItems: "center", gap: 10, flexShrink: 0 }}>
