@@ -22,6 +22,20 @@ export const PAISES = sbCL ? ["MX", "CL"] : ["MX"];
 
 const Ctx = createContext({ pais: "MX", setPais: () => {} });
 
+// La pantalla de ingreso queda fuera de la sesión y no puede usar el contexto.
+// Por eso el país también se lee y se guarda directo en el navegador: lo que se
+// elige al entrar es lo primero que lee la torre al abrirse.
+export function paisGuardado() {
+  try {
+    const g = localStorage.getItem(CLAVE);
+    return PAISES.includes(g) ? g : null;
+  } catch { return null; }
+}
+export function guardarPais(p) {
+  if (!PAISES.includes(p)) return;
+  try { localStorage.setItem(CLAVE, p); } catch { /* sin almacenamiento */ }
+}
+
 export function PaisProvider({ children }) {
   const { analista } = useAuth();
   const [pais, setPaisState] = useState(() => {
