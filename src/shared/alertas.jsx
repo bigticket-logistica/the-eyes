@@ -1,6 +1,7 @@
 import { createContext, useContext, useState, useEffect, useRef, useCallback } from "react";
 import { sb } from "./supabase.js";
 import { useAuth } from "./auth.jsx";
+import { usePais } from "./pais.jsx";
 
 // Contexto global de alertas de mensajes entrantes.
 // Escucha Realtime sobre crm_inc_mensajes y expone:
@@ -95,6 +96,15 @@ export function AlertasProvider({ children }) {
   const sonidoRef = useRef(sonidoActivo);
   sonidoRef.current = sonidoActivo;
 
+  // Suena lo de la ventana abierta. Todas las alarmas de este archivo son de
+  // México —mensajes, correos y asignaciones de la base de México—, así que con
+  // Chile elegido se callan. Hay analistas que cubren los dos países y cambian
+  // de uno a otro: el que está mirando es el que lo llama. Por referencia, para
+  // que cambiar el selector no desarme los canales en vivo.
+  const { pais } = usePais();
+  const paisRef = useRef(pais);
+  paisRef.current = pais;
+
   // Nivel de volumen, elegido por cada persona y recordado en su navegador: en
   // una torre con ruido no sirve el mismo nivel que en una oficina callada.
   const [nivelSonido, setNivel] = useState(nivelGuardado);
@@ -113,9 +123,12 @@ export function AlertasProvider({ children }) {
     reproducirDing(NIVELES_SONIDO[nivelRef.current] ?? 0.85, 2);
   }, []);
 
-  // volumen efectivo: el interruptor manda sobre el nivel
+  // volumen efectivo: el interruptor manda sobre el nivel, y el país sobre los
+  // dos. Las pruebas de sonido del menú no pasan por acá: suenan siempre, porque
+  // las pide la persona.
   const vol = useCallback(
-    () => (sonidoRef.current ? (NIVELES_SONIDO[nivelRef.current] ?? 0.85) : 0), []);
+    () => (paisRef.current === "MX" && sonidoRef.current
+      ? (NIVELES_SONIDO[nivelRef.current] ?? 0.85) : 0), []);
 
   // El navegador deja el audio "suspended" hasta el primer gesto de la persona.
   // Sin esto, el primer aviso de la jornada no suena y parece que el sistema
@@ -157,7 +170,7 @@ export function AlertasProvider({ children }) {
           cargarCorreos();
           const id = "co-" + c.id + "-" + Date.now();
           const quien = c.nombre_de || c.remitente || "un cliente";
-          setToasts((prev) => [...prev, {
+          if (paisRef.current === "MX") setToasts((prev) => [...prev, {
             id, titulo: "✉️ Correo nuevo",
             texto: `${quien}: ${String(c.asunto || "(sin asunto)").slice(0, 70)}`,
           }].slice(-4));
@@ -194,7 +207,7 @@ export function AlertasProvider({ children }) {
           setNoLeidos((n) => n + 1);
           const id = m.id || Math.random().toString(36);
           const texto = m.texto ? (m.texto.length > 60 ? m.texto.slice(0, 60) + "…" : m.texto) : "[adjunto]";
-          setToasts((prev) => [...prev, { id, titulo: "Nuevo mensaje de conductor", texto }].slice(-4));  // máx 4 a la vez
+          if (paisRef.current === "MX") setToasts((prev) => [...prev, { id, titulo: "Nuevo mensaje de conductor", texto }].slice(-4));  // máx 4 a la vez
           // Lo más importante que puede pasar: tres pulsos, el aviso más
           // insistente de los tres. Es alguien en la calle esperando.
           reproducirDing(vol(), 3);
@@ -226,7 +239,7 @@ export function AlertasProvider({ children }) {
             ? "BT-" + String(Number(a.case_id) - 900000000).padStart(8, "0")
             : "#" + a.case_id;
           const id = "as-" + a.id + "-" + Date.now();
-          setToasts((prev) => [...prev, {
+          if (paisRef.current === "MX") setToasts((prev) => [...prev, {
             id, titulo: "🎫 Ticket tomado",
             texto: `${nombre} tomó el ticket ${cod}`,
           }].slice(-4));
@@ -255,7 +268,12 @@ export function useAlertas() {
 // Componente visual de los toasts (esquina inferior derecha)
 export function ContenedorToasts() {
   const { toasts, quitarToast } = useAlertas();
-  if (!toasts.length) return null;
+  // Chile ve Chile, México ve México. Estos avisos son todos de México: con
+  // Chile elegido no se crean, y si había alguno en pantalla al cambiar de
+  // país, se esconde al instante. Los mensajes no se pierden: siguen en
+  // Consultas y Correos con su contador.
+  const { pais } = usePais();
+  if (pais !== "MX" || !toasts.length) return null;
   return (
     <div style={{ position: "fixed", right: 18, bottom: 18, display: "flex", flexDirection: "column",
       gap: 8, zIndex: 9999, maxWidth: 320 }}>
