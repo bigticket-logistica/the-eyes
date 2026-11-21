@@ -6,7 +6,8 @@ export async function mensajesDelCaso(caseId) {
   const { data, error } = await sb
     .from("crm_inc_mensajes")
     .select("id, direccion, emisor, emisor_id, tipo_contenido, texto, media_url, estado_entrega, creado_en, "
-            + "media_path, media_mime, media_bytes, media_estado, transcripcion, transcriptor, lat, lng")
+            + "media_path, media_mime, media_bytes, media_estado, transcripcion, transcriptor, lat, lng, "
+            + "analisis_pedido_en")
     .eq("case_id", caseId)
     .order("creado_en", { ascending: true });
   if (error) throw error;
@@ -88,7 +89,8 @@ export async function mensajesDeConversacion(conversacionId) {
   const { data, error } = await sb
     .from("crm_inc_mensajes")
     .select("id, case_id, direccion, emisor, tipo_contenido, texto, media_url, estado_entrega, creado_en, "
-            + "media_path, media_mime, media_bytes, media_estado, transcripcion, transcriptor, lat, lng")
+            + "media_path, media_mime, media_bytes, media_estado, transcripcion, transcriptor, lat, lng, "
+            + "analisis_pedido_en")
     .eq("conversacion_id", conversacionId)
     // Los ÚLTIMOS 400, no la conversación completa, y descendente.
     //   PostgREST corta las respuestas en 1000 filas y el .limit() no lo sube:
@@ -213,7 +215,11 @@ const TIPOS_ADJUNTO = ["imagen", "audio", "documento", "video", "sticker"];
 export function adjuntoPendiente(m) {
   if (!TIPOS_ADJUNTO.includes(m?.tipo_contenido)) return false;
   if (!m.media_path) return true;
-  if (["imagen", "audio"].includes(m.tipo_contenido) && !m.transcripcion) return true;
+  if (m.tipo_contenido === "audio" && !m.transcripcion) return true;
+  // Una foto descargada ya está lista: desde el 21-nov-2026 no se describe sola
+  // salvo con Biggy activo. Solo queda pendiente si alguien pidió analizarla y
+  // la descripción todavía no llega.
+  if (m.tipo_contenido === "imagen" && m.analisis_pedido_en && !m.transcripcion) return true;
   return false;
 }
 
