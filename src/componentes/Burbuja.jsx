@@ -195,8 +195,55 @@ function Adjunto({ m }) {
   );
 }
 
+// ── Analizar una foto a pedido ──────────────────────────────────────────────
+//   Desde el 21-nov-2026 las fotos no se describen solas, por costo: con Biggy
+//   inactivo el analista está mirando la foto con sus propios ojos. Solo se
+//   analizan automáticamente con Biggy activo, que sí las necesita. El resto,
+//   cuando el analista quiere el dato escrito —una guía, una placa, una
+//   dirección—, con este botón.
+//
+//   El botón solo marca la foto; el proceso de medios del VPS la toma en su
+//   siguiente vuelta (15 segundos a lo más) y la descripción llega sola.
+function AnalizarFoto({ m }) {
+  const [pidiendo, setPidiendo] = useState(false);
+  const [falla, setFalla] = useState(null);
+  const pedida = !!m.analisis_pedido_en;
+  const fallo = m.media_estado === "error";
+
+  async function pedir() {
+    setPidiendo(true); setFalla(null);
+    const { error } = await sb.rpc("fn_pedir_analisis_foto", { p_id: String(m.id) });
+    if (error) { setFalla(error.message); setPidiendo(false); }
+    // Si salió bien, "pidiendo" no se apaga: la marca llega por el canal en
+    // vivo y el texto queda en "Analizando…" hasta que llega la descripción.
+  }
+
+  const estilo = {
+    marginTop: 6, padding: "5px 9px", borderRadius: 7, fontSize: 11.5,
+    border: "1px solid var(--borde)", background: "#f8fafc", color: "var(--texto-suave)",
+  };
+
+  if ((pedida || pidiendo) && !fallo) {
+    return <div style={estilo}>👁 Analizando la foto…</div>;
+  }
+  return (
+    <div style={{ marginTop: 6 }}>
+      <button onClick={pedir} disabled={pidiendo && !fallo}
+        style={{ ...estilo, marginTop: 0, cursor: "pointer", color: "var(--navy)", fontWeight: 500 }}
+        title="Describe la foto con IA y transcribe los datos legibles: guía, placa, dirección">
+        {fallo ? "↻ No se pudo analizar · reintentar" : "👁 Analizar foto"}
+      </button>
+      {falla && <div style={{ fontSize: 11, color: "#b91c1c", marginTop: 3 }}>{falla}</div>}
+    </div>
+  );
+}
+
 // ── Transcripción / descripción producida por IA ─────────────────────────────
 function Transcripcion({ m }) {
+  // Foto de un conductor, ya descargada y sin describir: se ofrece analizarla.
+  if (!m.transcripcion && m.tipo_contenido === "imagen" && m.direccion === "entrante" && m.media_path) {
+    return <AnalizarFoto m={m} />;
+  }
   if (!m.transcripcion) return null;
   const alerta = m.transcripcion.startsWith("ALERTA:");
   const etiqueta = m.tipo_contenido === "audio" ? "🎧 Transcripción" : "👁 Descripción";
