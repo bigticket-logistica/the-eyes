@@ -249,6 +249,7 @@ export default function Topbar() {
         <nav style={{ display: "flex", alignItems: "center", gap: 2, marginLeft: 2, overflowX: "auto" }}>
           <Tab to="/">Avance</Tab>
           <Tab to="/incidencias">Incidencias</Tab>
+          <Tab to="/ranking">Ranking de Conductores</Tab>
         </nav>
         ) : (
         <nav style={{ display: "flex", alignItems: "center", gap: 2, marginLeft: 2, overflowX: "auto" }}>
