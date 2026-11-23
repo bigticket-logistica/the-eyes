@@ -247,7 +247,8 @@ export default function Topbar() {
             elegido mostraría datos de México con la etiqueta de Chile. */}
         {pais === "CL" ? (
         <nav style={{ display: "flex", alignItems: "center", gap: 2, marginLeft: 2, overflowX: "auto" }}>
-          <Tab to="/">Incidencias</Tab>
+          <Tab to="/">Avance</Tab>
+          <Tab to="/incidencias">Incidencias</Tab>
         </nav>
         ) : (
         <nav style={{ display: "flex", alignItems: "center", gap: 2, marginLeft: 2, overflowX: "auto" }}>
