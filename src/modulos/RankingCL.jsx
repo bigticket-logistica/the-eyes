@@ -13,6 +13,10 @@ import { sbCL } from "../shared/supabase.js";
 //  de rutas (rutas_dia_cl, refrescado cada 15 minutos). Las troncales no
 //  entran: no reparten a domicilio.
 //
+//  CECO, supervisor y jefe salen del maestro del Brain (Mantenedores): la
+//  camioneta que más usó el conductor en el período, su supervisor en
+//  vw_vehiculos_bt y el líder de ese supervisor en lideres_supervisores_cl.
+//
 //  Paso 1 de 3 (23-nov-2026). Los siguientes: los patrones de cada conductor
 //  (días, horas, zonas) y una explicación con IA a pedido.
 // ═══════════════════════════════════════════════════════════════════════════
@@ -63,6 +67,7 @@ export default function RankingCL() {
   const [minRutas, setMinRutas] = useState(3);
   const [filtroCeco, setFiltroCeco] = useState("");
   const [filtroSup, setFiltroSup] = useState("");
+  const [filtroJefe, setFiltroJefe] = useState("");
   const [busca, setBusca] = useState("");
   const [visto, setVisto] = useState(null);
 
@@ -85,15 +90,18 @@ export default function RankingCL() {
   const cecos = useMemo(() =>
     [...new Set((filas || []).map((f) => f.ceco).filter(Boolean))].sort(), [filas]);
   const supervisores = useMemo(() =>
-    [...new Set((filas || []).flatMap((f) => (f.supervisor || "").split(", ")).filter(Boolean))].sort(), [filas]);
+    [...new Set((filas || []).map((f) => f.supervisor).filter(Boolean))].sort(), [filas]);
+  const jefes = useMemo(() =>
+    [...new Set((filas || []).map((f) => f.jefe).filter(Boolean))].sort(), [filas]);
 
   const visibles = useMemo(() => {
     const q = busca.trim().toLowerCase();
     return (filas || []).filter((f) =>
       (!filtroCeco || f.ceco === filtroCeco)
-      && (!filtroSup || (f.supervisor || "").split(", ").includes(filtroSup))
-      && (!q || String(f.driver_name || "").toLowerCase().includes(q)));
-  }, [filas, filtroCeco, filtroSup, busca]);
+      && (!filtroSup || f.supervisor === filtroSup)
+      && (!filtroJefe || f.jefe === filtroJefe)
+      && (!q || [f.driver_name, f.patente].some((v) => String(v || "").toLowerCase().includes(q))));
+  }, [filas, filtroCeco, filtroSup, filtroJefe, busca]);
 
   const resumen = useMemo(() => {
     const paq = visibles.reduce((a, f) => a + n(f.paquetes), 0);
@@ -169,12 +177,17 @@ export default function RankingCL() {
           <option value="">Todos los supervisores</option>
           {supervisores.map((s) => <option key={s} value={s}>{s}</option>)}
         </select>
-        <input value={busca} onChange={(e) => setBusca(e.target.value)} placeholder="Buscar conductor"
+        <select value={filtroJefe} onChange={(e) => setFiltroJefe(e.target.value)} style={sel}>
+          <option value="">Todos los jefes</option>
+          {jefes.map((j) => <option key={j} value={j}>{j}</option>)}
+        </select>
+        <input value={busca} onChange={(e) => setBusca(e.target.value)} placeholder="Conductor o patente"
           style={{ ...sel, minWidth: 180 }} />
       </div>
       <div style={{ fontSize: 11, color: "var(--texto-tenue)", marginBottom: 10 }}>
         Con menos rutas que el mínimo, un conductor no entra: con dos rutas, un mal día lo pone primero por
-        azar. Hoy se cuenta aunque las rutas sigan en curso. Las troncales no entran.
+        azar. Hoy se cuenta aunque las rutas sigan en curso. Las troncales no entran. CECO, supervisor y
+        jefe son los de la camioneta que más usó en el período, según el maestro de Mantenedores.
       </div>
 
       {visibles.length === 0 ? (
@@ -192,6 +205,7 @@ export default function RankingCL() {
                 <th style={th}>Conductor</th>
                 <th style={th}>CECO · centro</th>
                 <th style={th}>Supervisor</th>
+                <th style={th}>Jefe</th>
                 <th style={{ ...th, ...num }}>Rutas</th>
                 <th style={{ ...th, ...num }}>Paquetes</th>
                 <th style={{ ...th, ...num }}>Fallidas</th>
@@ -204,12 +218,21 @@ export default function RankingCL() {
               {visibles.map((f) => (
                 <tr key={f.driver_name} style={{ borderTop: "1px solid var(--borde)" }}>
                   <td style={{ ...td, ...num, color: "var(--texto-suave)" }}>{f.posicion}</td>
-                  <td style={{ ...td, fontWeight: 500 }}>{f.driver_name}</td>
                   <td style={td}>
-                    <div>{f.ceco || <span style={{ color: "var(--texto-tenue)" }}>sin CECO</span>}</div>
+                    <div style={{ fontWeight: 500 }}>{f.driver_name}</div>
+                    <div style={{ fontSize: 10.5, color: "var(--texto-tenue)" }}>{f.patente || "sin patente"}</div>
+                  </td>
+                  <td style={td}>
+                    {/* Sin CECO casi siempre es una camioneta que no está en el
+                        maestro: se dice, para que se pueda corregir allá. */}
+                    <div>{f.ceco || <span style={{ color: "#9a4d00" }}>no está en el maestro</span>}</div>
                     <div style={{ fontSize: 10.5, color: "var(--texto-tenue)" }}>{f.service_center_id}</div>
                   </td>
                   <td style={td}>{f.supervisor || <span style={{ color: "var(--texto-tenue)" }}>sin asignar</span>}</td>
+                  <td style={td}>
+                    <div>{f.jefe || <span style={{ color: "var(--texto-tenue)" }}>sin asignar</span>}</div>
+                    {f.zona && <div style={{ fontSize: 10.5, color: "var(--texto-tenue)" }}>{f.zona}</div>}
+                  </td>
                   <td style={{ ...td, ...num }}>
                     {f.rutas}
                     <span style={{ color: "var(--texto-tenue)", fontSize: 10.5 }}> en {f.dias} d</span>
