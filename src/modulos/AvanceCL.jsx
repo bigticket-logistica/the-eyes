@@ -86,6 +86,102 @@ function Chip({ children, fondo = "#fdecea", color = "#a32d2d" }) {
   );
 }
 
+// ── Una fila de centro, con sus rutas debajo cuando está desplegada ─────────
+function FilaCentro({ g, abierto, onClick, filtrando, th, td }) {
+  const num = { textAlign: "right", fontVariantNumeric: "tabular-nums" };
+  return (
+    <>
+      <tr onClick={onClick} style={{ borderTop: "1px solid var(--borde)", cursor: "pointer",
+        background: abierto ? "#f4f7fb" : "#fff" }}>
+        <td style={{ ...td, color: "var(--texto-suave)", fontSize: 11 }}>{abierto ? "▾" : "▸"}</td>
+        <td style={{ ...td, fontWeight: 600 }}>
+          {g.sc}
+          {/* Con un filtro puesto se dice cuántas rutas del centro lo cumplen;
+              el resumen de la fila sigue siendo del centro completo. */}
+          {filtrando && (
+            <span style={{ fontWeight: 400, fontSize: 11, color: "var(--texto-suave)", marginLeft: 6 }}>
+              {g.visibles.length} con el filtro
+            </span>
+          )}
+        </td>
+        <td style={{ ...td, ...num }}>{g.rutas}</td>
+        <td style={td}><Barra pct={g.avance} /></td>
+        <td style={{ ...td, ...num }}>
+          {g.entregados}<span style={{ color: "var(--texto-tenue)" }}>/{g.total}</span>
+        </td>
+        <td style={{ ...td, ...num, color: g.fallidas ? "#a32d2d" : "var(--texto-tenue)",
+          fontWeight: g.fallidas ? 600 : 400 }}>{g.fallidas}</td>
+        <td style={{ ...td, ...num }}>{g.pendientes}</td>
+        <td style={td}>
+          {g.alertas > 0
+            ? <Chip fondo="#fff4e5" color="#9a4d00">{g.alertas} con alerta</Chip>
+            : <Chip fondo="#e7f6ef" color="#13724f">en regla</Chip>}
+        </td>
+      </tr>
+      {abierto && (
+        <tr>
+          <td colSpan={8} style={{ padding: "0 0 8px 28px", background: "#f4f7fb" }}>
+            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12, background: "#fff",
+              border: "1px solid var(--borde)", borderRadius: 8 }}>
+              <thead>
+                <tr style={{ textAlign: "left", color: "var(--texto-suave)", fontSize: 10.5,
+                  textTransform: "uppercase", letterSpacing: 0.3 }}>
+                  <th style={th}>Ruta</th>
+                  <th style={th}>Conductor</th>
+                  <th style={th}>Avance</th>
+                  <th style={{ ...th, textAlign: "right" }}>Entreg.</th>
+                  <th style={{ ...th, textAlign: "right" }}>Fallidas</th>
+                  <th style={{ ...th, textAlign: "right" }}>Pend.</th>
+                  <th style={th}>Alertas</th>
+                  <th style={{ ...th, textAlign: "right" }}>Dato</th>
+                </tr>
+              </thead>
+              <tbody>
+                {g.visibles.map((r) => {
+                  const al = alertasDe(r);
+                  return (
+                    <tr key={r.id_ruta} style={{ borderTop: "1px solid var(--borde)" }}>
+                      <td style={{ ...td, fontVariantNumeric: "tabular-nums" }}>
+                        {/* El id arriba porque es con lo que se busca en MELI. */}
+                        <div>{r.id_ruta}</div>
+                        {r.cycle_name && <div style={{ fontSize: 10.5, color: "var(--texto-tenue)" }}>{r.cycle_name}</div>}
+                      </td>
+                      <td style={td}>
+                        <div>{r.driver_name || "—"}</div>
+                        <div style={{ fontSize: 10.5, color: "var(--texto-tenue)" }}>
+                          {r.vehicle_license || ""}{r.has_helper ? " · con ayudante" : ""}
+                        </div>
+                      </td>
+                      <td style={td}><Barra pct={avanceDe(r)} /></td>
+                      <td style={{ ...td, ...num }}>
+                        {r.pkg_delivered ?? 0}<span style={{ color: "var(--texto-tenue)" }}>/{r.pkg_total ?? 0}</span>
+                      </td>
+                      <td style={{ ...td, ...num, color: r.pkg_not_delivered ? "#a32d2d" : "var(--texto-tenue)",
+                        fontWeight: r.pkg_not_delivered ? 600 : 400 }}>{r.pkg_not_delivered ?? 0}</td>
+                      <td style={{ ...td, ...num }}>{r.pkg_pending ?? 0}</td>
+                      <td style={td}>
+                        <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
+                          {al.length === 0
+                            ? <span style={{ color: "var(--texto-tenue)" }}>—</span>
+                            : al.map((a) => <Chip key={a.campo}>{a.corto}</Chip>)}
+                        </div>
+                      </td>
+                      <td style={{ ...td, textAlign: "right", fontSize: 11, color: "var(--texto-tenue)",
+                        whiteSpace: "nowrap" }} title="Minutos desde la última captura de esta ruta">
+                        {typeof r.hace_minutos === "number" ? `hace ${Math.round(r.hace_minutos)} min` : "—"}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </td>
+        </tr>
+      )}
+    </>
+  );
+}
+
 export default function AvanceCL() {
   const [rutas, setRutas] = useState(null);
   const [error, setError] = useState(null);
@@ -93,6 +189,15 @@ export default function AvanceCL() {
   const [filtroSC, setFiltroSC] = useState("");
   const [busca, setBusca] = useState("");
   const [visto, setVisto] = useState(null);
+  // Centros desplegados. Arrancan todos plegados: con 9 centros y ~150 rutas,
+  // la pantalla abierta entera no se puede leer. Se ve el resumen de cada
+  // centro y se despliega el que interesa.
+  const [abiertos, setAbiertos] = useState(() => new Set());
+  const alternar = (sc) => setAbiertos((prev) => {
+    const n = new Set(prev);
+    if (n.has(sc)) n.delete(sc); else n.add(sc);
+    return n;
+  });
 
   const cargar = useCallback(async () => {
     if (!sbCL) { setError("Faltan las variables de Chile en el despliegue."); return; }
@@ -114,7 +219,7 @@ export default function AvanceCL() {
     [...new Set((rutas || []).map((r) => r.service_center_id).filter(Boolean))].sort(), [rutas]);
 
   // Lo que pasa los filtros de centro y búsqueda; sobre esto se cuentan los
-  // totales de arriba, para que cuadren con lo que se ve.
+  // totales, para que cuadren con lo que se ve.
   const base = useMemo(() => {
     const q = busca.trim().toLowerCase();
     return (rutas || []).filter((r) =>
@@ -128,7 +233,7 @@ export default function AvanceCL() {
     return {
       rutas: base.length,
       avance: total ? Math.round(((entregados + fallidas) / total) * 100) : 0,
-      entregados, fallidas, pendientes: s("pkg_pending"),
+      total, entregados, fallidas, pendientes: s("pkg_pending"),
       conAlerta: base.filter((r) => alertasDe(r).length).length,
     };
   }, [base]);
@@ -144,8 +249,11 @@ export default function AvanceCL() {
     return c;
   }, [base]);
 
-  // Agrupado por centro. Dentro de cada centro, primero las rutas con alerta,
-  // después las más atrasadas. Los centros con más alertas van arriba.
+  // Un grupo por centro. El resumen de la fila es del centro COMPLETO —todas
+  // sus rutas—, para que el avance del centro no cambie según el filtro. Lo
+  // que el filtro decide es qué rutas aparecen al desplegarlo, y qué centros
+  // se muestran: con un filtro puesto, solo los que tienen alguna ruta que lo
+  // cumpla. Los centros con más alertas van arriba.
   const grupos = useMemo(() => {
     const pasa = (r) => {
       const al = alertasDe(r);
@@ -155,24 +263,33 @@ export default function AvanceCL() {
       return al.some((a) => a.filtro === filtro);
     };
     const porSC = new Map();
-    for (const r of base.filter(pasa)) {
+    for (const r of base) {
       const k = r.service_center_id || "—";
       if (!porSC.has(k)) porSC.set(k, []);
       porSC.get(k).push(r);
     }
-    const lista = [...porSC.entries()].map(([sc, rs]) => {
-      rs.sort((a, b) => alertasDe(b).length - alertasDe(a).length || avanceDe(a) - avanceDe(b));
-      const tot = rs.reduce((x, r) => x + (r.pkg_total || 0), 0);
-      const res = rs.reduce((x, r) => x + (r.pkg_delivered || 0) + (r.pkg_not_delivered || 0), 0);
+    const lista = [...porSC.entries()].map(([sc, todas]) => {
+      const visibles = todas.filter(pasa)
+        .sort((a, b) => alertasDe(b).length - alertasDe(a).length || avanceDe(a) - avanceDe(b));
+      const sum = (k) => todas.reduce((x, r) => x + (r[k] || 0), 0);
+      const tot = sum("pkg_total"), ent = sum("pkg_delivered"), fal = sum("pkg_not_delivered");
       return {
-        sc, rutas: rs,
-        avance: tot ? Math.round((res / tot) * 100) : 0,
-        fallidas: rs.reduce((x, r) => x + (r.pkg_not_delivered || 0), 0),
-        alertas: rs.filter((r) => alertasDe(r).length).length,
+        sc, visibles,
+        rutas: todas.length,
+        avance: tot ? Math.round(((ent + fal) / tot) * 100) : 0,
+        total: tot, entregados: ent, fallidas: fal, pendientes: sum("pkg_pending"),
+        alertas: todas.filter((r) => alertasDe(r).length).length,
       };
     });
-    return lista.sort((a, b) => b.alertas - a.alertas || a.sc.localeCompare(b.sc));
+    return lista
+      .filter((g) => filtro === "todas" || g.visibles.length > 0)
+      .sort((a, b) => b.alertas - a.alertas || a.sc.localeCompare(b.sc));
   }, [base, filtro]);
+
+  // Con una búsqueda escrita, los centros con coincidencias se abren solos:
+  // quien busca un conductor quiere verlo, no un resumen.
+  const buscando = busca.trim().length > 0;
+  const estaAbierto = (sc) => buscando || abiertos.has(sc);
 
   if (error) {
     return <div style={{ padding: 20, color: "#791F1F", fontSize: 13 }}>
@@ -194,6 +311,9 @@ export default function AvanceCL() {
 
   const th = { padding: "6px 10px", fontWeight: 600 };
   const td = { padding: "7px 10px" };
+  const num = { textAlign: "right", fontVariantNumeric: "tabular-nums" };
+  const botonChico = { fontSize: 11.5, padding: "4px 9px", borderRadius: 7, cursor: "pointer",
+    border: "1px solid var(--borde)", background: "#fff" };
 
   return (
     <div style={{ height: "100%", overflow: "auto", padding: "14px 18px" }}>
@@ -244,82 +364,59 @@ export default function AvanceCL() {
           background: "#fff", border: "1px solid var(--borde)", borderRadius: 10 }}>
           {rutas.length ? "Ninguna ruta con este filtro." : "Todavía no hay rutas capturadas hoy."}
         </div>
-      ) : grupos.map((g) => (
-        <div key={g.sc} style={{ background: "#fff", border: "1px solid var(--borde)", borderRadius: 10,
-          overflow: "hidden", marginBottom: 12 }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "8px 12px",
-            background: "var(--fondo, #f7f8fa)", borderBottom: "1px solid var(--borde)" }}>
-            <strong style={{ fontSize: 13 }}>{g.sc}</strong>
-            <span style={{ fontSize: 11.5, color: "var(--texto-suave)" }}>
-              {g.rutas.length} {g.rutas.length === 1 ? "ruta" : "rutas"} · avance {g.avance}%
+      ) : (
+        <div style={{ background: "#fff", border: "1px solid var(--borde)", borderRadius: 10, overflow: "hidden" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 12px",
+            borderBottom: "1px solid var(--borde)" }}>
+            <strong style={{ fontSize: 13 }}>Resumen por centro</strong>
+            <span style={{ fontSize: 11.5, color: "var(--texto-suave)" }}>clic en un centro para ver sus rutas</span>
+            <span style={{ marginLeft: "auto", display: "flex", gap: 6 }}>
+              <button onClick={() => setAbiertos(new Set(grupos.map((g) => g.sc)))} style={botonChico}>
+                Desplegar todos
+              </button>
+              <button onClick={() => setAbiertos(new Set())} style={botonChico}>Plegar todos</button>
             </span>
-            {g.fallidas > 0 && <Chip>{g.fallidas} fallidas</Chip>}
-            {g.alertas > 0
-              ? <Chip fondo="#fff4e5" color="#9a4d00">{g.alertas} con alerta</Chip>
-              : <Chip fondo="#e7f6ef" color="#13724f">en regla</Chip>}
           </div>
           <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
             <thead>
               <tr style={{ textAlign: "left", color: "var(--texto-suave)", fontSize: 10.5,
-                textTransform: "uppercase", letterSpacing: 0.3 }}>
-                <th style={th}>Ruta</th>
-                <th style={th}>Conductor</th>
+                textTransform: "uppercase", letterSpacing: 0.3, background: "var(--fondo, #f7f8fa)" }}>
+                <th style={{ ...th, width: 22 }}></th>
+                <th style={th}>Centro</th>
+                <th style={{ ...th, textAlign: "right" }}>Rutas</th>
                 <th style={th}>Avance</th>
                 <th style={{ ...th, textAlign: "right" }}>Entreg.</th>
                 <th style={{ ...th, textAlign: "right" }}>Fallidas</th>
                 <th style={{ ...th, textAlign: "right" }}>Pend.</th>
-                <th style={th}>Alertas</th>
-                <th style={{ ...th, textAlign: "right" }}>Dato</th>
+                <th style={th}>Estado</th>
               </tr>
             </thead>
             <tbody>
-              {g.rutas.map((r) => {
-                const al = alertasDe(r);
-                const pct = avanceDe(r);
-                return (
-                  <tr key={r.id_ruta} style={{ borderTop: "1px solid var(--borde)" }}>
-                    <td style={{ ...td, fontVariantNumeric: "tabular-nums" }}>
-                      {/* El id arriba porque es con lo que se busca en MELI. */}
-                      <div>{r.id_ruta}</div>
-                      {r.cycle_name && <div style={{ fontSize: 10.5, color: "var(--texto-tenue)" }}>{r.cycle_name}</div>}
-                    </td>
-                    <td style={td}>
-                      <div>{r.driver_name || "—"}</div>
-                      <div style={{ fontSize: 10.5, color: "var(--texto-tenue)" }}>
-                        {r.vehicle_license || ""}{r.has_helper ? " · con ayudante" : ""}
-                      </div>
-                    </td>
-                    <td style={td}><Barra pct={pct} /></td>
-                    <td style={{ ...td, textAlign: "right", fontVariantNumeric: "tabular-nums" }}>
-                      {r.pkg_delivered ?? 0}<span style={{ color: "var(--texto-tenue)" }}>/{r.pkg_total ?? 0}</span>
-                    </td>
-                    <td style={{ ...td, textAlign: "right", fontVariantNumeric: "tabular-nums",
-                      color: r.pkg_not_delivered ? "#a32d2d" : "var(--texto-tenue)",
-                      fontWeight: r.pkg_not_delivered ? 600 : 400 }}>
-                      {r.pkg_not_delivered ?? 0}
-                    </td>
-                    <td style={{ ...td, textAlign: "right", fontVariantNumeric: "tabular-nums" }}>
-                      {r.pkg_pending ?? 0}
-                    </td>
-                    <td style={td}>
-                      <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
-                        {al.length === 0
-                          ? <span style={{ color: "var(--texto-tenue)" }}>—</span>
-                          : al.map((a) => <Chip key={a.campo}>{a.corto}</Chip>)}
-                      </div>
-                    </td>
-                    <td style={{ ...td, textAlign: "right", fontSize: 11, color: "var(--texto-tenue)",
-                      whiteSpace: "nowrap" }}
-                      title="Minutos desde la última captura de esta ruta">
-                      {typeof r.hace_minutos === "number" ? `hace ${Math.round(r.hace_minutos)} min` : "—"}
-                    </td>
-                  </tr>
-                );
-              })}
+              {grupos.map((g) => (
+                <FilaCentro key={g.sc} g={g} abierto={estaAbierto(g.sc)} onClick={() => alternar(g.sc)}
+                  filtrando={filtro !== "todas"} th={th} td={td} />
+              ))}
+              {/* Total de lo que está a la vista: cuadra con los números de arriba. */}
+              <tr style={{ borderTop: "2px solid var(--borde)", background: "var(--fondo, #f7f8fa)", fontWeight: 600 }}>
+                <td style={td}></td>
+                <td style={td}>Total</td>
+                <td style={{ ...td, ...num }}>{resumen.rutas}</td>
+                <td style={td}><Barra pct={resumen.avance} /></td>
+                <td style={{ ...td, ...num }}>
+                  {resumen.entregados}<span style={{ color: "var(--texto-tenue)", fontWeight: 400 }}>/{resumen.total}</span>
+                </td>
+                <td style={{ ...td, ...num, color: resumen.fallidas ? "#a32d2d" : undefined }}>{resumen.fallidas}</td>
+                <td style={{ ...td, ...num }}>{resumen.pendientes}</td>
+                <td style={td}>
+                  {resumen.conAlerta
+                    ? <Chip fondo="#fff4e5" color="#9a4d00">{resumen.conAlerta} con alerta</Chip>
+                    : <Chip fondo="#e7f6ef" color="#13724f">en regla</Chip>}
+                </td>
+              </tr>
             </tbody>
           </table>
         </div>
-      ))}
+      )}
     </div>
   );
 }
