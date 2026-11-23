@@ -15,6 +15,7 @@ import Poligonos from "./modulos/Poligonos.jsx";
 import TorreControl from "./modulos/TorreControl.jsx";
 import Salud from "./modulos/Salud.jsx";
 import IncidenciasCL from "./modulos/IncidenciasCL.jsx";
+import AvanceCL from "./modulos/AvanceCL.jsx";
 import { PaisProvider, usePais } from "./shared/pais.jsx";
 import Topbar from "./componentes/Topbar.jsx";
 import { AlertasProvider, ContenedorToasts } from "./shared/alertas.jsx";
@@ -97,8 +98,8 @@ export default function App() {
 }
 
 
-// Chile tiene por ahora una sola pestaña, Incidencias. Cualquier otra
-// dirección vuelve ahí: una pestaña de México abierta con Chile elegido
+// Chile tiene sus propias pestañas: Avance e Incidencias. Cualquier otra
+// dirección vuelve a Avance: una pestaña de México abierta con Chile elegido
 // mostraría datos de México bajo la etiqueta de Chile, que es peor que no
 // mostrar nada. Las rutas de México se dejan tal cual, como hijos.
 function RutasPorPais({ children }) {
@@ -106,7 +107,9 @@ function RutasPorPais({ children }) {
   if (pais === "CL") {
     return (
       <Routes>
-        <Route path="/" element={<IncidenciasCL />} />
+        {/* Avance es la pestaña principal de Chile, como la Torre en México. */}
+        <Route path="/" element={<AvanceCL />} />
+        <Route path="/incidencias" element={<IncidenciasCL />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     );
