@@ -31,7 +31,7 @@ const pct = (v) => `${n(v).toLocaleString("es-CL", { minimumFractionDigits: 1, m
 function VsCentro({ v }) {
   if (v === null || v === undefined) return <span style={{ color: "var(--texto-tenue)" }}>—</span>;
   const x = n(v);
-  const texto = `${x.toLocaleString("es-CL", { maximumFractionDigits: 1 })}× su centro`;
+  const texto = `${x.toLocaleString("es-CL", { maximumFractionDigits: 1 })}× su CECO`;
   const [fondo, color] =
     x >= 2   ? ["#fdecea", "#a32d2d"] :
     x >= 1.5 ? ["#fff4e5", "#9a4d00"] :
@@ -143,7 +143,7 @@ export default function RankingCL() {
       <div style={{ display: "flex", alignItems: "baseline", gap: 10, marginBottom: 12 }}>
         <strong style={{ fontSize: 15 }}>Ranking de Conductores · Chile</strong>
         <span style={{ fontSize: 11.5, color: "var(--texto-suave)" }}>
-          por porcentaje de fallidas, comparado con su centro
+          por porcentaje de fallidas, comparado con su CECO
         </span>
         <span style={{ marginLeft: "auto", fontSize: 11, color: "var(--texto-tenue)" }}>
           {visto ? `visto ${visto.toLocaleTimeString("es-CL", { hour: "2-digit", minute: "2-digit" })}` : ""}
@@ -154,7 +154,7 @@ export default function RankingCL() {
         <Kpi titulo="Conductores en el ranking" valor={resumen.conductores} />
         <Kpi titulo="Fallidas" valor={resumen.fallidas} color={resumen.fallidas ? "#a32d2d" : undefined} />
         <Kpi titulo="% de fallidas del grupo" valor={pct(resumen.pct)} />
-        <Kpi titulo="Fallan el doble o más que su centro" valor={resumen.sobreDoble}
+        <Kpi titulo="Fallan el doble o más que su CECO" valor={resumen.sobreDoble}
           color={resumen.sobreDoble ? "#a32d2d" : "#1D9E75"} />
       </div>
 
@@ -242,7 +242,7 @@ export default function RankingCL() {
                     {f.fallidas}
                   </td>
                   <td style={td}><BarraPct v={f.pct_fallidas} /></td>
-                  <td style={td} title={`Su centro: ${pct(f.pct_centro)} de fallidas`}>
+                  <td style={td} title={`Su CECO: ${pct(f.pct_centro)} de fallidas`}>
                     <VsCentro v={f.vs_centro} />
                   </td>
                   <td style={{ ...td, ...num, fontSize: 11, color: "var(--texto-tenue)", whiteSpace: "nowrap" }}>

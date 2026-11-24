@@ -40,6 +40,14 @@ const FILTROS = [
 
 const alertasDe = (r) => ALERTAS.filter((a) => r[a.campo] === true);
 
+// Todo se agrupa por el CECO del Brain, no por el centro que informa MELI: las
+// rutas de Melipilla nacen en SRM2 pero se despachan desde ERM2, y agrupando
+// por centro quedaban escondidas dentro de SRM2 (23-nov-2026). La vista ya trae
+// el CECO del Brain, o el de respaldo si el Brain todavía no lo resolvió.
+// Sin ninguno, la ruta queda bajo su centro de MELI marcada como pendiente,
+// para que no desaparezca.
+const claveCeco = (r) => r.ceco || `${r.service_center_id || "—"} · CECO pendiente`;
+
 // Avance de una ruta. Se prefiere el porcentaje de MELI; si no viene, se
 // calcula con lo resuelto (entregado + fallido) sobre el total.
 function avanceDe(r) {
@@ -96,6 +104,11 @@ function FilaCentro({ g, abierto, onClick, filtrando, th, td }) {
         <td style={{ ...td, color: "var(--texto-suave)", fontSize: 11 }}>{abierto ? "▾" : "▸"}</td>
         <td style={{ ...td, fontWeight: 600 }}>
           {g.sc}
+          {g.origenes.length > 0 && (
+            <span style={{ fontWeight: 400, fontSize: 11, color: "var(--texto-tenue)", marginLeft: 6 }}>
+              {g.origenes.join(", ")}
+            </span>
+          )}
           {/* Con un filtro puesto se dice cuántas rutas del centro lo cumplen;
               el resumen de la fila sigue siendo del centro completo. */}
           {filtrando && (
@@ -216,14 +229,14 @@ export default function AvanceCL() {
   }, [cargar]);
 
   const centros = useMemo(() =>
-    [...new Set((rutas || []).map((r) => r.service_center_id).filter(Boolean))].sort(), [rutas]);
+    [...new Set((rutas || []).map(claveCeco))].sort(), [rutas]);
 
   // Lo que pasa los filtros de centro y búsqueda; sobre esto se cuentan los
   // totales, para que cuadren con lo que se ve.
   const base = useMemo(() => {
     const q = busca.trim().toLowerCase();
     return (rutas || []).filter((r) =>
-      (!filtroSC || r.service_center_id === filtroSC)
+      (!filtroSC || claveCeco(r) === filtroSC)
       && (!q || [r.id_ruta, r.driver_name, r.vehicle_license].some((v) => String(v || "").toLowerCase().includes(q))));
   }, [rutas, filtroSC, busca]);
 
@@ -264,7 +277,7 @@ export default function AvanceCL() {
     };
     const porSC = new Map();
     for (const r of base) {
-      const k = r.service_center_id || "—";
+      const k = claveCeco(r);
       if (!porSC.has(k)) porSC.set(k, []);
       porSC.get(k).push(r);
     }
@@ -275,6 +288,8 @@ export default function AvanceCL() {
       const tot = sum("pkg_total"), ent = sum("pkg_delivered"), fal = sum("pkg_not_delivered");
       return {
         sc, visibles,
+        // Los centros de MELI de donde nacen sus rutas: SRM2 en Melipilla.
+        origenes: [...new Set(todas.map((r) => r.service_center_id).filter(Boolean))].sort(),
         rutas: todas.length,
         avance: tot ? Math.round(((ent + fal) / tot) * 100) : 0,
         total: tot, entregados: ent, fallidas: fal, pendientes: sum("pkg_pending"),
@@ -350,7 +365,7 @@ export default function AvanceCL() {
         <select value={filtroSC} onChange={(e) => setFiltroSC(e.target.value)}
           style={{ fontSize: 12.5, padding: "5px 8px", borderRadius: 7, marginLeft: 6,
             border: "1px solid var(--borde)", background: "#fff" }}>
-          <option value="">Todos los centros</option>
+          <option value="">Todos los CECO</option>
           {centros.map((sc) => <option key={sc} value={sc}>{sc}</option>)}
         </select>
         <input value={busca} onChange={(e) => setBusca(e.target.value)}
@@ -368,8 +383,8 @@ export default function AvanceCL() {
         <div style={{ background: "#fff", border: "1px solid var(--borde)", borderRadius: 10, overflow: "hidden" }}>
           <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 12px",
             borderBottom: "1px solid var(--borde)" }}>
-            <strong style={{ fontSize: 13 }}>Resumen por centro</strong>
-            <span style={{ fontSize: 11.5, color: "var(--texto-suave)" }}>clic en un centro para ver sus rutas</span>
+            <strong style={{ fontSize: 13 }}>Resumen por CECO</strong>
+            <span style={{ fontSize: 11.5, color: "var(--texto-suave)" }}>clic en un CECO para ver sus rutas</span>
             <span style={{ marginLeft: "auto", display: "flex", gap: 6 }}>
               <button onClick={() => setAbiertos(new Set(grupos.map((g) => g.sc)))} style={botonChico}>
                 Desplegar todos
@@ -382,7 +397,7 @@ export default function AvanceCL() {
               <tr style={{ textAlign: "left", color: "var(--texto-suave)", fontSize: 10.5,
                 textTransform: "uppercase", letterSpacing: 0.3, background: "var(--fondo, #f7f8fa)" }}>
                 <th style={{ ...th, width: 22 }}></th>
-                <th style={th}>Centro</th>
+                <th style={th}>CECO</th>
                 <th style={{ ...th, textAlign: "right" }}>Rutas</th>
                 <th style={th}>Avance</th>
                 <th style={{ ...th, textAlign: "right" }}>Entreg.</th>
