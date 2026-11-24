@@ -5,6 +5,7 @@ import Ticketera from "./modulos/Ticketera.jsx";
 import Historico from "./modulos/Historico.jsx";
 import Consultas from "./modulos/Consultas.jsx";
 import Directorio from "./modulos/Directorio.jsx";
+import SupervisoresMX from "./modulos/SupervisoresMX.jsx";
 import Bitacora from "./modulos/Bitacora.jsx";
 import Correos from "./modulos/Correos.jsx";
 import Mensajes from "./modulos/Mensajes.jsx";
@@ -69,6 +70,7 @@ export default function App() {
             <Route path="/correos" element={<Correos />} />
             <Route path="/bitacora" element={<Bitacora />} />
             <Route path="/directorio" element={<Directorio />} />
+            <Route path="/supervisores" element={<SupervisoresMX />} />
             <Route path="/historico" element={<Historico />} />
             <Route path="/consultas" element={<Consultas />} />
             <Route path="/mensajes" element={<Mensajes />} />
