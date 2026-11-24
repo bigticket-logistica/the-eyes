@@ -261,6 +261,7 @@ export default function Topbar() {
           <Tab to="/mensajes" badge={chatNoLeidos}>Mensajes</Tab>
           <Tab to="/bitacora">Bitácora</Tab>
           <Tab to="/directorio">Directorio</Tab>
+          <Tab to="/supervisores">Supervisores</Tab>
           <Tab to="/anomalias">Anomalías</Tab>
           <Tab to="/poligonos" badge={segAlertas}>Polígonos</Tab>
           {/* Posventa va después de Anomalías: las dos se miran cuando el día
