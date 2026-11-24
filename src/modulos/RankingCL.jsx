@@ -19,10 +19,29 @@ import { sbCL } from "../shared/supabase.js";
 //
 //  Paso 1 de 3 (23-nov-2026). Los siguientes: los patrones de cada conductor
 //  (días, horas, zonas) y una explicación con IA a pedido.
+//
+//  Eventos (24-nov-2026): los hitos de eventos_operativos_cl dentro de la
+//  ventana se muestran arriba. Las rutas de un evento marcado para excluir no
+//  cuentan en el ranking; cada conductor muestra cuántas le quedaron fuera
+//  (rutas_excluidas). Las rutas sin conductor asignado (driver "-") tampoco.
 // ═══════════════════════════════════════════════════════════════════════════
 
 const VENTANAS = [7, 14, 30];
 const MINIMOS = [1, 3, 5];
+
+// Fecha de hoy en Chile, como "AAAA-MM-DD".
+const hoyChile = () => new Date().toLocaleDateString("en-CA", { timeZone: "America/Santiago" });
+
+// Primer día de la ventana: la misma regla que fn_torre_ranking_cl
+// (fecha > hoy − días, o sea desde hoy − días + 1).
+function desdeVentana(dias) {
+  const d = new Date(`${hoyChile()}T12:00:00`);
+  d.setDate(d.getDate() - dias + 1);
+  return d.toLocaleDateString("en-CA");
+}
+
+const fechaCorta = (f) =>
+  new Date(`${f}T12:00:00`).toLocaleDateString("es-CL", { day: "2-digit", month: "2-digit" });
 
 const n = (v) => (typeof v === "number" ? v : Number(v || 0));
 const pct = (v) => `${n(v).toLocaleString("es-CL", { minimumFractionDigits: 1, maximumFractionDigits: 1 })}%`;
@@ -62,6 +81,7 @@ function BarraPct({ v }) {
 
 export default function RankingCL() {
   const [filas, setFilas] = useState(null);
+  const [eventos, setEventos] = useState([]);
   const [error, setError] = useState(null);
   const [dias, setDias] = useState(7);
   const [minRutas, setMinRutas] = useState(3);
@@ -73,10 +93,15 @@ export default function RankingCL() {
 
   const cargar = useCallback(async () => {
     if (!sbCL) { setError("Faltan las variables de Chile en el despliegue."); return; }
-    const { data, error } = await sbCL.rpc("fn_torre_ranking_cl", { p_dias: dias, p_min_rutas: minRutas });
-    if (error) { setError(error.message); return; }
+    const [rk, ev] = await Promise.all([
+      sbCL.rpc("fn_torre_ranking_cl", { p_dias: dias, p_min_rutas: minRutas }),
+      sbCL.from("eventos_operativos_cl").select("*").gte("fecha", desdeVentana(dias)).order("fecha"),
+    ]);
+    if (rk.error) { setError(rk.error.message); return; }
     setError(null);
-    setFilas(data || []);
+    setFilas(rk.data || []);
+    // Si los eventos no se pueden leer, el ranking se muestra igual, sin el aviso.
+    setEventos(ev.error ? [] : (ev.data || []));
     setVisto(new Date());
   }, [dias, minRutas]);
 
@@ -150,6 +175,30 @@ export default function RankingCL() {
         </span>
       </div>
 
+      {eventos.length > 0 && (
+        <div style={{ background: "#fff8e6", border: "1px solid #f0d58a", borderRadius: 10,
+          padding: "9px 14px", marginBottom: 14, fontSize: 12.5 }}>
+          {eventos.map((e) => (
+            <div key={e.id} style={{ display: "flex", gap: 8, alignItems: "baseline", padding: "2px 0" }}>
+              <span>📌</span>
+              <span style={{ fontWeight: 600, whiteSpace: "nowrap" }}>
+                {fechaCorta(e.fecha)}{e.hora_desde !== null && e.hora_desde !== undefined
+                  ? ` desde las ${String(e.hora_desde).padStart(2, "0")}:00` : ""}
+              </span>
+              <span style={{ color: "var(--texto-suave)", whiteSpace: "nowrap" }}>
+                {(e.facility_ids || []).join(", ")}
+              </span>
+              <span style={{ flex: 1 }}>{e.descripcion}</span>
+              {e.excluir_ranking && (
+                <span style={{ fontSize: 10.5, color: "#7a5a00", whiteSpace: "nowrap" }}>
+                  excluido del ranking
+                </span>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+
       <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 14 }}>
         <Kpi titulo="Conductores en el ranking" valor={resumen.conductores} />
         <Kpi titulo="Fallidas" valor={resumen.fallidas} color={resumen.fallidas ? "#a32d2d" : undefined} />
@@ -186,7 +235,8 @@ export default function RankingCL() {
       </div>
       <div style={{ fontSize: 11, color: "var(--texto-tenue)", marginBottom: 10 }}>
         Con menos rutas que el mínimo, un conductor no entra: con dos rutas, un mal día lo pone primero por
-        azar. Hoy se cuenta aunque las rutas sigan en curso. Las troncales no entran. CECO, supervisor y
+        azar. Hoy se cuenta aunque las rutas sigan en curso. Las troncales, las rutas sin conductor
+        asignado y las de eventos marcados para excluir no entran. CECO, supervisor y
         jefe son los de la camioneta que más usó en el período, según el maestro de Mantenedores.
       </div>
 
@@ -236,6 +286,12 @@ export default function RankingCL() {
                   <td style={{ ...td, ...num }}>
                     {f.rutas}
                     <span style={{ color: "var(--texto-tenue)", fontSize: 10.5 }}> en {f.dias} d</span>
+                    {n(f.rutas_excluidas) > 0 && (
+                      <div style={{ fontSize: 10.5, color: "#7a5a00" }}
+                        title="Rutas de un evento operativo: no cuentan en su porcentaje">
+                        📌 +{f.rutas_excluidas} {n(f.rutas_excluidas) === 1 ? "excluida" : "excluidas"} por evento
+                      </div>
+                    )}
                   </td>
                   <td style={{ ...td, ...num }}>{n(f.paquetes).toLocaleString("es-CL")}</td>
                   <td style={{ ...td, ...num, fontWeight: 600, color: n(f.fallidas) ? "#a32d2d" : undefined }}>
