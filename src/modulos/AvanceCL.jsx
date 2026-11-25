@@ -16,6 +16,11 @@ import { sbCL } from "../shared/supabase.js";
 //     7 · rutas con saca pendiente
 //
 //  Solo lectura: las rutas se trabajan en MELI y esta pantalla dice cómo van.
+//
+//  Por jefatura (25-nov-2026): cada CECO trae su supervisor y su jefe desde la
+//  vista (vw_supervisor_ceco y lideres_supervisores_cl). Arriba se elige la
+//  jefatura y todo —KPIs, tabla y total— queda solo con lo suyo, para la
+//  entrega de turno. Con "Todas", la tabla va en un bloque por jefatura.
 // ═══════════════════════════════════════════════════════════════════════════
 
 // Las alertas que manda MELI, con el nombre que usa la torre. El orden es el
@@ -46,6 +51,10 @@ const alertasDe = (r) => ALERTAS.filter((a) => r[a.campo] === true);
 // el CECO del Brain, o el de respaldo si el Brain todavía no lo resolvió.
 // Sin ninguno, la ruta queda bajo su centro de MELI marcada como pendiente,
 // para que no desaparezca.
+// Jefatura de una ruta: el jefe del supervisor de su CECO.
+const SIN_JEFE = "Sin jefatura";
+const claveJefe = (r) => r.jefe || SIN_JEFE;
+
 const claveCeco = (r) => r.ceco || `${r.service_center_id || "—"} · CECO pendiente`;
 
 // Avance de una ruta. Se prefiere el porcentaje de MELI; si no viene, se
@@ -115,6 +124,9 @@ function FilaCentro({ g, abierto, onClick, filtrando, th, td }) {
             <span style={{ fontWeight: 400, fontSize: 11, color: "var(--texto-suave)", marginLeft: 6 }}>
               {g.visibles.length} con el filtro
             </span>
+          )}
+          {g.supervisor && (
+            <div style={{ fontWeight: 400, fontSize: 10.5, color: "var(--texto-tenue)" }}>{g.supervisor}</div>
           )}
         </td>
         <td style={{ ...td, ...num }}>{g.rutas}</td>
@@ -195,11 +207,46 @@ function FilaCentro({ g, abierto, onClick, filtrando, th, td }) {
   );
 }
 
+// ── Cabecera de una jefatura con su subtotal, y sus CECO debajo ────────────
+function BloqueJefe({ b, mostrarCabecera, td, num, children }) {
+  return (
+    <>
+      {mostrarCabecera && (
+        <tr style={{ borderTop: "2px solid var(--borde)", background: "#eef2f8" }}>
+          <td style={td}></td>
+          <td style={{ ...td, fontWeight: 700, color: b.jefe === SIN_JEFE ? "#9a4d00" : "var(--navy)" }}>
+            {b.jefe}
+            <span style={{ fontWeight: 400, fontSize: 11, color: "var(--texto-suave)", marginLeft: 6 }}>
+              {b.grupos.length} CECO
+            </span>
+          </td>
+          <td style={{ ...td, ...num, fontWeight: 600 }}>{b.rutas}</td>
+          <td style={td}><Barra pct={b.avance} /></td>
+          <td style={{ ...td, ...num, fontWeight: 600 }}>
+            {b.entregados}<span style={{ color: "var(--texto-tenue)", fontWeight: 400 }}>/{b.total}</span>
+          </td>
+          <td style={{ ...td, ...num, fontWeight: 600, color: b.fallidas ? "#a32d2d" : "var(--texto-tenue)" }}>
+            {b.fallidas}
+          </td>
+          <td style={{ ...td, ...num, fontWeight: 600 }}>{b.pendientes}</td>
+          <td style={td}>
+            {b.alertas > 0
+              ? <Chip fondo="#fff4e5" color="#9a4d00">{b.alertas} con alerta</Chip>
+              : <Chip fondo="#e7f6ef" color="#13724f">en regla</Chip>}
+          </td>
+        </tr>
+      )}
+      {children}
+    </>
+  );
+}
+
 export default function AvanceCL() {
   const [rutas, setRutas] = useState(null);
   const [error, setError] = useState(null);
   const [filtro, setFiltro] = useState("todas");
   const [filtroSC, setFiltroSC] = useState("");
+  const [jefatura, setJefatura] = useState("");
   const [busca, setBusca] = useState("");
   const [visto, setVisto] = useState(null);
   // Centros desplegados. Arrancan todos plegados: con 9 centros y ~150 rutas,
@@ -228,17 +275,33 @@ export default function AvanceCL() {
     return () => clearInterval(t);
   }, [cargar]);
 
+  // Las jefaturas del día, con cuántas rutas tiene cada una. "Sin jefatura"
+  // va al final: es lo que falta asignar en el maestro.
+  const jefaturas = useMemo(() => {
+    const c = new Map();
+    for (const r of rutas || []) c.set(claveJefe(r), (c.get(claveJefe(r)) || 0) + 1);
+    return [...c.entries()].sort((a, b) =>
+      (a[0] === SIN_JEFE) - (b[0] === SIN_JEFE) || a[0].localeCompare(b[0]));
+  }, [rutas]);
+
+  // Si la jefatura elegida ya no tiene rutas (cambió el día), se vuelve a Todas.
+  useEffect(() => {
+    if (jefatura && rutas && !rutas.some((r) => claveJefe(r) === jefatura)) setJefatura("");
+  }, [rutas, jefatura]);
+
   const centros = useMemo(() =>
-    [...new Set((rutas || []).map(claveCeco))].sort(), [rutas]);
+    [...new Set((rutas || []).filter((r) => !jefatura || claveJefe(r) === jefatura)
+      .map(claveCeco))].sort(), [rutas, jefatura]);
 
   // Lo que pasa los filtros de centro y búsqueda; sobre esto se cuentan los
   // totales, para que cuadren con lo que se ve.
   const base = useMemo(() => {
     const q = busca.trim().toLowerCase();
     return (rutas || []).filter((r) =>
-      (!filtroSC || claveCeco(r) === filtroSC)
+      (!jefatura || claveJefe(r) === jefatura)
+      && (!filtroSC || claveCeco(r) === filtroSC)
       && (!q || [r.id_ruta, r.driver_name, r.vehicle_license].some((v) => String(v || "").toLowerCase().includes(q))));
-  }, [rutas, filtroSC, busca]);
+  }, [rutas, jefatura, filtroSC, busca]);
 
   const resumen = useMemo(() => {
     const s = (k) => base.reduce((a, r) => a + (r[k] || 0), 0);
@@ -288,6 +351,8 @@ export default function AvanceCL() {
       const tot = sum("pkg_total"), ent = sum("pkg_delivered"), fal = sum("pkg_not_delivered");
       return {
         sc, visibles,
+        jefe: claveJefe(todas[0]),
+        supervisor: todas[0].supervisor || null,
         // Los centros de MELI de donde nacen sus rutas: SRM2 en Melipilla.
         origenes: [...new Set(todas.map((r) => r.service_center_id).filter(Boolean))].sort(),
         rutas: todas.length,
@@ -300,6 +365,26 @@ export default function AvanceCL() {
       .filter((g) => filtro === "todas" || g.visibles.length > 0)
       .sort((a, b) => b.alertas - a.alertas || a.sc.localeCompare(b.sc));
   }, [base, filtro]);
+
+  // Los grupos de CECO repartidos por jefatura, cada bloque con su subtotal.
+  const bloques = useMemo(() => {
+    const m = new Map();
+    for (const g of grupos) {
+      if (!m.has(g.jefe)) m.set(g.jefe, []);
+      m.get(g.jefe).push(g);
+    }
+    return [...m.entries()]
+      .sort((a, b) => (a[0] === SIN_JEFE) - (b[0] === SIN_JEFE) || a[0].localeCompare(b[0]))
+      .map(([jefe, gs]) => {
+        const sum = (k) => gs.reduce((x, g) => x + g[k], 0);
+        const tot = sum("total"), ent = sum("entregados"), fal = sum("fallidas");
+        return {
+          jefe, grupos: gs, rutas: sum("rutas"), total: tot, entregados: ent, fallidas: fal,
+          pendientes: sum("pendientes"), alertas: sum("alertas"),
+          avance: tot ? Math.round(((ent + fal) / tot) * 100) : 0,
+        };
+      });
+  }, [grupos]);
 
   // Con una búsqueda escrita, los centros con coincidencias se abren solos:
   // quien busca un conductor quiere verlo, no un resumen.
@@ -339,6 +424,28 @@ export default function AvanceCL() {
           {visto ? `visto ${visto.toLocaleTimeString("es-CL", { hour: "2-digit", minute: "2-digit" })}` : ""}
         </span>
       </div>
+
+      {/* Jefatura: lo primero que se elige en la entrega de turno. */}
+      {jefaturas.length > 1 && (
+        <div style={{ display: "flex", gap: 6, alignItems: "center", marginBottom: 12, flexWrap: "wrap" }}>
+          <span style={{ fontSize: 12, color: "var(--texto-suave)", marginRight: 2 }}>Jefatura</span>
+          {[["", (rutas || []).length], ...jefaturas].map(([j, c]) => {
+            const activo = jefatura === j;
+            return (
+              <button key={j || "todas"} onClick={() => { setJefatura(j); setFiltroSC(""); }}
+                style={{
+                  fontSize: 12.5, padding: "6px 12px", borderRadius: 8, cursor: "pointer",
+                  border: activo ? "1px solid var(--navy)" : "1px solid var(--borde)",
+                  background: activo ? "var(--navy)" : "#fff",
+                  color: activo ? "#fff" : (j === SIN_JEFE ? "#9a4d00" : "inherit"),
+                  fontWeight: activo ? 600 : 400,
+                }}>
+                {j || "Todas"} <span style={{ opacity: 0.7 }}>{c}</span>
+              </button>
+            );
+          })}
+        </div>
+      )}
 
       <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 14 }}>
         <Kpi titulo="Rutas" valor={resumen.rutas} />
@@ -383,7 +490,7 @@ export default function AvanceCL() {
         <div style={{ background: "#fff", border: "1px solid var(--borde)", borderRadius: 10, overflow: "hidden" }}>
           <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 12px",
             borderBottom: "1px solid var(--borde)" }}>
-            <strong style={{ fontSize: 13 }}>Resumen por CECO</strong>
+            <strong style={{ fontSize: 13 }}>{jefatura ? `Resumen por CECO · ${jefatura}` : "Resumen por jefatura y CECO"}</strong>
             <span style={{ fontSize: 11.5, color: "var(--texto-suave)" }}>clic en un CECO para ver sus rutas</span>
             <span style={{ marginLeft: "auto", display: "flex", gap: 6 }}>
               <button onClick={() => setAbiertos(new Set(grupos.map((g) => g.sc)))} style={botonChico}>
@@ -407,9 +514,14 @@ export default function AvanceCL() {
               </tr>
             </thead>
             <tbody>
-              {grupos.map((g) => (
-                <FilaCentro key={g.sc} g={g} abierto={estaAbierto(g.sc)} onClick={() => alternar(g.sc)}
-                  filtrando={filtro !== "todas"} th={th} td={td} />
+              {bloques.map((b) => (
+                <BloqueJefe key={b.jefe} b={b} mostrarCabecera={!jefatura && bloques.length > 1}
+                  td={td} num={num}>
+                  {b.grupos.map((g) => (
+                    <FilaCentro key={g.sc} g={g} abierto={estaAbierto(g.sc)} onClick={() => alternar(g.sc)}
+                      filtrando={filtro !== "todas"} th={th} td={td} />
+                  ))}
+                </BloqueJefe>
               ))}
               {/* Total de lo que está a la vista: cuadra con los números de arriba. */}
               <tr style={{ borderTop: "2px solid var(--borde)", background: "var(--fondo, #f7f8fa)", fontWeight: 600 }}>
