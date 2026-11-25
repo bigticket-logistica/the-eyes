@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useCallback } from "react";
+import { useState, useEffect, useMemo, useCallback, Fragment } from "react";
 import { sbCL } from "../shared/supabase.js";
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -24,6 +24,11 @@ import { sbCL } from "../shared/supabase.js";
 //  ventana se muestran arriba. Las rutas de un evento marcado para excluir no
 //  cuentan en el ranking; cada conductor muestra cuántas le quedaron fuera
 //  (rutas_excluidas). Las rutas sin conductor asignado (driver "-") tampoco.
+//
+//  Detalle por conductor (25-nov-2026, paso 2 de 3): clic en un conductor abre
+//  bajo su fila fn_torre_conductor_detalle_cl: fallidas por día de la semana,
+//  por hora (fallidas_hora_cl), por zona de la ruta (Brain) y sus últimas rutas.
+//  Cada ruta cuenta una vez, en el día en que empezó (vw_rutas_unicas_cl).
 // ═══════════════════════════════════════════════════════════════════════════
 
 const VENTANAS = [7, 14, 30];
@@ -79,6 +84,134 @@ function BarraPct({ v }) {
   );
 }
 
+// ── Detalle de un conductor ────────────────────────────────────────────────
+const DIAS_SEMANA = ["", "Lun", "Mar", "Mié", "Jue", "Vie", "Sáb", "Dom"];
+
+function Barras({ items, max, color = "#a32d2d" }) {
+  // items: [{ etiqueta, valor, texto, nota }]
+  const tope = max || Math.max(1, ...items.map((i) => i.valor));
+  return (
+    <div style={{ display: "grid", gap: 4 }}>
+      {items.map((i) => (
+        <div key={i.etiqueta} style={{ display: "grid", gridTemplateColumns: "64px 1fr 84px", gap: 6,
+          alignItems: "center", fontSize: 11.5 }}>
+          <span style={{ color: "var(--texto-suave)", whiteSpace: "nowrap", overflow: "hidden",
+            textOverflow: "ellipsis" }} title={i.etiqueta}>{i.etiqueta}</span>
+          <div style={{ height: 8, background: "#e8edf3", borderRadius: 999, overflow: "hidden" }}>
+            <div style={{ width: `${Math.min(100, (i.valor / tope) * 100)}%`, height: "100%",
+              background: color, borderRadius: 999 }} />
+          </div>
+          <span style={{ textAlign: "right", fontVariantNumeric: "tabular-nums" }} title={i.nota || ""}>
+            {i.texto}
+          </span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function Bloque({ titulo, nota, children }) {
+  return (
+    <div style={{ background: "#fff", border: "1px solid var(--borde)", borderRadius: 8, padding: "10px 12px" }}>
+      <div style={{ fontSize: 11, fontWeight: 600, textTransform: "uppercase", letterSpacing: 0.3,
+        color: "var(--texto-suave)", marginBottom: 8 }}>{titulo}</div>
+      {children}
+      {nota && <div style={{ fontSize: 10.5, color: "var(--texto-tenue)", marginTop: 8 }}>{nota}</div>}
+    </div>
+  );
+}
+
+function DetalleConductor({ driver, dias }) {
+  const [d, setD] = useState(null);
+  const [error, setError] = useState(null);
+
+  useEffect(() => {
+    let vivo = true;
+    setD(null); setError(null);
+    sbCL.rpc("fn_torre_conductor_detalle_cl", { p_driver: driver, p_dias: dias }).then(({ data, error }) => {
+      if (!vivo) return;
+      if (error) setError(error.message); else setD(data || {});
+    });
+    return () => { vivo = false; };
+  }, [driver, dias]);
+
+  if (error) return <div style={{ padding: 12, color: "#791F1F", fontSize: 12.5 }}>No se pudo leer el detalle: {error}</div>;
+  if (!d) return <div style={{ padding: 12, color: "var(--texto-suave)", fontSize: 12.5 }}>Cargando detalle…</div>;
+
+  const pctDe = (f, p) => (p ? (100 * f) / p : 0);
+  const diasItems = (d.dias || []).map((x) => ({
+    etiqueta: `${DIAS_SEMANA[x.dow]} · ${x.rutas} r`,
+    valor: pctDe(x.fallidas, x.paquetes),
+    texto: `${x.fallidas} · ${pct(pctDe(x.fallidas, x.paquetes))}`,
+    nota: `${x.rutas} rutas, ${n(x.paquetes).toLocaleString("es-CL")} paquetes`,
+  }));
+  const horasItems = (d.horas || []).map((x) => ({
+    etiqueta: x.hora < 0 ? "sin hora" : `${String(x.hora).padStart(2, "0")}:00`,
+    valor: x.fallidas,
+    texto: `${x.fallidas}`,
+  }));
+  const zonasItems = (d.zonas || []).map((x) => ({
+    etiqueta: x.zona,
+    valor: pctDe(x.fallidas, x.paquetes),
+    texto: `${x.fallidas} · ${pct(pctDe(x.fallidas, x.paquetes))}`,
+    nota: `${x.rutas} rutas, ${n(x.paquetes).toLocaleString("es-CL")} paquetes`,
+  }));
+  const vacio = <div style={{ fontSize: 12, color: "var(--texto-tenue)" }}>Sin datos en la ventana.</div>;
+
+  return (
+    <div style={{ padding: "12px 14px", background: "var(--fondo, #f7f8fa)" }}>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", gap: 10 }}>
+        <Bloque titulo="Por día de la semana" nota="Fallidas y % sobre sus paquetes de ese día.">
+          {diasItems.length ? <Barras items={diasItems} /> : vacio}
+        </Bloque>
+        <Bloque titulo="Por hora"
+          nota="Cada vez que se marcó una fallida, aunque después se entregara. Desde el 10-nov.">
+          {horasItems.length ? <Barras items={horasItems} color="#C25A08" /> : vacio}
+        </Bloque>
+        <Bloque titulo="Por zona de la ruta" nota="Zona principal según el Brain. Las de hoy aún no tienen zona.">
+          {zonasItems.length ? <Barras items={zonasItems} /> : vacio}
+        </Bloque>
+      </div>
+
+      <Bloque titulo={`Últimas rutas${d.excluidas ? ` · ${d.excluidas} excluida(s) por evento` : ""}`}>
+        {(d.rutas || []).length === 0 ? vacio : (
+          <div style={{ overflowX: "auto" }}>
+            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 11.5 }}>
+              <thead>
+                <tr style={{ textAlign: "left", color: "var(--texto-suave)", fontSize: 10.5 }}>
+                  <th style={{ padding: "4px 6px" }}>Fecha</th>
+                  <th style={{ padding: "4px 6px" }}>Ruta</th>
+                  <th style={{ padding: "4px 6px" }}>CECO · despacho</th>
+                  <th style={{ padding: "4px 6px" }}>Zona</th>
+                  <th style={{ padding: "4px 6px", textAlign: "right" }}>Paquetes</th>
+                  <th style={{ padding: "4px 6px", textAlign: "right" }}>Entregados</th>
+                  <th style={{ padding: "4px 6px", textAlign: "right" }}>Fallidas</th>
+                </tr>
+              </thead>
+              <tbody>
+                {d.rutas.map((r) => (
+                  <tr key={r.id_ruta} style={{ borderTop: "1px solid var(--borde)" }}>
+                    <td style={{ padding: "4px 6px", whiteSpace: "nowrap" }}>{fechaCorta(r.fecha)}</td>
+                    <td style={{ padding: "4px 6px", fontVariantNumeric: "tabular-nums" }}>{r.id_ruta}</td>
+                    <td style={{ padding: "4px 6px" }}>
+                      {r.ceco || "—"} <span style={{ color: "var(--texto-tenue)" }}>{r.facility || ""}</span>
+                    </td>
+                    <td style={{ padding: "4px 6px" }}>{r.zona || <span style={{ color: "var(--texto-tenue)" }}>—</span>}</td>
+                    <td style={{ padding: "4px 6px", textAlign: "right" }}>{n(r.paquetes).toLocaleString("es-CL")}</td>
+                    <td style={{ padding: "4px 6px", textAlign: "right" }}>{n(r.entregados).toLocaleString("es-CL")}</td>
+                    <td style={{ padding: "4px 6px", textAlign: "right", fontWeight: 600,
+                      color: n(r.fallidas) ? "#a32d2d" : "var(--texto-tenue)" }}>{r.fallidas}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </Bloque>
+    </div>
+  );
+}
+
 export default function RankingCL() {
   const [filas, setFilas] = useState(null);
   const [eventos, setEventos] = useState([]);
@@ -90,6 +223,7 @@ export default function RankingCL() {
   const [filtroJefe, setFiltroJefe] = useState("");
   const [busca, setBusca] = useState("");
   const [visto, setVisto] = useState(null);
+  const [abierto, setAbierto] = useState(null); // conductor con el detalle abierto
 
   const cargar = useCallback(async () => {
     if (!sbCL) { setError("Faltan las variables de Chile en el despliegue."); return; }
@@ -266,10 +400,19 @@ export default function RankingCL() {
             </thead>
             <tbody>
               {visibles.map((f) => (
-                <tr key={f.driver_name} style={{ borderTop: "1px solid var(--borde)" }}>
+                <Fragment key={f.driver_name}>
+                <tr onClick={() => setAbierto(abierto === f.driver_name ? null : f.driver_name)}
+                  title="Clic para ver su detalle"
+                  style={{ borderTop: "1px solid var(--borde)", cursor: "pointer",
+                    background: abierto === f.driver_name ? "#eef2f8" : undefined }}>
                   <td style={{ ...td, ...num, color: "var(--texto-suave)" }}>{f.posicion}</td>
                   <td style={td}>
-                    <div style={{ fontWeight: 500 }}>{f.driver_name}</div>
+                    <div style={{ fontWeight: 500 }}>
+                      <span style={{ color: "var(--texto-tenue)", fontSize: 10, marginRight: 4 }}>
+                        {abierto === f.driver_name ? "▾" : "▸"}
+                      </span>
+                      {f.driver_name}
+                    </div>
                     <div style={{ fontSize: 10.5, color: "var(--texto-tenue)" }}>{f.patente || "sin patente"}</div>
                   </td>
                   <td style={td}>
@@ -306,6 +449,14 @@ export default function RankingCL() {
                       { day: "2-digit", month: "2-digit" }) : "—"}
                   </td>
                 </tr>
+                {abierto === f.driver_name && (
+                  <tr>
+                    <td colSpan={11} style={{ padding: 0, borderTop: "1px solid var(--borde)" }}>
+                      <DetalleConductor driver={f.driver_name} dias={dias} />
+                    </td>
+                  </tr>
+                )}
+                </Fragment>
               ))}
             </tbody>
           </table>
