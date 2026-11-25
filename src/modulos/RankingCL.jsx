@@ -93,7 +93,7 @@ function Barras({ items, max, color = "#a32d2d" }) {
   return (
     <div style={{ display: "grid", gap: 4 }}>
       {items.map((i) => (
-        <div key={i.etiqueta} style={{ display: "grid", gridTemplateColumns: "64px 1fr 84px", gap: 6,
+        <div key={i.etiqueta} style={{ display: "grid", gridTemplateColumns: "100px 1fr 84px", gap: 6,
           alignItems: "center", fontSize: 11.5 }}>
           <span style={{ color: "var(--texto-suave)", whiteSpace: "nowrap", overflow: "hidden",
             textOverflow: "ellipsis" }} title={i.etiqueta}>{i.etiqueta}</span>
@@ -370,8 +370,9 @@ export default function RankingCL() {
       <div style={{ fontSize: 11, color: "var(--texto-tenue)", marginBottom: 10 }}>
         Con menos rutas que el mínimo, un conductor no entra: con dos rutas, un mal día lo pone primero por
         azar. Hoy se cuenta aunque las rutas sigan en curso. Las troncales, las rutas sin conductor
-        asignado y las de eventos marcados para excluir no entran. CECO, supervisor y
-        jefe son los de la camioneta que más usó en el período, según el maestro de Mantenedores.
+        asignado y las de eventos marcados para excluir no entran. Cada ruta cuenta una vez, en el día en que
+        empezó. El CECO sale del viaje en el Brain o, si el Brain aún no lo carga, del punto de despacho; bajo él
+        va el punto de despacho que más usó. Supervisor y jefe son los de su CECO.
       </div>
 
       {visibles.length === 0 ? (
@@ -419,7 +420,10 @@ export default function RankingCL() {
                     {/* Sin CECO casi siempre es una camioneta que no está en el
                         maestro: se dice, para que se pueda corregir allá. */}
                     <div>{f.ceco || <span style={{ color: "#9a4d00" }}>no está en el maestro</span>}</div>
-                    <div style={{ fontSize: 10.5, color: "var(--texto-tenue)" }}>{f.service_center_id}</div>
+                    <div style={{ fontSize: 10.5, color: "var(--texto-tenue)" }}
+                      title={f.facility && f.facility !== f.service_center_id ? `Centro MELI ${f.service_center_id}` : ""}>
+                      {f.facility || f.service_center_id}
+                    </div>
                   </td>
                   <td style={td}>{f.supervisor || <span style={{ color: "var(--texto-tenue)" }}>sin asignar</span>}</td>
                   <td style={td}>
