@@ -250,6 +250,7 @@ export default function Topbar() {
           <Tab to="/">Avance</Tab>
           <Tab to="/incidencias">Incidencias</Tab>
           <Tab to="/ranking">Ranking de Conductores</Tab>
+          <Tab to="/detenciones">Detenciones</Tab>
         </nav>
         ) : (
         <nav style={{ display: "flex", alignItems: "center", gap: 2, marginLeft: 2, overflowX: "auto" }}>
