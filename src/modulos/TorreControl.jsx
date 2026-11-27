@@ -680,7 +680,9 @@ export default function TorreControl() {
       const t = String(v);
       return /[;"\n]/.test(t) ? `"${t.replace(/"/g, '""')}"` : t;
     };
-    const txt = "\uFEFF" + [cols.join(";"),
+    // R\u00F3tulos legibles solo para el encabezado; los datos se leen con la clave.
+    const rotulos = { travel_id: "Travel ID", id_ruta: "ID ruta" };
+    const txt = "\uFEFF" + [cols.map((c) => rotulos[c] || c).join(";"),
       ...filas.map((f) => cols.map((c) => esc(f[c])).join(";"))].join("\n");
     const url = URL.createObjectURL(new Blob([txt], { type: "text/csv;charset=utf-8" }));
     const a = document.createElement("a");
@@ -825,11 +827,11 @@ export default function TorreControl() {
             <thead>
               <tr style={{ color: C.tenue, textAlign: "left", fontSize: 9.5,
                 textTransform: "uppercase", letterSpacing: 0.3 }}>
-                <th style={{ fontWeight: 600, padding: "5px 6px 5px 13px", width: "15%" }}>Ruta</th>
+                <th style={{ fontWeight: 600, padding: "5px 6px 5px 13px", width: "20%" }}>Ruta</th>
                 <th style={{ fontWeight: 600, padding: "5px 6px", width: "9%" }}>SC</th>
-                <th style={{ fontWeight: 600, padding: "5px 6px", width: "22%" }}>Conductor</th>
+                <th style={{ fontWeight: 600, padding: "5px 6px", width: "19%" }}>Conductor</th>
                 <th style={{ fontWeight: 600, padding: "5px 6px", width: "12%" }}>Placa</th>
-                <th style={{ fontWeight: 600, padding: "5px 6px", width: "21%" }}>Avance</th>
+                <th style={{ fontWeight: 600, padding: "5px 6px", width: "19%" }}>Avance</th>
                 <th style={{ fontWeight: 600, padding: "5px 13px 5px 6px" }}>Alertas</th>
               </tr>
             </thead>
@@ -842,7 +844,14 @@ export default function TorreControl() {
                       chico, que sirve para ubicarse pero no para pegar. */}
                   <td style={{ padding: "6px 6px 6px 13px", fontVariantNumeric: "tabular-nums",
                     whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-                    <div>{v.id_ruta || "—"}</div>
+                    <div title={v.travel_id}>
+                      <span style={{ fontSize: 9.5, color: C.tenue }}>Travel ID </span>
+                      {v.travel_id || "—"}
+                    </div>
+                    <div>
+                      <span style={{ fontSize: 9.5, color: C.tenue }}>ID ruta </span>
+                      {v.id_ruta || "—"}
+                    </div>
                     {v.ruta_nombre && (
                       <div style={{ fontSize: 9.5, color: C.tenue }}>{v.ruta_nombre}</div>
                     )}
@@ -964,10 +973,10 @@ export default function TorreControl() {
                     <tr style={{ color: C.tenue, textAlign: "left", fontSize: 9.5,
                       textTransform: "uppercase", letterSpacing: 0.3 }}>
                       <th style={{ fontWeight: 600, padding: "4px 6px 5px 0", width: "9%" }}>Cita</th>
-                      <th style={{ fontWeight: 600, padding: "4px 6px 5px 0", width: "21%" }}>Chofer</th>
-                      <th style={{ fontWeight: 600, padding: "4px 6px 5px 0", width: "12%" }}>Placa</th>
-                      <th style={{ fontWeight: 600, padding: "4px 6px 5px 0", width: "16%" }}>Ruta</th>
-                      <th style={{ fontWeight: 600, padding: "4px 6px 5px 0", width: "19%" }}>Avance</th>
+                      <th style={{ fontWeight: 600, padding: "4px 6px 5px 0", width: "19%" }}>Chofer</th>
+                      <th style={{ fontWeight: 600, padding: "4px 6px 5px 0", width: "10%" }}>Placa</th>
+                      <th style={{ fontWeight: 600, padding: "4px 6px 5px 0", width: "22%" }}>Ruta</th>
+                      <th style={{ fontWeight: 600, padding: "4px 6px 5px 0", width: "17%" }}>Avance</th>
                       <th style={{ fontWeight: 600, padding: "4px 0 5px 0" }}>Señales</th>
                     </tr>
                   </thead>
@@ -1017,13 +1026,24 @@ export default function TorreControl() {
                           <td style={{ padding: "5px 6px 5px 0", overflow: "hidden",
                             textOverflow: "ellipsis", whiteSpace: "nowrap" }}
                             title={v.ruta_region || ""}>
+                            {/* Travel ID siempre visible (también sin chofer,
+                                placa o ruta); ID ruta solo si existe. Van
+                                rotulados para no confundirlos al cruzar. */}
+                            <div style={{ fontVariantNumeric: "tabular-nums" }}
+                              title={v.travel_id}>
+                              <span style={{ fontSize: 9.5, color: C.tenue }}>Travel ID </span>
+                              {v.travel_id || "—"}
+                            </div>
                             {v.id_ruta || v.ruta_nombre ? (
                               <>
-                                <div style={{ fontVariantNumeric: "tabular-nums" }}>
-                                  {v.id_ruta || v.ruta_nombre}
-                                </div>
+                                {v.id_ruta && (
+                                  <div style={{ fontVariantNumeric: "tabular-nums" }}>
+                                    <span style={{ fontSize: 9.5, color: C.tenue }}>ID ruta </span>
+                                    {v.id_ruta}
+                                  </div>
+                                )}
                                 <div style={{ fontSize: 9.5, color: C.tenue }}>
-                                  {[v.id_ruta ? v.ruta_nombre : null,
+                                  {[v.ruta_nombre,
                                     v.ruta_paradas ? `${v.ruta_paradas} paradas` : null]
                                     .filter(Boolean).join(" · ")}
                                 </div>
@@ -1039,9 +1059,7 @@ export default function TorreControl() {
                                   </div>
                                 )}
                               </>
-                            ) : (
-                              <span style={{ color: C.tenue }}>—</span>
-                            )}
+                            ) : null}
                           </td>
                           {/* La celda de avance carga el estado cuando no hay
                               barra que dibujar. Antes había un guión que no
